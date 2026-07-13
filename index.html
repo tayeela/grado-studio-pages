@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ГРАДО Студия</title>
-<link rel="stylesheet" href="./tokens.css?v=9018">
-<script>window.__GRADO_ASSET_VERSION__="9018";</script>
-<script src="./pages-adapter.js?v=9018"></script>
-<script src="./canvas-theme.js?v=9018"></script>
-<link rel="stylesheet" href="./redesign/shell.css?v=9018">
-<link rel="stylesheet" href="./redesign/studio2.css?v=9018">
+<link rel="stylesheet" href="./tokens.css?v=9019">
+<script>window.__GRADO_ASSET_VERSION__="9019";</script>
+<script src="./pages-core.js?v=9019"></script>
+<script src="./pages-adapter.js?v=9019"></script>
+<script src="./canvas-theme.js?v=9019"></script>
+<link rel="stylesheet" href="./redesign/shell.css?v=9019">
+<link rel="stylesheet" href="./redesign/studio2.css?v=9019">
 <style>
   /* служебные слоты движка (скрытые контейнеры/поля, которые app.js биндит) и
      группы-заголовки в шапке. Новый интерфейс (редизайн Фаза 0-3). */
@@ -73,19 +74,20 @@
   <div id="stage">
     <canvas id="cv" tabindex="0" aria-label="Холст чертежа. Выберите инструмент на панели слева; Enter завершает фигуру, Escape отменяет действие.">Интерактивный холст чертежа ГРАДО Студии.</canvas>
     <section id="start-guide" class="start-guide" aria-labelledby="start-guide-title" hidden>
-      <div class="start-guide-kicker">Новый проект</div>
+      <div class="start-guide-kicker" id="start-guide-kicker">Новый проект</div>
       <h1 id="start-guide-title">Начните с границы территории</h1>
-      <p>Она задаёт расчётную площадь. После этого ТЭП будет обновляться автоматически по мере работы.</p>
-      <ol>
+      <p id="start-guide-copy">Она задаёт расчётную площадь. После этого ТЭП будет обновляться автоматически по мере работы.</p>
+      <ol id="start-guide-steps">
         <li><b>Создайте границу</b><span>Мы сразу включим инструмент «Полигон».</span></li>
         <li><b>Добавьте здания и зоны</b><span>Каждый тип попадёт в свой слой.</span></li>
         <li><b>Проверьте ТЭП</b><span>Расчёты и замечания появятся справа.</span></li>
       </ol>
       <div class="start-guide-actions">
         <button class="btn primary" id="start-boundary">Создать границу</button>
+        <button class="btn primary" id="start-draw" hidden>Начать рисовать</button>
         <button class="btn" id="start-demo">Открыть пример</button>
       </div>
-      <small>Подсказка: клавиша G создаёт или выбирает слой границы.</small>
+      <small id="start-guide-hint">Подсказка: клавиша G создаёт или выбирает слой границы.</small>
     </section>
     <div id="cv-activelayer" class="cv-float" style="top:16px;left:16px;padding:6px 12px;font-size:var(--fs-12);font-weight:500"></div>
     <div class="cv-float cv-compass"><svg class="ic" style="width:20px;height:20px"><use href="#i-north"/></svg></div>
@@ -305,16 +307,16 @@
 </svg>
 
 <!-- реальный движок (тот же порядок, что в index.html) -->
-<script src="./app-transform.js?v=9018"></script>
-<script src="./app-snap.js?v=9018"></script>
-<script src="./app-data.js?v=9018"></script>
-<script src="./app-style-ui.js?v=9018"></script>
-<script src="./app-attr.js?v=9018"></script>
-<script src="./app.js?v=9018"></script>
-<script src="./app-import.js?v=9018"></script>
-<script src="./collab.js?v=9018"></script>
-<script src="./redesign/cmdk.js?v=9018"></script>
-<script src="./redesign/a11y.js?v=9018"></script>
+<script src="./app-transform.js?v=9019"></script>
+<script src="./app-snap.js?v=9019"></script>
+<script src="./app-data.js?v=9019"></script>
+<script src="./app-style-ui.js?v=9019"></script>
+<script src="./app-attr.js?v=9019"></script>
+<script src="./app.js?v=9019"></script>
+<script src="./app-import.js?v=9019"></script>
+<script src="./collab.js?v=9019"></script>
+<script src="./redesign/cmdk.js?v=9019"></script>
+<script src="./redesign/a11y.js?v=9019"></script>
 <script>
   // счётчик слоёв в заголовке карточки — следит за #layers-body (app.js не трогаем)
   (function () {

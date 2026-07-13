@@ -501,7 +501,7 @@ function openProjectStyles() {
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal fmt-modal">
     <div class="modal-head">Стили проекта
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть стили проекта"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <div class="ps-note">Собственные знаки хранятся вместе с проектом и доступны при оформлении слоёв и объектов.</div>
       <div id="ps-list" class="ps-list"></div>
@@ -559,7 +559,7 @@ function openProjectStyles() {
     const s = (st.stroke && st.stroke[0] === "#") ? st.stroke : "#5c4630";
     ed.innerHTML = `<div class="modal ask-modal" style="width:280px">
       <div class="modal-head">Редактировать «${id}»
-        <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+        <button class="modal-x" aria-label="Закрыть редактирование стиля"><svg class="ic"><use href="#ic-close"/></svg></button></div>
       <div class="modal-body">
         <label>Название<input id="ps-t" value="${st.title || id}"></label>
         <label>Заливка<input type="color" id="ps-f" value="${f}"></label>
@@ -3367,7 +3367,7 @@ function openShortcuts() {
     </div>`).join("");
   overlay.innerHTML = `<div class="modal fmt-modal-lg sc-modal">
     <div class="modal-head">Горячие клавиши
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть горячие клавиши"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body sc-body">${groups}</div>
     <div class="modal-actions"><span class="spacer"></span>
       <button class="primary" id="sc-close">Понятно</button></div></div>`;
@@ -3452,6 +3452,7 @@ function allRoleOptions(selected = "") {
     `<option value=""${!selected ? " selected" : ""}>Обычный слой — без расчётной роли</option>`;
 }
 function startBoundaryFlow() {
+  startGuideDismissed = true;
   const existing = LAYERS_V2.find(layer => layer.kind === "boundary" && !layer.import_only && !layer.annotation);
   if (existing) {
     setActiveLayer(existing.id);
@@ -3462,11 +3463,41 @@ function startBoundaryFlow() {
   quickLayerByKind("boundary");
   toast("Граница готова. Поставьте первую точку на холсте.");
 }
+let startGuideDismissed = false;
 function updateStartExperience() {
   const guide = document.getElementById("start-guide");
-  const hasLayer = LAYERS_V2.some(layer => layer.user_created && !layer.import_only && !layer.annotation);
-  const isEmpty = !state.features.length && !hasLayer;
-  if (guide) guide.hidden = !isEmpty;
+  const drawableLayers = LAYERS_V2.filter(layer => layer.user_created && !layer.import_only && !layer.annotation);
+  const hasLayer = drawableLayers.length > 0;
+  const hasFeatures = state.features.length > 0;
+  const emptyLayer = hasLayer && !hasFeatures;
+  if (guide) {
+    guide.hidden = hasFeatures || (emptyLayer && startGuideDismissed);
+    const layer = activeLayer() || drawableLayers[0];
+    const kicker = document.getElementById("start-guide-kicker");
+    const title = document.getElementById("start-guide-title");
+    const copy = document.getElementById("start-guide-copy");
+    const steps = document.getElementById("start-guide-steps");
+    const boundaryButton = document.getElementById("start-boundary");
+    const drawButton = document.getElementById("start-draw");
+    const hint = document.getElementById("start-guide-hint");
+    if (emptyLayer && layer) {
+      if (kicker) kicker.textContent = "Проект готов к работе";
+      if (title) title.textContent = "Начертите первый объект";
+      if (copy) copy.textContent = `Активен слой «${layer.title}». Выберите инструмент и укажите точки на холсте — расчёты обновятся автоматически.`;
+      if (steps) steps.hidden = true;
+      if (boundaryButton) boundaryButton.hidden = true;
+      if (drawButton) drawButton.hidden = false;
+      if (hint) hint.textContent = `Тип геометрии слоя: ${GEOM_LABEL[layer.geometry_type] || layer.geometry_type}. Escape отменяет действие.`;
+    } else {
+      if (kicker) kicker.textContent = "Новый проект";
+      if (title) title.textContent = "Начните с границы территории";
+      if (copy) copy.textContent = "Она задаёт расчётную площадь. После этого ТЭП будет обновляться автоматически по мере работы.";
+      if (steps) steps.hidden = false;
+      if (boundaryButton) boundaryButton.hidden = false;
+      if (drawButton) drawButton.hidden = true;
+      if (hint) hint.textContent = "Подсказка: клавиша G создаёт или выбирает слой границы.";
+    }
+  }
   const active = activeLayer();
   const drawingTools = new Set(["point", "polyline", "polygon", "rect", "arc", "circle"]);
   const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror"]);
@@ -3502,7 +3533,7 @@ function openNewLayerDialog(options = {}) {
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal new-layer-modal">
     <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Структура проекта</span><span>Новый слой</span></div>
-      <button class="modal-x" title="Закрыть" aria-label="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть создание слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact new-layer-body">
       <p class="new-layer-intro">Выберите назначение — Студия подставит правильную геометрию и знак. После создания можно сразу чертить.</p>
       <div class="new-layer-purpose">
@@ -3724,7 +3755,7 @@ function openManageKinds() {
   }
   overlay.innerHTML = `<div class="modal fmt-modal-lg mk-modal">
     <div class="modal-head">Типы слоёв
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть типы слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="lib-hint">«Роль» нового слоя — считается в ТЭП и подхватывает знак. Встроенные типы менять нельзя, свои — добавляйте/правьте/удаляйте.</div>
       <div id="mk-list" class="mk-list"></div>
@@ -3979,7 +4010,7 @@ function openVariants() {
   }
   overlay.innerHTML = `<div class="modal var-modal" role="dialog" aria-modal="true" aria-labelledby="variants-title">
     <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Центр сценариев</span><span id="variants-title">Варианты концепции</span></span>
-      <button class="modal-x" title="Закрыть" aria-label="Закрыть варианты концепции"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть варианты концепции"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact var-body">
       <section id="var-current" class="var-current"></section>
       <div class="var-toolbar"><span><b>Сохранённые варианты</b><small>Снимки геометрии и расчётных параметров проекта</small></span>
@@ -4027,7 +4058,7 @@ function openAlbumConfig() {
   };
   let html = `<div class="modal fmt-modal album-modal">
     <div class="modal-head">Состав альбома
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть состав альбома"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body album-body">
       <div class="album-section-title">Листы и порядок</div>
       <div class="album-hint">Расположите листы в нужной последовательности.</div>
@@ -4091,7 +4122,7 @@ function openTepPresetEditor() {
   overlay.innerHTML = `<div class="modal fmt-modal tep-editor-modal" role="dialog" aria-modal="true" aria-labelledby="tep-editor-title">
     <div class="modal-head modal-head-rich">
       <span class="modal-head-copy"><span class="modal-kicker">Расчётный сценарий</span><span id="tep-editor-title">Параметры ТЭП</span></span>
-      <button class="modal-x" title="Закрыть" aria-label="Закрыть параметры ТЭП"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть параметры ТЭП"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body tep-editor-body">
       <div class="tep-editor-hint">Изменения применяются к текущему варианту и сразу пересчитывают показатели проекта.</div>
       <section class="form-section" aria-labelledby="tep-build-title">
@@ -4152,7 +4183,7 @@ function openBufferDialog() {
   ];
   overlay.innerHTML = `<div class="modal fmt-modal buffer-modal">
     <div class="modal-head">Создать буфер
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть создание буфера"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <div class="buffer-hint">Буфер строится вокруг выбранных объектов и добавляется в активный слой.</div>
       <div class="buffer-presets">
@@ -6040,6 +6071,16 @@ on("btn-refresh-src", "click", fetchSources);
 on("btn-shortcuts", "click", openShortcuts);
 on("btn-new-layer", "click", openNewLayerDialog);
 on("start-boundary", "click", startBoundaryFlow);
+on("start-draw", "click", () => {
+  const layer = activeLayer() || LAYERS_V2.find(item => item.user_created && !item.import_only && !item.annotation);
+  if (!layer) return startBoundaryFlow();
+  startGuideDismissed = true;
+  setActiveLayer(layer.id);
+  setTool(naturalToolFor(layer), { keepLayer: true });
+  document.getElementById("start-guide")?.setAttribute("hidden", "");
+  document.getElementById("cv")?.focus();
+  toast(`Слой «${layer.title}» активен. Поставьте первую точку на холсте.`);
+});
 on("start-demo", "click", () => {
   document.getElementById("btn-demo")?.click();
   if (window.matchMedia("(max-width: 900px)").matches && !document.body.classList.contains("panel-hidden")) {

@@ -84,7 +84,7 @@ async function openDataFetch() {
   }).join("");
   overlay.innerHTML = `<div class="modal fmt-modal data-modal">
     <div class="modal-head">Данные по области
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть данные по области"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="data-area-bar"><span>Видимая область</span><b>${areaTxt} км²</b></div>
       ${cardsHtml}

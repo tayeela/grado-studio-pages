@@ -205,7 +205,7 @@ function openLayerStyle(layer, opts = {}) {
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal fmt-modal fmt-modal-lg style-editor-modal" role="dialog" aria-modal="true" aria-labelledby="style-editor-title">
     <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Стиль слоя</span><span id="style-editor-title">Оформление · ${escHtml(layer.title)}</span></span>
-      <button class="modal-x" title="Закрыть" aria-label="Закрыть оформление слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть оформление слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact style-editor-body">
     <div class="seg" id="ls-mode" role="tablist" aria-label="Режим оформления">
       <button type="button" role="tab" aria-selected="${mode === "single"}" class="seg-btn${mode === "single" ? " active" : ""}" data-mode="single">Единый стиль</button>
@@ -592,7 +592,7 @@ function openStyleLibrary() {
   </div>`).join("");
   overlay.innerHTML = `<div class="modal lib-modal">
     <div class="modal-head">Библиотека знаков
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть библиотеку знаков"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="lib-hint">Правка меняет сам эталонный знак — во всех проектах, на холсте и на печати. Синяя точка — знак изменён.</div>
       <div class="lib-body">

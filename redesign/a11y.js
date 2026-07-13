@@ -48,6 +48,15 @@
     nodes.forEach(node => {
       const text = (node.getAttribute('title') || '').trim();
       if (!text) return;
+      const isSelfExplanatoryClose = node.matches('.modal-x, .panel-close, .errbar-close, [data-no-tooltip]');
+      if (isSelfExplanatoryClose) {
+        if (node.matches('button') && !node.hasAttribute('aria-label')) {
+          node.setAttribute('aria-label', text || 'Закрыть');
+        }
+        node.removeAttribute('title');
+        delete node.dataset.tooltip;
+        return;
+      }
       node.dataset.tooltip = text;
       node.removeAttribute('title');
       if (node.matches('button') && !node.hasAttribute('aria-label') && !(node.textContent || '').trim()) {

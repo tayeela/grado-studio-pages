@@ -148,7 +148,7 @@ function openAttributeTable(layer) {
   overlay.innerHTML = `<div class="modal attr-modal">
     <div class="modal-head">Таблица атрибутов · ${escHtml(layer.title)}
       <span class="muted" id="at-count"></span>
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть таблицу атрибутов"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="attr-toolbar">
       <button id="at-edit" title="Режим правки: редактировать ячейки, добавлять/удалять поля">✎ Правка</button>
       <button id="at-addf" class="at-editonly" hidden>+ поле</button>
@@ -244,7 +244,7 @@ function openAddFieldDialog(layer, onDone) {
   ov.className = "modal-overlay";
   ov.innerHTML = `<div class="modal fmt-modal ask-modal">
     <div class="modal-head">Новое поле · ${escHtml(layer.title)}
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть создание поля"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <label>Имя поля<input type="text" id="af-name" placeholder="напр. население"></label>
       <label>Тип<select id="af-type">${Object.entries(FIELD_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
@@ -308,7 +308,7 @@ function openManageFieldsDialog(layer, onDone) {
   };
   ov.innerHTML = `<div class="modal fmt-modal fmt-modal-lg">
     <div class="modal-head">Поля слоя · ${escHtml(layer.title)}
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть поля слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="fc-help">Имя, тип, порядок и значение по умолчанию своих полей. Значение по умолчанию заполняет пустые ячейки и новые объекты.</div>
       <div class="mf-table-wrap"><table class="attr-table mf-table"><thead><tr><th>Имя</th><th>Тип</th><th>По умолчанию</th><th></th></tr></thead><tbody id="mf-body"></tbody></table></div>
@@ -363,7 +363,7 @@ function openFieldCalc(layer, getFeats, onDone) {
   ov.className = "modal-overlay";
   ov.innerHTML = `<div class="modal fmt-modal fmt-modal-lg fc-modal">
     <div class="modal-head">Калькулятор полей · ${escHtml(layer.title)}
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <button class="modal-x" aria-label="Закрыть калькулятор полей"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
     <div class="fmt-sub">Куда записать</div>
     <label class="chk"><input type="radio" name="fc-mode" id="fc-new" checked> новое поле</label>

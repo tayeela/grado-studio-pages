@@ -12,17 +12,8 @@
     status,
     headers: { "Content-Type": "application/json; charset=utf-8" },
   });
-  const round = (value, digits = 2) => Number((Number(value) || 0).toFixed(digits));
-  const ringArea = ring => {
-    if (!Array.isArray(ring) || ring.length < 3) return 0;
-    let area = 0;
-    for (let i = 0; i < ring.length; i++) {
-      const a = ring[i], b = ring[(i + 1) % ring.length];
-      area += (Number(a[0]) || 0) * (Number(b[1]) || 0) -
-              (Number(b[0]) || 0) * (Number(a[1]) || 0);
-    }
-    return Math.abs(area) / 2;
-  };
+  const pagesCore = window.GRADO_PAGES_CORE;
+  if (!pagesCore) throw new Error("Не загружено вычислительное ядро браузерной версии");
   const bodyText = async (input, options) => {
     const body = options && options.body;
     if (typeof body === "string") return body;
@@ -36,73 +27,11 @@
   };
 
   function browserTep(payload) {
-    const features = Array.isArray(payload.features) ? payload.features : [];
-    const params = payload.params || {};
-    const boundaries = features.filter(f => f.kind === "boundary" && f.ring);
-    const hasTerritory = boundaries.length > 0;
-    const terrHa = boundaries.reduce((sum, f) => sum + ringArea(f.ring), 0) / 10000;
-    const restrictHa = features.filter(f => f.kind === "restrict" && f.ring)
-      .reduce((sum, f) => sum + ringArea(f.ring), 0) / 10000;
-    const calcHa = Math.max(0, terrHa - restrictHa);
-    const factSpp = features.filter(f => f.kind === "building" && f.ring)
-      .reduce((sum, f) => sum + ringArea(f.ring) * Math.max(1, Number(f.props && f.props.floors) || 9) / 1000, 0);
-    const factDensity = calcHa > 0 ? factSpp / calcHa : 0;
-    const targetDensity = Number(params.density) || 25;
-    const targetSpp = calcHa * targetDensity;
-    const housing = targetSpp * (Number(params.ratio_zh) || 80) / 100;
-    const residentialSpp = housing * 0.94;
-    const apartmentArea = residentialSpp * 0.65;
-    const population = apartmentArea * 1000 / 33;
-    const educationZone = Number(params.education_zone) === 2 ? 2 : 1;
-    const territoryMode = Number(params.territory_mode) === 2 ? 2 : 1;
-    const dooPerThousand = educationZone === 2 ? 63 : 44;
-    const schoolPerThousand = educationZone === 2 ? 124 : 90;
-    const zonesHa = features.filter(f => f.kind === "zone" && f.ring)
-      .reduce((sum, f) => sum + ringArea(f.ring), 0) / 10000;
-    const results = [
-      { id: "terr_area", group: "Площади", title: "Территория", value: round(terrHa), unit: "га" },
-      { id: "restrict_area", group: "Площади", title: "Ограничения", value: round(restrictHa), unit: "га" },
-      { id: "calc_area", group: "Площади", title: "Расчётная территория", value: round(calcHa), unit: "га" },
-      { id: "target_spp", group: "Застройка", title: "СПП по нормативной плотности", value: round(targetSpp, 1), unit: "тыс. м²" },
-      { id: "population", group: "Население", title: "Расчётное население", value: Math.round(population), unit: "чел." },
-      { id: "doo_places", group: "Социальная инфраструктура", title: "Места в ДОО (2151-ПП)", value: Math.round(population * dooPerThousand / 1000), unit: "мест" },
-      { id: "school_places", group: "Социальная инфраструктура", title: "Места в школах (2151-ПП)", value: Math.round(population * schoolPerThousand / 1000), unit: "мест" },
-      { id: "retail_nnp_required", group: "Обслуживание", title: "Торговля к размещению (2152-ПП)", value: Math.round(population * 270 / 1000), unit: "м² ННП" },
-      { id: "services_nnp_required", group: "Обслуживание", title: "Бытовое обслуживание (2152-ПП)", value: Math.round(population * 100 / 1000), unit: "м² ННП" },
-      { id: "green_area_required", group: "Жилые территории", title: "Озеленённая территория по режиму 2152-ПП", value: Math.round(territoryMode === 2 ? calcHa * 10000 * 0.25 : population * 5), unit: "м²" },
-      { id: "playground_area_required", group: "Жилые территории", title: "Детские площадки при реконструкции", value: Math.round(territoryMode === 2 ? population * 0.5 : 0), unit: "м²" },
-      { id: "adult_recreation_area_required", group: "Жилые территории", title: "Площадки отдыха взрослых при реконструкции", value: Math.round(territoryMode === 2 ? population * 0.1 : 0), unit: "м²" },
-    ];
-    const checks = [{
-      title: "Нормативный профиль Москвы", ok: true,
-      msg: `2151-ПП: образовательная зона ${educationZone}; 2152-ПП: ${territoryMode === 2 ? "реконструкция" : "преобразование"}`,
-    }];
-    if (factDensity > 0) checks.push({ title: "Плотность по ПЗЗ/ГПЗУ", ok: false, msg: `Факт ${round(factDensity)} тыс. м²/га — требуется сверка с параметрами участка` });
-    if (population > 0) checks.push({ title: "Транспорт · 945-ПП", ok: false, msg: "Расчёт парковок требует ВРИ, территориальной зоны и типов объектов" });
-    return {
-      inputs: { terr_area: round(terrHa, 4), restrict_area: round(restrictHa, 4) },
-      results,
-      fact: { spp: round(factSpp, 1), density: round(factDensity) },
-      zones: { ok: true, total_ha: round(zonesHa), shared_edges: 0 },
-      checks,
-      regulatory_profile: { id: "moscow_urban_planning_2026_07", checked_at: "2026-07-13" },
-      has_territory: hasTerritory,
-    };
+    return pagesCore.computeTep(payload);
   }
 
   function webProject(payload) {
-    return {
-      format: "grado-web",
-      version: 1,
-      name: payload.name || "Проект",
-      features: payload.features || [],
-      userLayers: payload.layers || [],
-      projectStyles: payload.projectStyles || {},
-      projectCustomKinds: payload.projectCustomKinds || [],
-      undo_stack: payload.undo_stack || [],
-      redo_stack: payload.redo_stack || [],
-      studioState: payload.studioState || {},
-    };
+    return pagesCore.webProject(payload);
   }
 
   window.gradoTileUrl = (z, x, y, source) => source === "osm"
@@ -160,10 +89,7 @@
     if (path === "/api/tep") return json(browserTep(await bodyJson(input, options)));
     if (path === "/api/preflight") {
       const payload = await bodyJson(input, options);
-      const features = Array.isArray(payload.features) ? payload.features : [];
-      return json({ errors: [], warnings: [], summary: {
-        total: features.length, exportable: features.length, annotations: 0,
-      }});
+      return json(pagesCore.preflightProject(payload));
     }
     if (path === "/api/grado") {
       const project = webProject(await bodyJson(input, options));
