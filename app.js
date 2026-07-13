@@ -2665,8 +2665,11 @@ function renderTep(data) {
   if (data.checks && data.checks.length) {
     html += `<div class="tep-group">Проверки</div>`;
     for (const c of data.checks) {
-      const col = c.ok ? "var(--success)" : "var(--warning)";
-      html += `<div class="tep-row" style="color:${col}"><span>${escHtml(c.title)}</span><span class="v">${escHtml(c.msg)}</span></div>`;
+      const stateClass = c.ok ? "ok" : "warning";
+      html += `<div class="tep-check ${stateClass}">
+        <span class="tep-check-mark" aria-hidden="true"></span>
+        <span class="tep-check-copy"><b>${escHtml(c.title)}</b><span>${escHtml(c.msg)}</span></span>
+      </div>`;
     }
   }
   body.innerHTML = html;
@@ -3756,22 +3759,38 @@ function openTepPresetEditor() {
   const tm = document.getElementById("p-territory-mode").value;
   const kr = document.getElementById("p-krail").value;
   const kb = document.getElementById("p-kba").value;
-  overlay.innerHTML = `<div class="modal fmt-modal tep-editor-modal">
-    <div class="modal-head">Параметры расчёта ТЭП
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
-    <div class="modal-body">
-      <div class="tep-editor-hint">Эти значения используются при расчёте технико-экономических показателей проекта.</div>
-      <label>Плотность застройки<input id="ed-d" type="number" value="${d}" step="0.5"></label>
-      <label>Доля жилья, %<input id="ed-r" type="number" value="${r}" step="1"></label>
-      <label>Зона образования по 2151-ПП<select id="ed-ez"><option value="1"${ez === "1" ? " selected" : ""}>Зона 1 · 44 / 90 мест</option><option value="2"${ez === "2" ? " selected" : ""}>Зона 2 · 63 / 124 места</option></select></label>
-      <label>Режим территории по 2152-ПП<select id="ed-tm"><option value="1"${tm === "1" ? " selected" : ""}>Преобразование · 5 м² озеленения/чел.</option><option value="2"${tm === "2" ? " selected" : ""}>Реконструкция · 25% территории</option></select></label>
-      <label>Коэффициент влияния железной дороги<input id="ed-kr" type="number" value="${kr}" step="0.05"></label>
-      <label>Коэффициент деловой активности<input id="ed-kb" type="number" value="${kb}" step="0.05"></label>
+  overlay.innerHTML = `<div class="modal fmt-modal tep-editor-modal" role="dialog" aria-modal="true" aria-labelledby="tep-editor-title">
+    <div class="modal-head modal-head-rich">
+      <span class="modal-head-copy"><span class="modal-kicker">Расчётный сценарий</span><span id="tep-editor-title">Параметры ТЭП</span></span>
+      <button class="modal-x" title="Закрыть" aria-label="Закрыть параметры ТЭП"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body tep-editor-body">
+      <div class="tep-editor-hint">Изменения применяются к текущему варианту и сразу пересчитывают показатели проекта.</div>
+      <section class="form-section" aria-labelledby="tep-build-title">
+        <div class="form-section-head"><span class="form-step">01</span><span><b id="tep-build-title">Застройка</b><small>Целевые параметры расчётной территории</small></span></div>
+        <div class="form-grid">
+          <label><span>Плотность застройки</span><span class="field-shell"><input id="ed-d" type="number" value="${d}" min="1" max="60" step="0.5"><em>тыс. м²/га</em></span></label>
+          <label><span>Доля жилья</span><span class="field-shell"><input id="ed-r" type="number" value="${r}" min="0" max="100" step="1"><em>%</em></span></label>
+        </div>
+      </section>
+      <section class="form-section" aria-labelledby="tep-norm-title">
+        <div class="form-section-head"><span class="form-step">02</span><span><b id="tep-norm-title">Нормативный профиль</b><small>Москва · действующие 2151-ПП и 2152-ПП</small></span></div>
+        <div class="form-grid">
+          <label><span>Образовательная зона</span><select id="ed-ez"><option value="1"${ez === "1" ? " selected" : ""}>Зона 1 · ДОО 44 / школа 90</option><option value="2"${ez === "2" ? " selected" : ""}>Зона 2 · ДОО 63 / школа 124</option></select></label>
+          <label><span>Режим территории</span><select id="ed-tm"><option value="1"${tm === "1" ? " selected" : ""}>Преобразование · 5 м²/чел.</option><option value="2"${tm === "2" ? " selected" : ""}>Реконструкция · 25%</option></select></label>
+        </div>
+      </section>
+      <section class="form-section" aria-labelledby="tep-mobility-title">
+        <div class="form-section-head"><span class="form-step">03</span><span><b id="tep-mobility-title">Транспортная доступность</b><small>Коэффициенты предварительного расчёта 945-ПП</small></span></div>
+        <div class="form-grid">
+          <label><span>Железнодорожная доступность</span><input id="ed-kr" type="number" value="${kr}" min="0.5" max="1" step="0.05"></label>
+          <label><span>Деловая активность</span><input id="ed-kb" type="number" value="${kb}" min="0.1" max="1" step="0.05"></label>
+        </div>
+      </section>
     </div>
     <div class="modal-actions">
-      <span class="spacer"></span>
-      <button id="ed-close">Закрыть</button>
-      <button id="ed-apply" class="primary">Применить</button>
+      <span class="modal-action-note">Параметры сохраняются в проекте</span><span class="spacer"></span>
+      <button id="ed-close">Отмена</button>
+      <button id="ed-apply" class="primary">Применить сценарий</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -5495,8 +5514,10 @@ function initPanelResizer() {
     const saved = localStorage.getItem('grado_panel_width');
     if (saved) panel.style.flexBasis = saved + 'px';
   } catch (e) {}
+  const MIN_PANEL_WIDTH = 300;
+  const MAX_PANEL_WIDTH = 640;
   const setWidth = width => {
-    const value = Math.max(180, Math.min(600, Math.round(width)));
+    const value = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, Math.round(width)));
     panel.style.flexBasis = value + 'px';
     resizer.setAttribute('aria-valuenow', String(value));
     resize();
@@ -5504,33 +5525,37 @@ function initPanelResizer() {
   };
   setWidth(parseInt(panel.style.flexBasis) || panel.offsetWidth || 312);
   let startX = 0, startW = 0;
-  resizer.addEventListener('mousedown', e => {
+  resizer.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
     startX = e.clientX;
     startW = panel.offsetWidth;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
+    resizer.setPointerCapture(e.pointerId);
+    document.body.classList.add('panel-resizing');
     const move = ev => {
       const dx = ev.clientX - startX;
       // panel on the right: drag resizer right (dx>0) → narrower panel
       setWidth(startW - dx);
     };
-    const up = () => {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      try { localStorage.setItem('grado_panel_width', parseInt(panel.style.flexBasis) || 268); } catch (e) {}
+    const up = ev => {
+      resizer.removeEventListener('pointermove', move);
+      resizer.removeEventListener('pointerup', up);
+      resizer.removeEventListener('pointercancel', up);
+      if (resizer.hasPointerCapture(ev.pointerId)) resizer.releasePointerCapture(ev.pointerId);
+      document.body.classList.remove('panel-resizing');
+      try { localStorage.setItem('grado_panel_width', parseInt(panel.style.flexBasis) || 312); } catch (e) {}
       resize();
     };
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up, { once: true });
+    resizer.addEventListener('pointermove', move);
+    resizer.addEventListener('pointerup', up);
+    resizer.addEventListener('pointercancel', up);
   });
   resizer.addEventListener('keydown', e => {
     let width = parseInt(panel.style.flexBasis) || panel.offsetWidth;
     if (e.key === 'ArrowLeft') width += 20;
     else if (e.key === 'ArrowRight') width -= 20;
-    else if (e.key === 'Home') width = 180;
-    else if (e.key === 'End') width = 600;
+    else if (e.key === 'Home') width = MIN_PANEL_WIDTH;
+    else if (e.key === 'End') width = MAX_PANEL_WIDTH;
     else return;
     e.preventDefault();
     width = setWidth(width);
