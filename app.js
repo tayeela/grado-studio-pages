@@ -2445,6 +2445,8 @@ function collectState() {
     name: document.getElementById("project-name").value,
     density: document.getElementById("p-density").value,
     ratio: document.getElementById("p-ratio").value,
+    educationZone: document.getElementById("p-education-zone").value,
+    territoryMode: document.getElementById("p-territory-mode").value,
     krail: document.getElementById("p-krail").value,
     kba: document.getElementById("p-kba").value,
     layersVisible: Object.fromEntries(LAYERS_V2.map(L => [L.id, L.visible])),
@@ -2591,6 +2593,8 @@ let tepTimer = null;
 function params() {
   return { density: +document.getElementById("p-density").value || 25,
            ratio_zh: +document.getElementById("p-ratio").value || 80,
+           education_zone: +document.getElementById("p-education-zone").value === 2 ? 2 : 1,
+           territory_mode: +document.getElementById("p-territory-mode").value === 2 ? 2 : 1,
            k_rail: +document.getElementById("p-krail").value || 1,
            k_ba: +document.getElementById("p-kba").value || 0.5 };
 }
@@ -3415,6 +3419,8 @@ function resetProjectState(name = "Новый проект") {
   document.getElementById("project-name").value = name;
   document.getElementById("p-density").value = 25;
   document.getElementById("p-ratio").value = 80;
+  document.getElementById("p-education-zone").value = 1;
+  document.getElementById("p-territory-mode").value = 1;
   document.getElementById("p-krail").value = 1;
   document.getElementById("p-kba").value = 0.5;
   const exportSelect = document.getElementById("export-style");
@@ -3559,7 +3565,7 @@ function saveCurrentAsVariant(name) {
 function setParamInputs(p) {
   if (!p) return;
   const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
-  set("p-density", p.density); set("p-ratio", p.ratio_zh); set("p-krail", p.k_rail); set("p-kba", p.k_ba);
+  set("p-density", p.density); set("p-ratio", p.ratio_zh); set("p-education-zone", p.education_zone); set("p-territory-mode", p.territory_mode); set("p-krail", p.k_rail); set("p-kba", p.k_ba);
 }
 async function tepForVariant(features, prms) {
   try {
@@ -3746,6 +3752,8 @@ function openTepPresetEditor() {
   overlay.className = "modal-overlay";
   const d = document.getElementById("p-density").value;
   const r = document.getElementById("p-ratio").value;
+  const ez = document.getElementById("p-education-zone").value;
+  const tm = document.getElementById("p-territory-mode").value;
   const kr = document.getElementById("p-krail").value;
   const kb = document.getElementById("p-kba").value;
   overlay.innerHTML = `<div class="modal fmt-modal tep-editor-modal">
@@ -3755,6 +3763,8 @@ function openTepPresetEditor() {
       <div class="tep-editor-hint">Эти значения используются при расчёте технико-экономических показателей проекта.</div>
       <label>Плотность застройки<input id="ed-d" type="number" value="${d}" step="0.5"></label>
       <label>Доля жилья, %<input id="ed-r" type="number" value="${r}" step="1"></label>
+      <label>Зона образования по 2151-ПП<select id="ed-ez"><option value="1"${ez === "1" ? " selected" : ""}>Зона 1 · 44 / 90 мест</option><option value="2"${ez === "2" ? " selected" : ""}>Зона 2 · 63 / 124 места</option></select></label>
+      <label>Режим территории по 2152-ПП<select id="ed-tm"><option value="1"${tm === "1" ? " selected" : ""}>Преобразование · 5 м² озеленения/чел.</option><option value="2"${tm === "2" ? " selected" : ""}>Реконструкция · 25% территории</option></select></label>
       <label>Коэффициент влияния железной дороги<input id="ed-kr" type="number" value="${kr}" step="0.05"></label>
       <label>Коэффициент деловой активности<input id="ed-kb" type="number" value="${kb}" step="0.05"></label>
     </div>
@@ -3768,6 +3778,8 @@ function openTepPresetEditor() {
   overlay.querySelector("#ed-apply").onclick = () => {
     document.getElementById("p-density").value = overlay.querySelector("#ed-d").value;
     document.getElementById("p-ratio").value = overlay.querySelector("#ed-r").value;
+    document.getElementById("p-education-zone").value = overlay.querySelector("#ed-ez").value;
+    document.getElementById("p-territory-mode").value = overlay.querySelector("#ed-tm").value;
     document.getElementById("p-krail").value = overlay.querySelector("#ed-kr").value;
     document.getElementById("p-kba").value = overlay.querySelector("#ed-kb").value;
     persist();
@@ -4911,6 +4923,8 @@ on("btn-clear", "click", async () => {
 });
 on("p-density", "change", refreshTep);
 on("p-ratio", "change", refreshTep);
+on("p-education-zone", "change", refreshTep);
+on("p-territory-mode", "change", refreshTep);
 on("p-krail", "change", refreshTep);
 on("p-kba", "change", refreshTep);
 on("btn-tep-editor", "click", openTepPresetEditor);
@@ -5396,6 +5410,8 @@ function applyRestoredState(d) {
   if (d.name) document.getElementById("project-name").value = d.name;
   if (d.density) document.getElementById("p-density").value = d.density;
   if (d.ratio) document.getElementById("p-ratio").value = d.ratio;
+  if (d.educationZone) document.getElementById("p-education-zone").value = d.educationZone;
+  if (d.territoryMode) document.getElementById("p-territory-mode").value = d.territoryMode;
   if (d.krail) document.getElementById("p-krail").value = d.krail;
   if (d.kba) document.getElementById("p-kba").value = d.kba;
 }

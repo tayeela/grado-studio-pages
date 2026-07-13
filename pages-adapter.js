@@ -50,7 +50,13 @@
     const targetDensity = Number(params.density) || 25;
     const targetSpp = calcHa * targetDensity;
     const housing = targetSpp * (Number(params.ratio_zh) || 80) / 100;
-    const population = housing * 1000 / 30;
+    const residentialSpp = housing * 0.94;
+    const apartmentArea = residentialSpp * 0.65;
+    const population = apartmentArea * 1000 / 33;
+    const educationZone = Number(params.education_zone) === 2 ? 2 : 1;
+    const territoryMode = Number(params.territory_mode) === 2 ? 2 : 1;
+    const dooPerThousand = educationZone === 2 ? 63 : 44;
+    const schoolPerThousand = educationZone === 2 ? 124 : 90;
     const zonesHa = features.filter(f => f.kind === "zone" && f.ring)
       .reduce((sum, f) => sum + ringArea(f.ring), 0) / 10000;
     const results = [
@@ -59,20 +65,27 @@
       { id: "calc_area", group: "Площади", title: "Расчётная территория", value: round(calcHa), unit: "га" },
       { id: "target_spp", group: "Застройка", title: "СПП по нормативной плотности", value: round(targetSpp, 1), unit: "тыс. м²" },
       { id: "population", group: "Население", title: "Расчётное население", value: Math.round(population), unit: "чел." },
-      { id: "doo_places", group: "Социальная инфраструктура", title: "Места в ДОО", value: Math.round(population * 44 / 1000), unit: "мест" },
-      { id: "school_places", group: "Социальная инфраструктура", title: "Места в школах", value: Math.round(population * 124 / 1000), unit: "мест" },
+      { id: "doo_places", group: "Социальная инфраструктура", title: "Места в ДОО (2151-ПП)", value: Math.round(population * dooPerThousand / 1000), unit: "мест" },
+      { id: "school_places", group: "Социальная инфраструктура", title: "Места в школах (2151-ПП)", value: Math.round(population * schoolPerThousand / 1000), unit: "мест" },
+      { id: "retail_nnp_required", group: "Обслуживание", title: "Торговля к размещению (2152-ПП)", value: Math.round(population * 270 / 1000), unit: "м² ННП" },
+      { id: "services_nnp_required", group: "Обслуживание", title: "Бытовое обслуживание (2152-ПП)", value: Math.round(population * 100 / 1000), unit: "м² ННП" },
+      { id: "green_area_required", group: "Жилые территории", title: "Озеленённая территория по режиму 2152-ПП", value: Math.round(territoryMode === 2 ? calcHa * 10000 * 0.25 : population * 5), unit: "м²" },
+      { id: "playground_area_required", group: "Жилые территории", title: "Детские площадки при реконструкции", value: Math.round(territoryMode === 2 ? population * 0.5 : 0), unit: "м²" },
+      { id: "adult_recreation_area_required", group: "Жилые территории", title: "Площадки отдыха взрослых при реконструкции", value: Math.round(territoryMode === 2 ? population * 0.1 : 0), unit: "м²" },
     ];
     const checks = [{
-      title: "Режим расчёта", ok: true,
-      msg: "предварительный расчёт в браузере",
+      title: "Нормативный профиль Москвы", ok: true,
+      msg: `2151-ПП: образовательная зона ${educationZone}; 2152-ПП: ${territoryMode === 2 ? "реконструкция" : "преобразование"}`,
     }];
-    if (factDensity > 40) checks.push({ title: "Плотность", ok: false, msg: `Высокая ${round(factDensity)} > 40` });
+    if (factDensity > 0) checks.push({ title: "Плотность по ПЗЗ/ГПЗУ", ok: false, msg: `Факт ${round(factDensity)} тыс. м²/га — требуется сверка с параметрами участка` });
+    if (population > 0) checks.push({ title: "Транспорт · 945-ПП", ok: false, msg: "Расчёт парковок требует ВРИ, территориальной зоны и типов объектов" });
     return {
       inputs: { terr_area: round(terrHa, 4), restrict_area: round(restrictHa, 4) },
       results,
       fact: { spp: round(factSpp, 1), density: round(factDensity) },
       zones: { ok: true, total_ha: round(zonesHa), shared_edges: 0 },
       checks,
+      regulatory_profile: { id: "moscow_urban_planning_2026_07", checked_at: "2026-07-13" },
       has_territory: hasTerritory,
     };
   }
