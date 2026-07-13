@@ -3351,8 +3351,11 @@ function updateStartExperience() {
     const button = document.getElementById(id);
     if (!button) return;
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
-    button.disabled = !state.features.length;
-    button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
+    const webUnavailable = button.dataset.webUnavailable === "true";
+    button.disabled = webUnavailable || !state.features.length;
+    button.title = webUnavailable
+      ? "Доступно в настольной версии"
+      : (!state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle);
   });
 }
 function openNewLayerDialog(options = {}) {

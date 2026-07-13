@@ -205,6 +205,13 @@
     if (logo) logo.insertAdjacentHTML("beforeend", '<b class="web-badge">Веб</b>');
     const album = document.getElementById("btn-album");
     if (album) { album.textContent = "Альбом"; album.title = "Настроить состав альбома"; }
+    const buffer = document.getElementById("btn-buffer-open");
+    if (buffer) {
+      buffer.dataset.webUnavailable = "true";
+      buffer.disabled = true;
+      buffer.title = "Буферизация доступна в настольной версии";
+      buffer.setAttribute("aria-label", "Буферизация — доступна в настольной версии");
+    }
     document.querySelectorAll("[data-click]").forEach(row => {
       if (blocked.has(row.dataset.click)) {
         row.classList.add("web-disabled");

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ГРАДО Студия</title>
-<link rel="stylesheet" href="./tokens.css?v=9012">
-<script>window.__GRADO_ASSET_VERSION__="9012";</script>
-<script src="./pages-adapter.js?v=9012"></script>
-<script src="./canvas-theme.js?v=9012"></script>
-<link rel="stylesheet" href="./redesign/shell.css?v=9012">
-<link rel="stylesheet" href="./redesign/studio2.css?v=9012">
+<link rel="stylesheet" href="./tokens.css?v=9013">
+<script>window.__GRADO_ASSET_VERSION__="9013";</script>
+<script src="./pages-adapter.js?v=9013"></script>
+<script src="./canvas-theme.js?v=9013"></script>
+<link rel="stylesheet" href="./redesign/shell.css?v=9013">
+<link rel="stylesheet" href="./redesign/studio2.css?v=9013">
 <style>
   /* служебные слоты движка (скрытые контейнеры/поля, которые app.js биндит) и
      группы-заголовки в шапке. Новый интерфейс (редизайн Фаза 0-3). */
@@ -38,7 +38,7 @@
   <button class="btn" data-menu="menu-proj" aria-haspopup="menu" aria-controls="menu-proj" aria-expanded="false"><svg class="ic" style="width:15px;height:15px"><use href="#i-folder"/></svg>Проект<svg class="ic caret"><use href="#i-caret"/></svg></button>
   <button class="btn" data-menu="menu-out" aria-haspopup="menu" aria-controls="menu-out" aria-expanded="false">Выпуск<svg class="ic caret"><use href="#i-caret"/></svg></button>
   <button class="btn primary" id="btn-album">Собрать альбом</button>
-  <button class="iconbtn panel-visibility" id="btn-panel-visibility" title="Показать или скрыть панель слоёв" aria-label="Скрыть панель слоёв" aria-controls="panel" aria-expanded="true"><svg class="ic"><use href="#i-layers"/></svg></button>
+  <button class="iconbtn panel-visibility" id="btn-panel-visibility" title="Показать или скрыть инспектор" aria-label="Скрыть инспектор" aria-controls="panel" aria-expanded="true"><svg class="ic"><use href="#i-layers"/></svg></button>
 </header>
 
 <div id="main">
@@ -50,17 +50,18 @@
     <button class="tool" data-tool="polyline" title="Линия"><svg class="ic"><use href="#i-line"/></svg>Линия</button>
     <button class="tool" data-tool="polygon" title="Полигон"><svg class="ic"><use href="#i-poly"/></svg>Полигон</button>
     <button class="tool" data-tool="rect" title="Прямоугольник" aria-label="Прямоугольник"><svg class="ic"><use href="#i-rect"/></svg>Прямоуг.</button>
-    <button class="tool" data-tool="arc" title="Дуга по 3 точкам" aria-label="Дуга по трём точкам"><svg class="ic"><use href="#i-arc"/></svg>Дуга</button>
-    <button class="tool" data-tool="circle" title="Окружность" aria-label="Окружность"><svg class="ic"><use href="#i-circle"/></svg>Окружн.</button>
+    <button class="tool more-tools" id="btn-more-tools" type="button" title="Показать дополнительные инструменты" aria-label="Показать дополнительные инструменты" aria-expanded="false"><svg class="ic"><use href="#ic-menu-dots"/></svg><span>Ещё</span></button>
+    <button class="tool advanced-tool" data-tool="arc" title="Дуга по 3 точкам" aria-label="Дуга по трём точкам"><svg class="ic"><use href="#i-arc"/></svg>Дуга</button>
+    <button class="tool advanced-tool" data-tool="circle" title="Окружность" aria-label="Окружность"><svg class="ic"><use href="#i-circle"/></svg>Окружн.</button>
     <div class="rail-group">Правка</div>
     <button class="tool" data-tool="trim" title="Обрезать (T)"><svg class="ic"><use href="#i-trim"/></svg>Обрезать</button>
     <button class="tool" data-tool="extend" title="Продлить (E)"><svg class="ic"><use href="#i-extend"/></svg>Продлить</button>
     <button class="tool" id="btn-join" title="Склеить (J)"><svg class="ic"><use href="#i-join"/></svg>Склеить</button>
-    <button class="tool" data-tool="fillet" title="Сопрячь"><svg class="ic"><use href="#i-fillet"/></svg>Сопрячь</button>
+    <button class="tool advanced-tool" data-tool="fillet" title="Сопрячь"><svg class="ic"><use href="#i-fillet"/></svg>Сопрячь</button>
     <button class="tool" id="btn-buffer-open" title="Буфер вокруг выбранных объектов"><svg class="ic"><use href="#i-circle"/></svg>Буфер</button>
-    <button class="tool" data-tool="rotate" title="Поворот"><svg class="ic"><use href="#i-rotate"/></svg>Поворот</button>
-    <button class="tool" data-tool="scale" title="Масштаб"><svg class="ic"><use href="#i-scale"/></svg>Масштаб</button>
-    <button class="tool" data-tool="mirror" title="Зеркало"><svg class="ic"><use href="#i-mirror"/></svg>Зеркало</button>
+    <button class="tool advanced-tool" data-tool="rotate" title="Поворот"><svg class="ic"><use href="#i-rotate"/></svg>Поворот</button>
+    <button class="tool advanced-tool" data-tool="scale" title="Масштаб"><svg class="ic"><use href="#i-scale"/></svg>Масштаб</button>
+    <button class="tool advanced-tool" data-tool="mirror" title="Зеркало"><svg class="ic"><use href="#i-mirror"/></svg>Зеркало</button>
     <div class="rail-group">Мера</div>
     <button class="tool" data-tool="dim" title="Размер (D)"><svg class="ic"><use href="#i-dim"/></svg>Размер</button>
     <button class="tool" data-tool="measure" title="Измерение (M)" aria-label="Измерение расстояния"><svg class="ic"><use href="#i-ruler"/></svg>Измер.</button>
@@ -111,18 +112,23 @@
     </div>
   </div>
 
-  <div id="panel-resizer" title="Перетащите — ширина панели" role="separator" aria-label="Ширина панели слоёв" aria-orientation="vertical" aria-valuemin="300" aria-valuemax="640" tabindex="0"></div>
+  <div id="panel-resizer" title="Перетащите — ширина инспектора" role="separator" aria-label="Ширина инспектора" aria-orientation="vertical" aria-valuemin="300" aria-valuemax="640" tabindex="0"></div>
 
   <!-- ПРАВАЯ ПАНЕЛЬ: Слои — реальный #layers-body движка в новом виде.
        Свойства/Данные/ТЭП — следующие шаги. -->
-  <aside id="panel">
-    <div class="panel-head"><span class="title">Слои и объект</span>
+  <aside id="panel" data-panel-view="project">
+    <div class="panel-head"><span class="title">Инспектор</span>
       <button class="phbtn" data-pop="p-basemap" title="Подложка" aria-label="Настроить подложку" aria-controls="p-basemap" aria-expanded="false"><svg class="ic" style="width:17px;height:17px"><use href="#i-map"/></svg></button>
       <button class="phbtn" data-pop="p-grid" title="Сетка и привязки" aria-label="Настроить сетку и привязки" aria-controls="p-grid" aria-expanded="false"><svg class="ic" style="width:17px;height:17px"><use href="#i-grid"/></svg></button>
       <button class="phbtn" data-pop="p-src" title="Источники данных" aria-label="Показать источники данных" aria-controls="p-src" aria-expanded="false"><svg class="ic" style="width:17px;height:17px"><use href="#i-db"/></svg></button>
-      <button class="phbtn panel-close" id="btn-panel-close" title="Скрыть панель" aria-label="Скрыть панель слоёв"><svg class="ic" style="width:17px;height:17px"><use href="#ic-close"/></svg></button>
+      <button class="phbtn panel-close" id="btn-panel-close" title="Скрыть инспектор" aria-label="Скрыть инспектор"><svg class="ic" style="width:17px;height:17px"><use href="#ic-close"/></svg></button>
+    </div>
+    <div class="panel-tabs" role="tablist" aria-label="Раздел инспектора">
+      <button type="button" id="panel-tab-project" role="tab" aria-selected="true" aria-controls="panel-project-view" tabindex="0">Проект</button>
+      <button type="button" id="panel-tab-tep" role="tab" aria-selected="false" aria-controls="panel-tep-view" tabindex="-1">ТЭП <span class="panel-tab-live" aria-hidden="true"></span></button>
     </div>
     <div class="panel-scroll">
+      <div class="panel-view" id="panel-project-view" role="tabpanel" aria-labelledby="panel-tab-project">
       <div class="card" id="card-props">
         <div class="card-h"><button type="button" class="card-toggle" aria-expanded="true" aria-controls="props-card-body"><svg class="ic cc"><use href="#i-caret"/></svg>Свойства</button></div>
         <div class="card-b" id="props-card-body"><div id="props-body" class="muted"></div></div>
@@ -140,6 +146,8 @@
           <button class="addlayer" id="btn-new-layer" style="margin-top:6px"><svg class="ic" style="width:15px;height:15px"><use href="#i-plus"/></svg>Добавить слой</button>
         </div>
       </div>
+      </div>
+      <div class="panel-view" id="panel-tep-view" role="tabpanel" aria-labelledby="panel-tab-tep" hidden>
       <div class="card" id="tep-card">
         <div class="card-h"><button type="button" class="card-toggle" aria-expanded="true" aria-controls="tep-card-body"><svg class="ic cc"><use href="#i-caret"/></svg><svg class="ic" style="width:15px;height:15px"><use href="#i-chart"/></svg>ТЭП
           <span class="tep-status-badge" id="tep-status"></span><span class="tep-live">живой расчёт</span></button>
@@ -150,6 +158,7 @@
           <div id="tep-fact"></div>
           <div id="tep-body" class="muted">Начертите границу территории</div>
         </div>
+      </div>
       </div>
     </div>
   </aside>
@@ -296,16 +305,16 @@
 </svg>
 
 <!-- реальный движок (тот же порядок, что в index.html) -->
-<script src="./app-transform.js?v=9012"></script>
-<script src="./app-snap.js?v=9012"></script>
-<script src="./app-data.js?v=9012"></script>
-<script src="./app-style-ui.js?v=9012"></script>
-<script src="./app-attr.js?v=9012"></script>
-<script src="./app.js?v=9012"></script>
-<script src="./app-import.js?v=9012"></script>
-<script src="./collab.js?v=9012"></script>
-<script src="./redesign/cmdk.js?v=9012"></script>
-<script src="./redesign/a11y.js?v=9012"></script>
+<script src="./app-transform.js?v=9013"></script>
+<script src="./app-snap.js?v=9013"></script>
+<script src="./app-data.js?v=9013"></script>
+<script src="./app-style-ui.js?v=9013"></script>
+<script src="./app-attr.js?v=9013"></script>
+<script src="./app.js?v=9013"></script>
+<script src="./app-import.js?v=9013"></script>
+<script src="./collab.js?v=9013"></script>
+<script src="./redesign/cmdk.js?v=9013"></script>
+<script src="./redesign/a11y.js?v=9013"></script>
 <script>
   // счётчик слоёв в заголовке карточки — следит за #layers-body (app.js не трогаем)
   (function () {
@@ -346,7 +355,7 @@
     const setHidden = hidden => {
       document.body.classList.toggle('panel-hidden', hidden);
       toggle?.setAttribute('aria-expanded', String(!hidden));
-      if (toggle) toggle.setAttribute('aria-label', hidden ? 'Показать панель слоёв' : 'Скрыть панель слоёв');
+      if (toggle) toggle.setAttribute('aria-label', hidden ? 'Показать инспектор' : 'Скрыть инспектор');
       try { localStorage.setItem('grado_panel_hidden', hidden ? '1' : '0'); } catch (_) {}
     };
     let saved = false;
@@ -360,6 +369,65 @@
         toggle?.click();
       }
     });
+  })();
+  // Инспектор показывает один рабочий контекст за раз. Это сохраняет место
+  // для холста и не заставляет искать расчёты под длинным списком слоёв.
+  (function () {
+    const panel = document.getElementById('panel');
+    const projectTab = document.getElementById('panel-tab-project');
+    const tepTab = document.getElementById('panel-tab-tep');
+    const tabs = [projectTab, tepTab].filter(Boolean);
+    if (!panel || tabs.length !== 2) return;
+    const setView = view => {
+      const next = view === 'tep' ? 'tep' : 'project';
+      panel.dataset.panelView = next;
+      tabs.forEach(tab => {
+        const selected = tab.id === `panel-tab-${next}`;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      document.getElementById('panel-project-view').hidden = next !== 'project';
+      document.getElementById('panel-tep-view').hidden = next !== 'tep';
+      if (next === 'tep') {
+        const card = document.getElementById('tep-card');
+        card?.classList.remove('collapsed');
+        card?.querySelector('.card-toggle')?.setAttribute('aria-expanded', 'true');
+      }
+      try { localStorage.setItem('grado_panel_view', next); } catch (_) {}
+    };
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => setView(index ? 'tep' : 'project'));
+      tab.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const nextIndex = event.key === 'ArrowRight' ? (index + 1) % tabs.length : (index + tabs.length - 1) % tabs.length;
+        tabs[nextIndex].click();
+        tabs[nextIndex].focus();
+      });
+    });
+    let saved = 'project';
+    try { saved = localStorage.getItem('grado_panel_view') || 'project'; } catch (_) {}
+    setView(saved);
+  })();
+  // На невысоком экране оставляем в рейле основные команды, как в системной
+  // панели инструментов с overflow. Полный набор остаётся в одном клике.
+  (function () {
+    const toolbar = document.getElementById('toolbar');
+    const more = document.getElementById('btn-more-tools');
+    if (!toolbar || !more) return;
+    const setExpanded = expanded => {
+      toolbar.classList.toggle('expanded', expanded);
+      more.setAttribute('aria-expanded', String(expanded));
+      more.setAttribute('aria-label', expanded ? 'Скрыть дополнительные инструменты' : 'Показать дополнительные инструменты');
+      more.title = expanded ? 'Скрыть дополнительные инструменты' : 'Показать дополнительные инструменты';
+      const label = more.querySelector('span');
+      if (label) label.textContent = expanded ? 'Меньше' : 'Ещё';
+      try { localStorage.setItem('grado_toolbar_expanded', expanded ? '1' : '0'); } catch (_) {}
+    };
+    let saved = false;
+    try { saved = localStorage.getItem('grado_toolbar_expanded') === '1'; } catch (_) {}
+    setExpanded(saved);
+    more.addEventListener('click', () => setExpanded(!toolbar.classList.contains('expanded')));
   })();
   // меню шапки (Данные/Проект/Выпуск) — открытие под кнопкой + клик по реальным
   // скрытым кнопкам движка (app.js не меняется)

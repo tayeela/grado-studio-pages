@@ -7,7 +7,15 @@
    ============================================================================= */
 (function () {
   const $ = id => document.getElementById(id);
-  const click = id => { const e = $(id); if (e) e.click(); };
+  const click = id => {
+    const e = $(id);
+    if (!e) return;
+    if (e.disabled) {
+      if (typeof window.toast === "function") window.toast(e.title || "Команда сейчас недоступна", "warn");
+      return;
+    }
+    e.click();
+  };
   const has = fn => typeof window[fn] === "function";
   const call = (fn, ...a) => { if (has(fn)) try { window[fn](...a); } catch (e) { console.warn(fn, e); } };
   const tool = t => () => { if (has("setTool")) setTool(t); };
@@ -22,6 +30,10 @@
   };
   const styleActive = () => { if (has("openLayerStyle") && has("activeLayer")) { const L = activeLayer(); if (L) openLayerStyle(L); } };
   const fitAll = () => { if (has("fitView")) fitView(); else click("btn-zoom-fit"); if (has("draw")) draw(); };
+  const openPanelView = view => () => {
+    if (document.body.classList.contains("panel-hidden")) click("btn-panel-visibility");
+    click(view === "tep" ? "panel-tab-tep" : "panel-tab-project");
+  };
   const modKey = key => `${/Mac|iPhone|iPad|iPod/.test(navigator.platform || "") ? "⌘" : "Ctrl+"}${key}`;
 
   const COMMANDS = [
@@ -62,6 +74,9 @@
     ]},
     { sec: "Вид и проект", items: [
       { t: "Вписать всё в экран", k: "F", run: fitAll },
+      { t: "Открыть инспектор проекта", run: openPanelView("project") },
+      { t: "Открыть расчёты ТЭП", run: openPanelView("tep") },
+      { t: "Показать / скрыть инспектор", run: () => click("btn-panel-visibility") },
       { t: "Переключить тему (свет / тёмная)", run: () => click("btn-theme") },
       { t: "Параметры расчёта ТЭП…", run: () => click("btn-tep-editor") },
       { t: "Отменить", k: modKey("Z"), run: () => click("btn-undo") },

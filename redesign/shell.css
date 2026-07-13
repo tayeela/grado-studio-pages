@@ -98,6 +98,7 @@ header{
 .tool.active{background:var(--accent-weak);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-line)}
 .tool:disabled{opacity:.34;cursor:not-allowed;transform:none;background:transparent;color:var(--muted)}
 .tool .ic{width:19px;height:19px}
+.more-tools{display:none}
 
 /* ==== ХОЛСТ ==== */
 /* правило 4: canvas абсолютно внутри #stage(flex:1 1 0) — canvas.width НЕ в
@@ -167,7 +168,21 @@ body.panel-hidden #panel,body.panel-hidden #panel-resizer{display:none}
 .phbtn{width:30px;height:30px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted);transition:background .12s,color .12s}
 .phbtn:hover{background:var(--field-bg);color:var(--text)}
 .phbtn.on{color:var(--accent);background:var(--accent-weak)}
+.panel-tabs{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin:9px var(--sp-3) 0;padding:3px;
+  border:1px solid var(--field-border);border-radius:10px;background:var(--field-bg);flex:0 0 auto}
+.panel-tabs button{position:relative;height:30px;border-radius:7px;color:var(--muted);font-size:var(--fs-12);font-weight:560;
+  transition:background .14s var(--ease-out),color .14s var(--ease-out),box-shadow .14s var(--ease-out)}
+.panel-tabs button:hover{color:var(--text)}
+.panel-tabs button[aria-selected="true"]{color:var(--text);background:var(--panel);box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--hairline)}
+.panel-tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.panel-tab-live{display:inline-block;width:5px;height:5px;margin-left:5px;border-radius:50%;background:var(--success);vertical-align:2px}
 .panel-scroll{flex:1;overflow-y:auto;padding:var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-3)}
+.panel-view{display:flex;flex-direction:column;gap:var(--sp-3);min-height:0}
+.panel-view[hidden]{display:none}
+#panel-tep-view #tep-card{border:0;background:transparent;box-shadow:none;overflow:visible}
+#panel-tep-view #tep-card>.card-h{padding-inline:2px;background:transparent}
+#panel-tep-view #tep-card>.card-b{padding-inline:2px}
+#panel-tep-view #tep-card>.card-h .cc{display:none}
 
 .card{background:var(--panel);border:1px solid var(--hairline);border-radius:var(--r-md);box-shadow:var(--shadow-sm);overflow:hidden;flex:0 0 auto}
 .card-h{display:flex;align-items:center;gap:8px;padding:0 var(--sp-3);min-height:40px;font-size:var(--fs-12);font-weight:600;color:var(--text);user-select:none;transition:background .12s var(--ease-out)}
@@ -353,4 +368,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   .start-guide{width:min(410px,calc(100% - 24px));padding:20px}
   .start-guide-actions{flex-direction:column;align-items:stretch}
   .start-guide-actions .btn{width:100%}
+}
+@media (max-height:900px){
+  #toolbar:not(.expanded) .advanced-tool{display:none}
+  #toolbar .more-tools{display:flex}
+  #toolbar.expanded .more-tools{color:var(--accent);background:var(--accent-weak)}
 }
