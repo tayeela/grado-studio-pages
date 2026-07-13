@@ -22,9 +22,73 @@
   )].filter(visible);
 
   function labelIconButtons(root = document) {
-    root.querySelectorAll('button[title]:not([aria-label])').forEach(button => {
-      if (!(button.textContent || '').trim()) button.setAttribute('aria-label', button.title);
+    root.querySelectorAll('button:is([title],[data-tooltip]):not([aria-label])').forEach(button => {
+      const label = button.title || button.dataset.tooltip;
+      if (!(button.textContent || '').trim() && label) button.setAttribute('aria-label', label);
     });
+  }
+
+  // Нативные browser-tooltip различаются между Safari/Chrome, перекрывают
+  // интерфейс и не подчиняются дизайн-системе. Переносим title в единый слой,
+  // сохраняя доступное имя у иконок и поддержку клавиатурного фокуса.
+  const tooltip = document.createElement('div');
+  tooltip.id = 'ui-tooltip';
+  tooltip.className = 'ui-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.hidden = true;
+  document.body.appendChild(tooltip);
+  let tooltipTarget = null;
+  let tooltipTimer = 0;
+  let suppressFocusTooltipUntil = 0;
+
+  function prepareTooltips(root = document) {
+    const nodes = [];
+    if (root instanceof Element && root.hasAttribute('title')) nodes.push(root);
+    root.querySelectorAll?.('[title]').forEach(node => nodes.push(node));
+    nodes.forEach(node => {
+      const text = (node.getAttribute('title') || '').trim();
+      if (!text) return;
+      node.dataset.tooltip = text;
+      node.removeAttribute('title');
+      if (node.matches('button') && !node.hasAttribute('aria-label') && !(node.textContent || '').trim()) {
+        node.setAttribute('aria-label', text);
+      }
+    });
+  }
+
+  function hideTooltip() {
+    window.clearTimeout(tooltipTimer);
+    tooltipTimer = 0;
+    if (tooltipTarget) tooltipTarget.removeAttribute('aria-describedby');
+    tooltipTarget = null;
+    tooltip.hidden = true;
+  }
+
+  function positionTooltip(target) {
+    const anchor = target.getBoundingClientRect();
+    const box = tooltip.getBoundingClientRect();
+    const gap = 8;
+    const edge = 8;
+    let left = anchor.left + anchor.width / 2 - box.width / 2;
+    left = Math.max(edge, Math.min(left, window.innerWidth - box.width - edge));
+    let top = anchor.bottom + gap;
+    if (top + box.height > window.innerHeight - edge) top = anchor.top - box.height - gap;
+    top = Math.max(edge, Math.min(top, window.innerHeight - box.height - edge));
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+  }
+
+  function showTooltip(target, immediate = false) {
+    if (!target?.isConnected || !target.dataset.tooltip) return;
+    hideTooltip();
+    tooltipTarget = target;
+    tooltipTimer = window.setTimeout(() => {
+      if (!tooltipTarget?.isConnected) return hideTooltip();
+      tooltip.textContent = tooltipTarget.dataset.tooltip;
+      tooltip.hidden = false;
+      tooltipTarget.setAttribute('aria-describedby', tooltip.id);
+      positionTooltip(tooltipTarget);
+    }, immediate ? 120 : 420);
   }
 
   function prepareDialog(overlay) {
@@ -110,6 +174,32 @@
   }
 
   labelIconButtons();
+  prepareTooltips();
+  document.addEventListener('pointerover', event => {
+    const target = event.target.closest?.('[data-tooltip]');
+    if (target && target !== tooltipTarget) showTooltip(target);
+  });
+  document.addEventListener('pointerout', event => {
+    if (tooltipTarget && !tooltipTarget.contains(event.relatedTarget)) hideTooltip();
+  });
+  document.addEventListener('focusin', event => {
+    if (performance.now() < suppressFocusTooltipUntil) return;
+    const target = event.target.closest?.('[data-tooltip]');
+    if (target) showTooltip(target, true);
+  });
+  document.addEventListener('focusout', event => {
+    if (tooltipTarget && !tooltipTarget.contains(event.relatedTarget)) hideTooltip();
+  });
+  document.addEventListener('pointerdown', hideTooltip, true);
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    // Закрытие popover/modal возвращает фокус на кнопку-триггер. Не показываем
+    // поверх уже понятной кнопки вторую подсказку сразу после закрытия окна.
+    suppressFocusTooltipUntil = performance.now() + 360;
+    hideTooltip();
+  }, true);
+  window.addEventListener('scroll', hideTooltip, true);
+  window.addEventListener('resize', hideTooltip);
   document.addEventListener('click', event => {
     const trigger = event.target.closest?.('button, [role^="menuitem"], a[href]');
     if (trigger && visible(trigger)) lastTrigger = trigger;
@@ -119,7 +209,13 @@
 
   const observer = new MutationObserver(records => {
     for (const record of records) {
-      if (record.type === 'attributes') continue;
+      if (record.type === 'attributes') {
+        if (record.attributeName === 'title') {
+          labelIconButtons(record.target.parentElement || document);
+          prepareTooltips(record.target);
+        }
+        continue;
+      }
       record.addedNodes.forEach(node => {
         if (!(node instanceof Element)) return;
         if (node.matches('.modal-overlay')) prepareDialog(node);
@@ -127,12 +223,13 @@
         if (node.matches('.ctx-menu')) prepareContextMenu(node);
         node.querySelectorAll?.('.ctx-menu').forEach(prepareContextMenu);
         labelIconButtons(node);
+        prepareTooltips(node);
       });
       record.removedNodes.forEach(restoreRemovedFocus);
     }
     syncPopupState();
   });
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class', 'title'] });
   syncPopupState();
 
   document.querySelectorAll('[data-menu], [data-pop]').forEach(button => {

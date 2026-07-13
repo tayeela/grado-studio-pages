@@ -5730,23 +5730,31 @@ function initPanelResizer() {
     startW = panel.offsetWidth;
     resizer.setPointerCapture(e.pointerId);
     document.body.classList.add('panel-resizing');
+    const pointerId = e.pointerId;
     const move = ev => {
       const dx = ev.clientX - startX;
       // panel on the right: drag resizer right (dx>0) → narrower panel
       setWidth(startW - dx);
     };
-    const up = ev => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
       resizer.removeEventListener('pointermove', move);
-      resizer.removeEventListener('pointerup', up);
-      resizer.removeEventListener('pointercancel', up);
-      if (resizer.hasPointerCapture(ev.pointerId)) resizer.releasePointerCapture(ev.pointerId);
+      resizer.removeEventListener('pointerup', finish);
+      resizer.removeEventListener('pointercancel', finish);
+      resizer.removeEventListener('lostpointercapture', finish);
+      window.removeEventListener('blur', finish);
+      if (resizer.hasPointerCapture(pointerId)) resizer.releasePointerCapture(pointerId);
       document.body.classList.remove('panel-resizing');
       try { localStorage.setItem('grado_panel_width', parseInt(panel.style.flexBasis) || 312); } catch (e) {}
       resize();
     };
     resizer.addEventListener('pointermove', move);
-    resizer.addEventListener('pointerup', up);
-    resizer.addEventListener('pointercancel', up);
+    resizer.addEventListener('pointerup', finish);
+    resizer.addEventListener('pointercancel', finish);
+    resizer.addEventListener('lostpointercapture', finish);
+    window.addEventListener('blur', finish, { once: true });
   });
   resizer.addEventListener('keydown', e => {
     let width = parseInt(panel.style.flexBasis) || panel.offsetWidth;
