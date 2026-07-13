@@ -115,8 +115,12 @@
     const path = url.pathname;
     const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
 
-    if (path === "/version.json" || path.endsWith("/version.json"))
-      return nativeFetch(new URL("./version.json", window.location.href), options);
+    if (path === "/version.json" || path.endsWith("/version.json")) {
+      const versionUrl = new URL("./version.json", window.location.href);
+      const release = window.__GRADO_ASSET_VERSION__;
+      if (release) versionUrl.searchParams.set("v", release);
+      return nativeFetch(versionUrl, options);
+    }
     if (!path.startsWith("/api/")) return nativeFetch(input, options);
 
     if (path === "/api/hub") return json({ hub: false });
