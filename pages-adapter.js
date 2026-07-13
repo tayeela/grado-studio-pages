@@ -174,7 +174,8 @@
     if (path === "/api/open-grado") {
       try {
         const project = JSON.parse(await bodyText(input, options));
-        if (project.format !== "grado-web" || !Array.isArray(project.features))
+        if (project.format !== "grado-web" || !Array.isArray(project.features)
+            || !project.features.every(feature => feature && typeof feature === "object" && !Array.isArray(feature)))
           return json({ error: "Это не проект браузерной версии ГРАДО" }, 400);
         return json(project);
       } catch (error) {
@@ -215,11 +216,23 @@
     document.querySelectorAll("[data-click]").forEach(row => {
       if (blocked.has(row.dataset.click)) {
         row.classList.add("web-disabled");
-        row.title = "Требуется настольная версия";
+        row.setAttribute("aria-disabled", "true");
+        if (row.matches(".menu-row")) row.hidden = true;
       }
     });
+    const addMenuNote = (menuId, text) => {
+      const menu = document.getElementById(menuId);
+      if (!menu || menu.querySelector(".web-menu-note")) return;
+      const note = document.createElement("div");
+      note.className = "web-menu-note";
+      note.setAttribute("role", "note");
+      note.textContent = text;
+      menu.appendChild(note);
+    };
+    addMenuNote("menu-data", "Импорт НСПД, ГИС ОГД и данных по области доступен в настольной версии.");
+    addMenuNote("menu-out", "DXF и печать в масштабе доступны в настольной версии.");
     const style = document.createElement("style");
-    style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.web-disabled{opacity:.45}.pages-mode #st-bridge{display:none!important}`;
+    style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.web-disabled{opacity:.46;cursor:default}.web-disabled:hover,.web-disabled:focus{background:transparent;color:var(--text)}.web-menu-note{max-width:250px;margin:6px 4px 2px;padding:8px 9px;border-radius:8px;background:var(--field-bg);color:var(--text-2);font-size:11px;line-height:1.35}.pages-mode #st-bridge{display:none!important}`;
     document.head.appendChild(style);
   });
 })();

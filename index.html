@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ГРАДО Студия</title>
-<link rel="stylesheet" href="./tokens.css?v=9016">
-<script>window.__GRADO_ASSET_VERSION__="9016";</script>
-<script src="./pages-adapter.js?v=9016"></script>
-<script src="./canvas-theme.js?v=9016"></script>
-<link rel="stylesheet" href="./redesign/shell.css?v=9016">
-<link rel="stylesheet" href="./redesign/studio2.css?v=9016">
+<link rel="stylesheet" href="./tokens.css?v=9017">
+<script>window.__GRADO_ASSET_VERSION__="9017";</script>
+<script src="./pages-adapter.js?v=9017"></script>
+<script src="./canvas-theme.js?v=9017"></script>
+<link rel="stylesheet" href="./redesign/shell.css?v=9017">
+<link rel="stylesheet" href="./redesign/studio2.css?v=9017">
 <style>
   /* служебные слоты движка (скрытые контейнеры/поля, которые app.js биндит) и
      группы-заголовки в шапке. Новый интерфейс (редизайн Фаза 0-3). */
@@ -22,7 +22,7 @@
 </style>
 </head>
 <body>
-<div id="errbar" hidden></div>
+<div id="errbar" role="alert" aria-live="assertive" hidden></div>
 
 <!-- ШАПКА (новый стиль, реальные кнопки движка) -->
 <header>
@@ -305,16 +305,16 @@
 </svg>
 
 <!-- реальный движок (тот же порядок, что в index.html) -->
-<script src="./app-transform.js?v=9016"></script>
-<script src="./app-snap.js?v=9016"></script>
-<script src="./app-data.js?v=9016"></script>
-<script src="./app-style-ui.js?v=9016"></script>
-<script src="./app-attr.js?v=9016"></script>
-<script src="./app.js?v=9016"></script>
-<script src="./app-import.js?v=9016"></script>
-<script src="./collab.js?v=9016"></script>
-<script src="./redesign/cmdk.js?v=9016"></script>
-<script src="./redesign/a11y.js?v=9016"></script>
+<script src="./app-transform.js?v=9017"></script>
+<script src="./app-snap.js?v=9017"></script>
+<script src="./app-data.js?v=9017"></script>
+<script src="./app-style-ui.js?v=9017"></script>
+<script src="./app-attr.js?v=9017"></script>
+<script src="./app.js?v=9017"></script>
+<script src="./app-import.js?v=9017"></script>
+<script src="./collab.js?v=9017"></script>
+<script src="./redesign/cmdk.js?v=9017"></script>
+<script src="./redesign/a11y.js?v=9017"></script>
 <script>
   // счётчик слоёв в заголовке карточки — следит за #layers-body (app.js не трогаем)
   (function () {
@@ -454,7 +454,7 @@
         row.classList.toggle('on', row.dataset.setexport === sel.value));
       m.hidden = false;
       btn.setAttribute('aria-expanded', 'true');
-      setTimeout(() => m.querySelector('[role^="menuitem"]')?.focus(), 0);
+      setTimeout(() => m.querySelector('[role^="menuitem"]:not([aria-disabled="true"])')?.focus(), 0);
     }));
     document.querySelectorAll('.menu [data-click]').forEach(row => row.addEventListener('click', () => {
       closeAll();

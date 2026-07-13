@@ -10,14 +10,32 @@ fetch("/version.json").then(r => r.ok ? r.json() : null).then(info => {
   if (logo) logo.title = `ГРАДО Студия · v${VERSION}`;
 }).catch(() => {});
 
-// любая ошибка интерфейса — на экран, а не молча в консоль
-window.addEventListener("error", e => {
-  if (/ResizeObserver loop/.test(e.message || "")) return; // безобидное предупреждение браузера
+// Ошибка не должна превращаться в техническую красную полосу от края до края.
+// Показываем человеку короткий план восстановления, а технические детали
+// оставляем только в console для диагностики и отчёта об ошибке.
+function reportUiError(error, context = "Ошибка интерфейса") {
+  console.error(context, error);
   const el = document.getElementById("errbar");
-  if (el) {
-    el.textContent = `Ошибка интерфейса (${VERSION}): ${e.message} — ${String(e.filename).split("/").pop()}:${e.lineno}`;
-    el.style.display = "block";
-  }
+  if (!el) return;
+  const message = document.createElement("span");
+  message.textContent = `${context}. Повторите действие; если ошибка повторится — сохраните проект и перезагрузите страницу.`;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "errbar-close";
+  close.setAttribute("aria-label", "Закрыть сообщение об ошибке");
+  close.textContent = "×";
+  close.onclick = () => { el.hidden = true; el.style.display = "none"; };
+  el.replaceChildren(message, close);
+  el.dataset.errorVersion = VERSION;
+  el.hidden = false;
+  el.style.display = "flex";
+}
+window.addEventListener("error", event => {
+  if (/ResizeObserver loop/.test(event.message || "")) return;
+  reportUiError(event.error || event.message);
+});
+window.addEventListener("unhandledrejection", event => {
+  reportUiError(event.reason, "Не удалось завершить действие");
 });
 
 function on(id, event, fn) {
@@ -162,7 +180,10 @@ const LAYERS_V2 = [
     semantic_class: null, geometry_type: "polyline", style_id: "dimension.line",
     annotation: true, tool: "dim", defaults: () => ({}) },
 ];
-const LAYER_BY_ID = {}, LAYER_BY_KIND = {};
+// Индексы могут получать ключи из импортированного проекта. Null-prototype
+// исключает служебные ключи вроде __proto__/constructor и делает lookup
+// обычной проверкой идентификатора, а не доступом к прототипу Object.
+const LAYER_BY_ID = Object.create(null), LAYER_BY_KIND = Object.create(null);
 function rebuildLayerIndexes() {
   for (const id of Object.keys(LAYER_BY_ID)) delete LAYER_BY_ID[id];
   for (const kind of Object.keys(LAYER_BY_KIND)) delete LAYER_BY_KIND[kind];
@@ -215,10 +236,12 @@ const BASE_KINDS = [
   { kind: "social", semantic_class: "social.object", geometry_type: "point",
     style_id: "social.point", label: "Точечный объект" },
 ];
-const BASE_KIND_BY_KIND = Object.fromEntries(BASE_KINDS.map(b => [b.kind, b]));
+const BASE_KIND_BY_KIND = Object.assign(Object.create(null),
+  Object.fromEntries(BASE_KINDS.map(b => [b.kind, b])));
 // semantic_class → kind, для восстановления пользовательских слоёв с диска
 // (манифест для бэкенда несёт code, не kind — см. userLayersManifest)
-const KIND_BY_SEMANTIC_CLASS = Object.fromEntries(BASE_KINDS.map(b => [b.semantic_class, b.kind]));
+const KIND_BY_SEMANTIC_CLASS = Object.assign(Object.create(null),
+  Object.fromEntries(BASE_KINDS.map(b => [b.semantic_class, b.kind])));
 
 // prop-дефолты нового объекта — та же логика, что у встроенных слоёв,
 // но переиспользуемая (нужна и при создании слоя, и при восстановлении
@@ -276,7 +299,8 @@ function createUserLayer({ kind, title, styleId, id = null }) {
 // code = generic.<geom> (есть в классификаторе, экспортируется как чистая
 // геометрия), в ТЭП не идёт; свои поля добавляются в атрибутивной таблице.
 const GENERIC_CODE = { point: "generic.point", polyline: "generic.line", polygon: "generic.polygon", arc: "generic.arc", circle: "generic.circle" };
-const CODE_TO_GEOM = Object.fromEntries(Object.entries(GENERIC_CODE).map(([g, c]) => [c, g]));
+const CODE_TO_GEOM = Object.assign(Object.create(null),
+  Object.fromEntries(Object.entries(GENERIC_CODE).map(([g, c]) => [c, g])));
 const GENERIC_STYLE = { point: "social.point", polyline: "boundary.line", polygon: "func_zone.fill", arc: "red.line.projected", circle: "red.line.projected" };
 function createGenericLayer({ title, geometry_type, styleId, id = null }) {
   const layerId = id || uniqueLayerId(title);
@@ -4170,11 +4194,14 @@ async function openAutosaveRecovery() {
           const savedState = saved && saved.state && typeof saved.state === "object"
             ? saved.state : saved;
           resetProjectState(savedState && savedState.name || "Восстановленный проект");
-          applyRestoredState(saved);
+          if (!applyRestoredState(saved)) throw new Error("invalid autosave state");
+          const skipped = lastRestoreSkipped;
           syncProjectControls();
           close();
           afterChange(); fitView();
-          toast(`Восстановлена копия «${item.name}»`);
+          toast(skipped
+            ? `Восстановлена копия «${item.name}»; ${ruCount(skipped, "повреждённый объект пропущен", "повреждённых объекта пропущено", "повреждённых объектов пропущено")}`
+            : `Восстановлена копия «${item.name}»`, skipped ? "warn" : "ok");
         } catch (error) {
           button.disabled = false;
           toast("Не удалось восстановить копию", "error");
@@ -5454,12 +5481,16 @@ function loadProjectData(data) {
     redo: Array.isArray(data.redo_stack) ? data.redo_stack : [],
   };
   resetProjectState(restored.name);
-  applyRestoredState(restored);
+  if (!applyRestoredState(restored)) throw new Error("invalid project state");
+  const skipped = lastRestoreSkipped;
   syncProjectControls();
   setTool("select", { keepLayer: true });
   afterChange();
   fitView();
-  toast(`Открыт проект: ${data.features.length} объектов`);
+  toast(skipped
+    ? `Открыт проект: ${ruCount(state.features.length, "объект", "объекта", "объектов")}; ${ruCount(skipped, "повреждённый объект пропущен", "повреждённых объекта пропущено", "повреждённых объектов пропущено")}`
+    : `Открыт проект: ${ruCount(state.features.length, "объект", "объекта", "объектов")}`,
+    skipped ? "warn" : "ok");
 }
 
 // мост браузерного расширения: опрос входящих выгрузок
@@ -5517,11 +5548,165 @@ on("btn-demo", "click", () => {
 });
 
 // ---------- старт ----------
+const RESTORED_GEOMETRY_TYPES = new Set(["point", "polyline", "polygon", "arc", "circle"]);
+let lastRestoreSkipped = 0;
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function isSafeProjectKey(value, pattern) {
+  return typeof value === "string" && pattern.test(value)
+    && !["__proto__", "prototype", "constructor"].includes(value);
+}
+function isSafeDictionaryKey(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 128
+    && !["__proto__", "prototype", "constructor"].includes(value);
+}
+function isFinitePoint(point) {
+  return Array.isArray(point) && point.length >= 2
+    && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1]));
+}
+function numberInRange(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : fallback;
+}
+function hasValidGeometry(feature) {
+  if (isFinitePoint(feature.point)) return true;
+  if (Array.isArray(feature.line) && feature.line.length >= 2 && feature.line.every(isFinitePoint)) return true;
+  if (Array.isArray(feature.ring) && feature.ring.length >= 3 && feature.ring.every(isFinitePoint)) return true;
+  const circle = feature.circle;
+  if (isRecord(circle) && ["cx", "cy", "r"].every(name => Number.isFinite(Number(circle[name])))
+      && Number(circle.r) > 0) return true;
+  const arc = feature.arc;
+  if (isRecord(arc) && ["cx", "cy", "r", "a0", "sweep"].every(name => Number.isFinite(Number(arc[name])))
+      && Number(arc.r) > 0) return true;
+  return false;
+}
+function normalizeFeatureList(value) {
+  if (!Array.isArray(value)) return [];
+  const features = value.filter(feature => isRecord(feature) && hasValidGeometry(feature))
+    .map(feature => {
+      const clean = { ...feature, props: isRecord(feature.props) ? feature.props : {} };
+      if (!isSafeDictionaryKey(clean.style_id)) delete clean.style_id;
+      if (!isSafeProjectKey(clean.layer_id, /^[a-z0-9][a-z0-9._-]{0,127}$/i)) delete clean.layer_id;
+      if (!isRecord(clean.fmt)) delete clean.fmt;
+      return clean;
+    });
+  const usedIds = new Set();
+  let nextId = 1;
+  for (const feature of features) {
+    const id = Number(feature.id);
+    if (Number.isSafeInteger(id) && id > 0 && !usedIds.has(id)) {
+      feature.id = id;
+      usedIds.add(id);
+      continue;
+    }
+    while (usedIds.has(nextId)) nextId += 1;
+    feature.id = nextId;
+    usedIds.add(nextId);
+  }
+  return features;
+}
+function safeHistoryStack(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(snapshot => {
+    if (typeof snapshot !== "string") return [];
+    try {
+      const features = JSON.parse(snapshot);
+      if (!Array.isArray(features)) return [];
+      return [JSON.stringify(normalizeFeatureList(features))];
+    } catch (error) { return []; }
+  });
+}
+function normalizeRestoredState(payload) {
+  let restored = payload;
+  if (isRecord(restored) && isRecord(restored.state)) restored = restored.state;
+  if (!isRecord(restored) || !Array.isArray(restored.features)) return null;
+
+  const features = normalizeFeatureList(restored.features);
+  const userLayers = Array.isArray(restored.userLayers) ? restored.userLayers.filter(spec =>
+    isRecord(spec) && isSafeProjectKey(spec.layer_id, /^[a-z0-9][a-z0-9._-]{0,127}$/i)
+      && typeof spec.title === "string"
+      && typeof (spec.studio_code || spec.code) === "string").map(spec => {
+        const clean = { ...spec };
+        if (!isSafeDictionaryKey(clean.style_id)) delete clean.style_id;
+        if (Array.isArray(clean.fields)) clean.fields = clean.fields.filter(isRecord);
+        return clean;
+      }) : [];
+  const projectCustomKinds = Array.isArray(restored.projectCustomKinds)
+    ? restored.projectCustomKinds.filter(spec => isRecord(spec)
+      && isSafeProjectKey(spec.kind, /^[a-z][a-z0-9_]{0,63}$/)
+      && typeof spec.semantic_class === "string" && spec.semantic_class.startsWith("custom.")
+      && RESTORED_GEOMETRY_TYPES.has(spec.geometry_type)
+      && isSafeDictionaryKey(spec.style_id) && typeof spec.label === "string")
+    : [];
+  const projectStyles = Object.create(null);
+  if (isRecord(restored.projectStyles)) {
+    for (const [id, style] of Object.entries(restored.projectStyles))
+      if (isSafeDictionaryKey(id) && isRecord(style)) projectStyles[id] = style;
+  }
+  const variants = Array.isArray(restored.variants) ? restored.variants.flatMap((variant, index) => {
+    if (!isRecord(variant) || !Array.isArray(variant.features)) return [];
+    const variantFeatures = normalizeFeatureList(variant.features);
+    return [{ ...variant,
+      id: isSafeDictionaryKey(variant.id) ? variant.id : `restored-${index + 1}`,
+      name: typeof variant.name === "string" ? variant.name : `Вариант ${index + 1}`,
+      features: variantFeatures,
+      params: isRecord(variant.params) ? variant.params : {},
+      tepSummary: isRecord(variant.tepSummary) ? variant.tepSummary : null,
+    }];
+  }) : [];
+  const albumSheetIds = new Set(["title", "location", "base", "apo", "tep", "ortho", "photo", "parking", "greenery"]);
+  const rawAlbum = isRecord(restored.albumConfig) ? restored.albumConfig : {};
+  const albumSheets = Array.isArray(rawAlbum.sheets)
+    ? [...new Set(rawAlbum.sheets.filter(sheet => albumSheetIds.has(sheet)))] : [];
+  const albumConfig = {
+    sheets: albumSheets.length ? albumSheets : [...DEFAULT_ALBUM_CONFIG.sheets],
+    title: {
+      org: typeof rawAlbum.title?.org === "string" ? rawAlbum.title.org : DEFAULT_ALBUM_CONFIG.title.org,
+      city_year: typeof rawAlbum.title?.city_year === "string"
+        ? rawAlbum.title.city_year : DEFAULT_ALBUM_CONFIG.title.city_year,
+    },
+  };
+  const radius = Number(restored.accessRadii?.r);
+  const accessRadii = {
+    on: !!restored.accessRadii?.on,
+    r: Number.isFinite(radius) && radius >= 1 && radius <= 100000 ? radius : 300,
+  };
+  const skipped = restored.features.length - features.length;
+  if (skipped) console.warn(`Пропущено повреждённых объектов: ${skipped}`);
+  return {
+    ...restored,
+    features,
+    userLayers,
+    projectCustomKinds,
+    projectStyles,
+    variants,
+    albumConfig,
+    accessRadii,
+    name: typeof restored.name === "string" ? restored.name.slice(0, 240) : "Проект",
+    density: numberInRange(restored.density, 0, 1000, 25),
+    ratio: numberInRange(restored.ratio, 0, 100, 80),
+    educationZone: [1, 2].includes(Number(restored.educationZone)) ? Number(restored.educationZone) : 1,
+    territoryMode: [1, 2].includes(Number(restored.territoryMode)) ? Number(restored.territoryMode) : 1,
+    krail: numberInRange(restored.krail, 0, 10, 1),
+    kba: numberInRange(restored.kba, 0, 10, 0.5),
+    basemapSource: ["osm", "sat", "s2"].includes(restored.basemapSource)
+      ? restored.basemapSource : "osm",
+    undo: safeHistoryStack(restored.undo),
+    redo: safeHistoryStack(restored.redo),
+    _skippedFeatures: skipped,
+    nextId: Number.isSafeInteger(Number(restored.nextId)) && Number(restored.nextId) > 0
+      ? Number(restored.nextId) : 1,
+  };
+}
+
 function applyRestoredState(d) {
   // Автосейв v1 хранится в проверяемой оболочке; старые снимки остаются
   // сырым состоянием и по-прежнему открываются без миграции на диске.
-  if (d && d.state && typeof d.state === "object") d = d.state;
-  if (!d || typeof d !== "object") return;
+  d = normalizeRestoredState(d);
+  lastRestoreSkipped = 0;
+  if (!d) return false;
+  lastRestoreSkipped = d._skippedFeatures || 0;
   // Свои типы нужны ДО восстановления слоёв: иначе слой пользовательского
   // типа неизвестен индексам и молча пропускается при открытии .grado.
   if (Array.isArray(d.projectCustomKinds)) {
@@ -5534,7 +5719,7 @@ function applyRestoredState(d) {
     for (const spec of d.userLayers) {
       if (LAYER_BY_ID[spec.layer_id]) {
         if (Array.isArray(spec.fields) && spec.fields.length)
-          LAYER_BY_ID[spec.layer_id].fields = spec.fields;
+          LAYER_BY_ID[spec.layer_id].fields = spec.fields.filter(isRecord);
         continue;  // уже есть (встроенный или повторный restore)
       }
       let created = null;
@@ -5549,7 +5734,7 @@ function applyRestoredState(d) {
         created = createUserLayer({ kind, title: spec.title,
           styleId: spec.style_id, id: spec.layer_id });
       }
-      if (created && Array.isArray(spec.fields)) created.fields = spec.fields;
+      if (created && Array.isArray(spec.fields)) created.fields = spec.fields.filter(isRecord);
     }
   }
   state.features = (d.features || []).map(upgradeFeature);  // legacy kind → слой v2
@@ -5575,7 +5760,7 @@ function applyRestoredState(d) {
   syncNextId();
   if (d.layerTitles) {
     for (const [id, title] of Object.entries(d.layerTitles))
-      if (LAYER_BY_ID[id]) LAYER_BY_ID[id].title = title;
+      if (LAYER_BY_ID[id] && typeof title === "string") LAYER_BY_ID[id].title = title;
   }
   if (d.layersVisible) {
     for (const [id, vis] of Object.entries(d.layersVisible))
@@ -5593,7 +5778,7 @@ function applyRestoredState(d) {
   }
   if (d.layerFmt) {
     for (const [id, fmt] of Object.entries(d.layerFmt))
-      if (LAYER_BY_ID[id]) LAYER_BY_ID[id].fmt = fmt;
+      if (LAYER_BY_ID[id] && isRecord(fmt)) LAYER_BY_ID[id].fmt = fmt;
   }
   if (d.layerLocked) {
     for (const [id, locked] of Object.entries(d.layerLocked))
@@ -5601,11 +5786,12 @@ function applyRestoredState(d) {
   }
   if (d.layerRules) {
     for (const [id, rules] of Object.entries(d.layerRules))
-      if (LAYER_BY_ID[id] && Array.isArray(rules) && rules.length) LAYER_BY_ID[id].rules = rules;
+      if (LAYER_BY_ID[id] && Array.isArray(rules) && rules.length)
+        LAYER_BY_ID[id].rules = rules.filter(isRecord);
   }
   if (d.layerFields) {
     for (const [id, flds] of Object.entries(d.layerFields))
-      if (LAYER_BY_ID[id]) LAYER_BY_ID[id].fields = flds;
+      if (LAYER_BY_ID[id] && Array.isArray(flds)) LAYER_BY_ID[id].fields = flds.filter(isRecord);
   }
   if (d.activeLayerId && LAYER_BY_ID[d.activeLayerId])
     state.activeLayerId = d.activeLayerId;
@@ -5614,7 +5800,7 @@ function applyRestoredState(d) {
     const fb = LAYERS_V2.find(l => !l.annotation && !l.import_only);
     state.activeLayerId = fb ? fb.id : null;
   }
-  if (Array.isArray(d.sources)) state.sources = d.sources;
+  if (Array.isArray(d.sources)) state.sources = d.sources.filter(isRecord);
   if (d.basemapSource && d.basemapSource !== basemap.source) {
     setBasemapSource(d.basemapSource);
     const sel = document.getElementById("basemap-source");
@@ -5624,21 +5810,22 @@ function applyRestoredState(d) {
     const sel = document.getElementById("export-style");
     if (sel) sel.value = d.exportStyle === "canvas" ? "canvas" : "standard";
   }
-  if (d.projectStyles && typeof d.projectStyles === "object") {
+  if (isRecord(d.projectStyles)) {
     state.projectStyles = d.projectStyles;
   }
-  if (Array.isArray(d.variants)) state.variants = d.variants;
-  if (d.accessRadii && typeof d.accessRadii === "object") state.accessRadii = d.accessRadii;
-  if (d.albumConfig && typeof d.albumConfig === 'object') {
+  if (Array.isArray(d.variants)) state.variants = d.variants.filter(isRecord);
+  if (isRecord(d.accessRadii)) state.accessRadii = d.accessRadii;
+  if (isRecord(d.albumConfig)) {
     state.albumConfig = d.albumConfig;
   }
-  if (d.name) document.getElementById("project-name").value = d.name;
-  if (d.density) document.getElementById("p-density").value = d.density;
-  if (d.ratio) document.getElementById("p-ratio").value = d.ratio;
-  if (d.educationZone) document.getElementById("p-education-zone").value = d.educationZone;
-  if (d.territoryMode) document.getElementById("p-territory-mode").value = d.territoryMode;
-  if (d.krail) document.getElementById("p-krail").value = d.krail;
-  if (d.kba) document.getElementById("p-kba").value = d.kba;
+  document.getElementById("project-name").value = d.name;
+  document.getElementById("p-density").value = d.density;
+  document.getElementById("p-ratio").value = d.ratio;
+  document.getElementById("p-education-zone").value = d.educationZone;
+  document.getElementById("p-territory-mode").value = d.territoryMode;
+  document.getElementById("p-krail").value = d.krail;
+  document.getElementById("p-kba").value = d.kba;
+  return true;
 }
 // применить состояние, пришедшее извне (веб-синхронизация): пересобрать
 // сцену/панели, сохранив вид. В отличие от restore() — без fitView (у
@@ -5655,16 +5842,21 @@ window.afterExternalApply = function () {
   if (document.body.classList.contains("hub-mode")) return;
   try {
     const raw = localStorage.getItem("grado_studio_v1");
-    if (raw) { applyRestoredState(JSON.parse(raw)); return; }
+    if (raw && applyRestoredState(JSON.parse(raw))) {
+      if (lastRestoreSkipped) queueMicrotask(() => toast(
+        `${ruCount(lastRestoreSkipped, "Повреждённый объект пропущен", "Повреждённых объекта пропущено", "Повреждённых объектов пропущено")} при восстановлении`, "warn"));
+      return;
+    }
   } catch (e) { /* повреждённое сохранение игнорируем, пробуем файловый автосейв ниже */ }
   // localStorage пуст (новый браузер/профиль, приватный режим, чистка данных
   // сайта) — пробуем резервную копию на диске сервера
   fetch("/api/autosave").then(r => r.ok ? r.json() : null).then(d => {
     const saved = d && d.state && typeof d.state === "object" ? d.state : d;
-    if (!saved || !saved.features) return;
-    applyRestoredState(d);
+    if (!saved || !Array.isArray(saved.features) || !applyRestoredState(d)) return;
     draw(); renderProps(); renderLayers(); renderSources(); refreshTep(); fitView();
-    toast("Восстановлено из файлового автосохранения");
+    toast(lastRestoreSkipped
+      ? `Восстановлено из автосохранения; ${ruCount(lastRestoreSkipped, "повреждённый объект пропущен", "повреждённых объекта пропущено", "повреждённых объектов пропущено")}`
+      : "Восстановлено из файлового автосохранения", lastRestoreSkipped ? "warn" : "ok");
   }).catch(() => {});
 })();
 

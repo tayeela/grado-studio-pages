@@ -171,8 +171,13 @@
       item.setAttribute('aria-checked', String(item.classList.contains('on'))));
   }
 
+  function enabledMenuItems(menu) {
+    return [...menu.querySelectorAll('[role^="menuitem"]')]
+      .filter(item => visible(item) && item.getAttribute('aria-disabled') !== 'true');
+  }
+
   function moveMenuFocus(menu, direction) {
-    const items = [...menu.querySelectorAll('[role^="menuitem"]')].filter(visible);
+    const items = enabledMenuItems(menu);
     if (!items.length) return;
     const current = items.indexOf(document.activeElement);
     const next = current < 0 ? 0 : (current + direction + items.length) % items.length;
@@ -244,7 +249,8 @@
       const id = button.dataset.menu || button.dataset.pop;
       const popup = document.getElementById(id);
       if (!visible(popup)) return;
-      const target = popup.querySelector('[role^="menuitem"], input, select, button');
+      const target = enabledMenuItems(popup)[0]
+        || popup.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])');
       target?.focus();
     }));
   });
@@ -274,12 +280,15 @@
     if (menu && visible(menu)) {
       if (event.key === 'ArrowDown') { event.preventDefault(); moveMenuFocus(menu, 1); }
       else if (event.key === 'ArrowUp') { event.preventDefault(); moveMenuFocus(menu, -1); }
-      else if (event.key === 'Home') { event.preventDefault(); menu.querySelector('[role^="menuitem"]')?.focus(); }
+      else if (event.key === 'Home') { event.preventDefault(); enabledMenuItems(menu)[0]?.focus(); }
       else if (event.key === 'End') {
         event.preventDefault();
-        [...menu.querySelectorAll('[role^="menuitem"]')].filter(visible).at(-1)?.focus();
+        enabledMenuItems(menu).at(-1)?.focus();
       }
-      else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); document.activeElement.click(); }
+      else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (document.activeElement.getAttribute?.('aria-disabled') !== 'true') document.activeElement.click();
+      }
       else if (event.key === 'Escape') {
         event.preventDefault();
         const trigger = document.querySelector(`[aria-controls="${menu.id}"]`);

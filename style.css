@@ -632,9 +632,20 @@ footer span { flex-shrink: 0; }
   background: var(--danger-weak); margin-top: var(--sp-1); }
 #props-body button.danger:hover { background: var(--danger); color: var(--on-accent); }
 
-/* ---- баннер ошибки -------------------------------------------------------- */
-#errbar { background: var(--danger); color: #fff; padding: var(--sp-1) var(--sp-3);
-  font-size: var(--fs-12); z-index: var(--z-overlay); }
+/* ---- сообщение об ошибке: компактная плавающая карточка, не полоса -------- */
+#errbar { position: fixed; top: calc(var(--header-h, 56px) + 12px); left: 50%;
+  transform: translateX(-50%); display: none; align-items: center; gap: var(--sp-3);
+  width: max-content; max-width: min(620px, calc(100vw - 24px));
+  padding: 10px 10px 10px 14px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--hairline));
+  border-radius: var(--r-md); background: var(--panel); color: var(--text);
+  box-shadow: var(--shadow-lg); font-size: var(--fs-12); line-height: 1.4;
+  z-index: calc(var(--z-overlay) + 8); }
+#errbar::before { content: ""; width: 8px; height: 8px; flex: 0 0 auto;
+  border-radius: 50%; background: var(--danger); }
+#errbar .errbar-close { width: 28px; height: 28px; min-width: 28px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--text-2);
+  font-size: 20px; line-height: 1; }
+#errbar .errbar-close:hover { background: var(--field-bg); color: var(--text); }
 
 /* ---- скроллбары ----------------------------------------------------------- */
 #panel::-webkit-scrollbar, .attr-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
