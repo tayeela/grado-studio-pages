@@ -6,6 +6,8 @@
   window.GRADO_STATIC = true;
   const nativeFetch = window.fetch.bind(window);
   const AUTOSAVE_KEY = "grado_pages_autosave_v1";
+  const AUTOSAVE_BACKUP_KEY = "grado_pages_autosave_checkpoint_v1";
+  const LEGACY_AUTOSAVE_KEY = "grado_studio_v1";
   const OVERRIDES_KEY = "grado_pages_style_overrides_v1";
 
   const json = (value, status = 200) => new Response(JSON.stringify(value), {
@@ -26,6 +28,33 @@
     if (!text) return {};
     try { return JSON.parse(text); }
     catch (error) { return null; }
+  };
+  const requestHeader = (input, options, name) => {
+    const headers = (options && options.headers) ||
+      (input instanceof Request ? input.headers : null);
+    if (!headers) return null;
+    if (typeof headers.get === "function") return headers.get(name);
+    if (Array.isArray(headers)) {
+      const item = headers.find(([key]) => String(key).toLowerCase() === name.toLowerCase());
+      return item ? item[1] : null;
+    }
+    const key = Object.keys(headers).find(item => item.toLowerCase() === name.toLowerCase());
+    return key ? headers[key] : null;
+  };
+  const readStoredJson = key => {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  };
+  const backupMeta = payload => {
+    const state = isRecord(payload && payload.state) ? payload.state : payload;
+    if (!isRecord(state) || !Array.isArray(state.features)) return null;
+    return {
+      id: 1,
+      saved_at: payload && payload.saved_at || null,
+      name: typeof state.name === "string" && state.name.trim() ? state.name : "Без названия",
+      feature_count: state.features.length,
+      size: JSON.stringify(payload).length,
+    };
   };
   const isRecord = value => !!value && typeof value === "object" && !Array.isArray(value);
   const projectBodyError = payload => {
@@ -82,7 +111,23 @@
       },
     });
     if (path === "/api/initial-grado") return json(null);
-    if (path === "/api/autosave/backups") return json({ backups: [] });
+    if (path === "/api/autosave/backups") {
+      try {
+        const backup = readStoredJson(AUTOSAVE_BACKUP_KEY);
+        const meta = backupMeta(backup);
+        return json({ backups: meta ? [meta] : [] });
+      } catch (error) {
+        return json({ backups: [] });
+      }
+    }
+    if (path === "/api/autosave/backups/1") {
+      try {
+        const backup = readStoredJson(AUTOSAVE_BACKUP_KEY);
+        return backupMeta(backup) ? json(backup) : json({ error: "Копия не найдена" }, 404);
+      } catch (error) {
+        return json({ error: "Копия повреждена" }, 500);
+      }
+    }
     if (path.startsWith("/api/autosave/backups/")) return json(null, 404);
     if (path === "/api/autosave") {
       if (method === "POST") {
@@ -90,15 +135,27 @@
         if (!isRecord(state) || !Array.isArray(state.features))
           return json({ error: "Некорректное состояние автосохранения" }, 400);
         const savedAt = new Date().toISOString();
+        const envelope = { state, saved_at: savedAt };
         try {
-          localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ state, saved_at: savedAt }));
+          // Контрольная копия создаётся только перед заменой проекта. Обычный
+          // автосейв хранит одну версию и не расходует квоту браузера вдвое.
+          if (requestHeader(input, options, "X-Grado-Checkpoint") === "1")
+            localStorage.setItem(AUTOSAVE_BACKUP_KEY, JSON.stringify(envelope));
+          localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(envelope));
+          if (typeof localStorage.removeItem === "function")
+            localStorage.removeItem(LEGACY_AUTOSAVE_KEY);
         } catch (error) {
           return json({ error: "Недостаточно места для автосохранения" }, 507);
         }
         return json({ ok: true, saved_at: savedAt });
       }
-      try { return json(JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || "null")); }
-      catch (error) { return json(null); }
+      try {
+        const current = readStoredJson(AUTOSAVE_KEY);
+        if (current) return json(current);
+        // Однократная миграция проектов, созданных до единого хранилища.
+        const legacy = readStoredJson(LEGACY_AUTOSAVE_KEY);
+        return legacy ? json({ state: legacy, saved_at: null }) : json(null);
+      } catch (error) { return json(null); }
     }
     if (path === "/api/style-overrides") {
       if (method === "POST") {

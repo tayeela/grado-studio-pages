@@ -243,7 +243,7 @@
       <div class="collab-err" id="au-err"></div>
       ${isReg ? `<label>Инвайт-код<input id="au-invite" autocomplete="off" placeholder="код от администратора"></label>` : ""}
       <label>Логин<input id="au-login" autocomplete="username" placeholder="латиница, 3-32 символа"></label>
-      <label>Пароль<input id="au-pass" type="password" autocomplete="${isReg ? "new-password" : "current-password"}" placeholder="минимум 6 символов"></label>
+      <label>Пароль<input id="au-pass" type="password" autocomplete="${isReg ? "new-password" : "current-password"}" placeholder="минимум 8 символов"></label>
       <button class="primary collab-go" id="au-go">${isReg ? "Зарегистрироваться" : "Войти"}</button>
       <div class="collab-switch">${isReg
         ? `Уже есть аккаунт? <a id="au-to-login">Войти</a>`

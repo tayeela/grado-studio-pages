@@ -2680,14 +2680,19 @@ function setSaveStatus(text, kind = "") {
   el.textContent = text;
   el.className = kind ? `save-${kind}` : "";
 }
-async function saveStateNow(payload) {
+async function saveStateNow(payload, options = {}) {
   setSaveStatus("Сохранение…", "busy");
   try {
+    const headers = { "Content-Type": "application/json" };
+    if (options.checkpoint) headers["X-Grado-Checkpoint"] = "1";
     const response = await fetch("/api/autosave", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers,
       body: JSON.stringify(payload),
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      const issue = await response.json().catch(() => ({}));
+      throw new Error(issue.error || `HTTP ${response.status}`);
+    }
     const result = await response.json();
     const savedAt = result && result.saved_at ? new Date(result.saved_at) : new Date();
     const time = Number.isNaN(savedAt.getTime()) ? "" :
@@ -2701,7 +2706,10 @@ async function saveStateNow(payload) {
 }
 function persist() {
   const payload = collectState();
-  if (!_lsOverflow) {
+  // В статической браузерной версии единственный источник автосохранения —
+  // pages-adapter. Раньше тот же JSON одновременно занимал два localStorage-
+  // ключа и крупный проект упирался в квоту вдвое раньше.
+  if (!_lsOverflow && !window.GRADO_STATIC) {
     try { localStorage.setItem("grado_studio_v1", JSON.stringify(payload)); }
     catch (e) {
       // QuotaExceeded (проект > лимита) → больше не пытаемся; приватный режим —
@@ -2860,16 +2868,21 @@ function renderTep(data) {
            <span class="tep-zone-error">${escHtml(data.zones.error)}</span>
          </div>`;
   }
-  fact.innerHTML = `<div class="tep-row"><span>По посадке зданий</span><span></span></div>
+  fact.innerHTML = `<div class="tep-fact-head"><b>Фактическая посадка</b><small>по объектам на холсте</small></div>
     <div class="tep-row"><span>СПП факт</span><span class="v">${data.fact.spp} <small>тыс. м²</small></span></div>
     <div class="tep-row"><span>Плотность факт</span><span class="v">${data.fact.density} <small>тыс. м²/га</small></span></div>
-    ${zonesHtml}`;
+    ${zonesHtml}
+    <div class="tep-context-note">Ниже — расчётный потенциал по заданной нормативной плотности, а не уже размещённые здания.</div>`;
   const body = document.getElementById("tep-body");
   body.classList.remove("muted");
   let html = "", group = null;
   const duplicateNeeds = new Set(["doo_places", "school_places", "policlinic_places"]);
   for (const r of data.results.filter(row => !duplicateNeeds.has(row.id))) {
-    if (r.group !== group) { group = r.group; html += `<div class="tep-group">${group}</div>`; }
+    if (r.group !== group) {
+      group = r.group;
+      const groupTitle = group === "Застройка" ? "Расчётный потенциал" : group;
+      html += `<div class="tep-group">${groupTitle}</div>`;
+    }
     html += `<div class="tep-row"><span>${escHtml(r.title)}</span><span class="v">${escHtml(r.value)} <small>${escHtml(r.unit)}</small></span></div>`;
   }
   if (data.checks && data.checks.length) {
@@ -3144,11 +3157,25 @@ function renderProps() {
       <label>Прозрачность, %<input type="range" id="f-fmt-op" min="10" max="100" step="5" value="${Math.round((f.fmt.fillOpacity ?? cur.fillOpacity ?? 1) * 100)}"></label>` : ""}
     <div class="metric" style="font-size:11px;color:var(--muted);margin-top:2px">Правки влияют только на экран и «знаки: как на холсте». Для стандартного PDF — используйте «Знак из библиотеки» или правила слоя.</div>`;
   }
+  const onlyBoundary = f.kind === "boundary" && state.features.every(item =>
+    item && (item.kind === "boundary" || item.kind === "dim"));
+  const nextStepHtml = onlyBoundary ? `<div class="props-next-step" role="region" aria-label="Следующий шаг проекта">
+    <span>Следующий шаг</span><b>Добавьте проектные объекты</b>
+    <p>Граница задаёт расчётную площадь. Теперь разместите здания или функциональные зоны — фактические показатели появятся в ТЭП.</p>
+    <div><button type="button" id="props-add-building">Добавить здание</button><button type="button" id="props-add-zone">Добавить зону</button></div>
+  </div>` : "";
   el.innerHTML = `<div class="kind">${escHtml((L || {}).title || f.kind)}</div>
-    <div class="metric">${metric}</div>${prov}${extra}${userFieldsHtml}${styleHtml}
+    <div class="metric">${metric}</div>${prov}${nextStepHtml}${extra}${userFieldsHtml}${styleHtml}
     ${f.point ? "" : transformControlsHtml()}
     <div class="metric" style="margin-top:6px">двойной клик по ребру — вершина,<br>Alt+клик по вершине — удалить,<br>R — поворот, ${modKeyLabel("D")} — дубликат</div>
     <button class="danger" id="f-del">Удалить (Del)</button>`;
+  const startNextLayer = kind => {
+    state.selected = null;
+    quickLayerByKind(kind);
+    renderProps();
+  };
+  el.querySelector("#props-add-building")?.addEventListener("click", () => startNextLayer("building"));
+  el.querySelector("#props-add-zone")?.addEventListener("click", () => startNextLayer("zone"));
   if (f.line && (f.props.radius || 0) > 0) {
     const b = document.createElement("button");
     b.textContent = "Применить сопряжение";
@@ -3552,7 +3579,7 @@ function startBoundaryFlow() {
   }
   startGuideDismissed = true;
   quickLayerByKind("boundary");
-  toast("Граница готова. Поставьте первую точку на холсте.");
+  toast("Слой границы готов. Поставьте первую точку на холсте.");
 }
 let startGuideDismissed = false;
 function updateStartExperience() {
@@ -4457,7 +4484,10 @@ async function openAutosaveRecovery() {
     const data = await response.json();
     const backups = Array.isArray(data.backups) ? data.backups : [];
     if (!backups.length) {
-      body.innerHTML = `<div class="recovery-empty">Предыдущих копий пока нет. Они появятся после нескольких изменений проекта.</div>`;
+      const emptyCopy = window.GRADO_STATIC
+        ? "Контрольная копия появится перед созданием или открытием другого проекта."
+        : "Предыдущих копий пока нет. Они появятся после нескольких изменений проекта.";
+      body.innerHTML = `<div class="recovery-empty">${emptyCopy}</div>`;
       return;
     }
     body.innerHTML = backups.map(item => {
@@ -4481,7 +4511,7 @@ async function openAutosaveRecovery() {
           if (!backupResponse.ok) throw new Error(`HTTP ${backupResponse.status}`);
           const saved = await backupResponse.json();
           clearTimeout(autosaveTimer);
-          await saveStateNow(collectState());
+          await saveStateNow(collectState(), { checkpoint: true });
           const savedState = saved && saved.state && typeof saved.state === "object"
             ? saved.state : saved;
           resetProjectState(savedState && savedState.name || "Восстановленный проект");
@@ -5730,7 +5760,7 @@ async function checkpointBeforeReplace() {
   if (window.Collab && window.Collab.active) return true;
   clearTimeout(autosaveTimer);
   try {
-    await saveStateNow(collectState());
+    await saveStateNow(collectState(), { checkpoint: true });
     return true;
   } catch (error) {
     toast("Не удалось сохранить текущий проект. Замена отменена.", "error");
@@ -6174,14 +6204,16 @@ window.afterExternalApply = function () {
   // веб-режим совместной работы: состояние приходит с сервера (collab.js),
   // локальные localStorage/autosave не восстанавливаем (это чужой/старый проект)
   if (document.body.classList.contains("hub-mode")) return;
-  try {
-    const raw = localStorage.getItem("grado_studio_v1");
-    if (raw && applyRestoredState(JSON.parse(raw))) {
-      if (lastRestoreSkipped) queueMicrotask(() => toast(
-        `${ruCount(lastRestoreSkipped, "Повреждённый объект пропущен", "Повреждённых объекта пропущено", "Повреждённых объектов пропущено")} при восстановлении`, "warn"));
-      return;
-    }
-  } catch (e) { /* повреждённое сохранение игнорируем, пробуем файловый автосейв ниже */ }
+  if (!window.GRADO_STATIC) {
+    try {
+      const raw = localStorage.getItem("grado_studio_v1");
+      if (raw && applyRestoredState(JSON.parse(raw))) {
+        if (lastRestoreSkipped) queueMicrotask(() => toast(
+          `${ruCount(lastRestoreSkipped, "Повреждённый объект пропущен", "Повреждённых объекта пропущено", "Повреждённых объектов пропущено")} при восстановлении`, "warn"));
+        return;
+      }
+    } catch (e) { /* повреждённое сохранение игнорируем, пробуем файловый автосейв ниже */ }
+  }
   // localStorage пуст (новый браузер/профиль, приватный режим, чистка данных
   // сайта) — пробуем резервную копию на диске сервера
   fetch("/api/autosave").then(r => r.ok ? r.json() : null).then(d => {
