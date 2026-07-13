@@ -29,8 +29,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{
 
 /* ==== ШАПКА ==== */
 header{
-  flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2) var(--sp-3);
-  min-height:52px;padding:7px var(--sp-4);background:var(--glass-strong);backdrop-filter:var(--glass-blur);
+  flex:0 0 auto;display:flex;align-items:center;flex-wrap:nowrap;gap:var(--sp-3);
+  height:52px;padding:7px var(--sp-4);background:var(--glass-strong);backdrop-filter:var(--glass-blur);
   box-shadow:var(--glass-hi),0 1px 0 var(--hairline);z-index:var(--z-header);position:relative;
 }
 .hgroup{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto}
@@ -96,6 +96,7 @@ header{
 .tool:hover{background:var(--field-bg);color:var(--text)}
 .tool:active{transform:scale(.95)}
 .tool.active{background:var(--accent-weak);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-line)}
+.tool:disabled{opacity:.34;cursor:not-allowed;transform:none;background:transparent;color:var(--muted)}
 .tool .ic{width:19px;height:19px}
 
 /* ==== ХОЛСТ ==== */
@@ -105,6 +106,24 @@ header{
 #scene{width:100%;height:100%;display:block;background:var(--canvas-bg)}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;background:var(--canvas-bg)}
 #scene .pick{cursor:pointer}
+.start-guide{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-54%);
+  width:min(430px,calc(100% - 48px));padding:24px;border:1px solid var(--glass-border);
+  border-radius:var(--r-lg);background:color-mix(in srgb,var(--glass-strong) 96%,var(--panel));
+  backdrop-filter:var(--glass-blur);box-shadow:var(--shadow-lg),var(--glass-hi)}
+.start-guide-kicker{font-size:10px;line-height:1;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--accent);font-weight:650;margin-bottom:8px}
+.start-guide h1{font-size:19px;line-height:1.22;letter-spacing:-.02em;margin:0 0 8px}
+.start-guide>p{font-size:var(--fs-12);line-height:1.5;color:var(--muted);max-width:38em}
+.start-guide ol{list-style:none;display:grid;gap:10px;margin:18px 0}
+.start-guide li{position:relative;display:flex;flex-direction:column;gap:2px;padding-left:28px}
+.start-guide li::before{content:counter(list-item);position:absolute;left:0;top:0;width:19px;height:19px;
+  display:grid;place-items:center;border-radius:6px;background:var(--accent-weak);color:var(--accent);
+  font-family:var(--font-mono);font-size:9px;font-weight:650}
+.start-guide li b{font-size:var(--fs-12);font-weight:650}
+.start-guide li span{font-size:11px;line-height:1.4;color:var(--muted)}
+.start-guide-actions{display:flex;gap:8px;align-items:center;margin-top:4px}
+.start-guide-actions .btn{justify-content:center}
+.start-guide>small{display:block;margin-top:12px;color:var(--faint);font-size:10px}
 .cv-float{position:absolute;background:var(--glass-strong);backdrop-filter:var(--glass-blur);
   box-shadow:var(--glass-hi),var(--shadow-md);border-radius:var(--r-md)}
 .cv-compass{top:16px;right:16px;width:38px;height:38px;display:grid;place-items:center;color:var(--text-2)}
@@ -140,6 +159,9 @@ body.panel-resizing iframe{pointer-events:none!important}
   background:var(--glass);backdrop-filter:var(--glass-blur);
   box-shadow:var(--glass-hi),-1px 0 0 var(--hairline);z-index:var(--z-panel);
 }
+.panel-visibility{flex:0 0 auto}
+.panel-close{display:none}
+body.panel-hidden #panel,body.panel-hidden #panel-resizer{display:none}
 .panel-head{height:44px;flex:0 0 auto;display:flex;align-items:center;gap:2px;padding:0 var(--sp-3);box-shadow:0 1px 0 var(--hairline)}
 .panel-head .title{font-size:var(--fs-13);font-weight:600;flex:1}
 .phbtn{width:30px;height:30px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted);transition:background .12s,color .12s}
@@ -296,8 +318,39 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 @keyframes pop{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 
-/* адаптив: узкий экран — панель уже, тулбар компактнее */
+/* Адаптив: шапка остаётся одной строкой, панель становится рабочим drawer. */
 @media (max-width:1120px){
-  #panel{width:280px}
-  .kbar{max-width:180px;overflow:hidden}
+  header{gap:var(--sp-2);padding-inline:var(--sp-3)}
+  .projname{max-width:170px;min-width:80px}
+  .kbar{width:32px;height:32px;padding:0;justify-content:center;border-radius:var(--r-sm)}
+  .kbar>span,.kbar>kbd{display:none}
+  #panel{width:300px}
+}
+@media (max-width:900px){
+  .projname{display:none}
+  .hsep{display:none}
+  #btn-theme{display:none}
+  #panel-resizer{display:none}
+  #panel{position:absolute;right:0;top:0;bottom:0;width:min(340px,calc(100vw - 72px));min-width:0;max-width:none;
+    box-shadow:var(--shadow-lg),-1px 0 0 var(--hairline);transition:transform .18s var(--ease-out),visibility .18s}
+  body.panel-hidden #panel{display:flex;transform:translateX(102%);visibility:hidden;pointer-events:none}
+  body:not(.panel-hidden) .start-guide{left:12px;right:calc(min(340px,calc(100vw - 72px)) + 12px);
+    width:auto;transform:translateY(-54%)}
+  body:not(.panel-hidden) .start-guide-actions{flex-direction:column;align-items:stretch}
+  body:not(.panel-hidden) .start-guide-actions .btn{width:100%}
+  .panel-close{display:grid}
+  .statusbar{gap:var(--sp-3);padding-inline:var(--sp-3)}
+  #st-coords,#st-grid,#st-snap,.cv-scale{display:none!important}
+  #st-layer{max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+@media (max-width:700px){
+  .logo span{display:none}
+  header>.iconbtn:not(#btn-panel-visibility){display:none}
+  header>.btn{padding-inline:9px}
+  #btn-album{padding-inline:10px}
+  #toolbar{width:64px}
+  .tool{width:52px}
+  .start-guide{width:min(410px,calc(100% - 24px));padding:20px}
+  .start-guide-actions{flex-direction:column;align-items:stretch}
+  .start-guide-actions .btn{width:100%}
 }

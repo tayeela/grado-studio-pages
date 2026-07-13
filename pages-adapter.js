@@ -192,6 +192,10 @@
     if (!blocked.has(id)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (id === "btn-album") {
+      document.getElementById("btn-album-config")?.click();
+      return;
+    }
     if (window.toast) window.toast("Функция требует настольную версию с сервером", "warn");
   }, true);
 
@@ -200,7 +204,7 @@
     const logo = document.getElementById("logo");
     if (logo) logo.insertAdjacentHTML("beforeend", '<b class="web-badge">Веб</b>');
     const album = document.getElementById("btn-album");
-    if (album) { album.textContent = "Альбом — в desktop"; album.title = "Требуется настольная версия"; }
+    if (album) { album.textContent = "Альбом"; album.title = "Настроить состав альбома"; }
     document.querySelectorAll("[data-click]").forEach(row => {
       if (blocked.has(row.dataset.click)) {
         row.classList.add("web-disabled");

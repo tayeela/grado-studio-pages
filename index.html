@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ГРАДО Студия</title>
-<link rel="stylesheet" href="./tokens.css?v=9011">
-<script>window.__GRADO_ASSET_VERSION__="9011";</script>
-<script src="./pages-adapter.js?v=9011"></script>
-<script src="./canvas-theme.js?v=9011"></script>
-<link rel="stylesheet" href="./redesign/shell.css?v=9011">
-<link rel="stylesheet" href="./redesign/studio2.css?v=9011">
+<link rel="stylesheet" href="./tokens.css?v=9012">
+<script>window.__GRADO_ASSET_VERSION__="9012";</script>
+<script src="./pages-adapter.js?v=9012"></script>
+<script src="./canvas-theme.js?v=9012"></script>
+<link rel="stylesheet" href="./redesign/shell.css?v=9012">
+<link rel="stylesheet" href="./redesign/studio2.css?v=9012">
 <style>
   /* служебные слоты движка (скрытые контейнеры/поля, которые app.js биндит) и
      группы-заголовки в шапке. Новый интерфейс (редизайн Фаза 0-3). */
@@ -29,7 +29,7 @@
   <div class="logo" id="logo" title="ГРАДО Студия">ГРАДО <span>Студия</span></div>
   <input class="projname" id="project-name" value="Концепция развития территории" spellcheck="false" aria-label="Название проекта">
   <div class="spacer"></div>
-  <button class="kbar" id="open-cmdk" title="Командная палитра"><svg class="ic" style="width:14px;height:14px"><use href="#i-search"/></svg>Найти инструмент, слой, действие<kbd data-mod-key="K">⌘K</kbd></button>
+  <button class="kbar" id="open-cmdk" title="Командная палитра"><svg class="ic" style="width:14px;height:14px"><use href="#i-search"/></svg><span>Найти инструмент, слой, действие</span><kbd data-mod-key="K">⌘K</kbd></button>
   <button class="iconbtn" id="btn-theme" title="Светлая / тёмная тема" aria-label="Переключить светлую и тёмную тему"><svg class="ic"><use href="#i-theme"/></svg></button>
   <button class="iconbtn" id="btn-undo" title="Отменить (⌘Z)" aria-label="Отменить"><svg class="ic"><use href="#i-undo"/></svg></button>
   <button class="iconbtn" id="btn-redo" title="Вернуть (⌘⇧Z)" aria-label="Вернуть"><svg class="ic"><use href="#i-redo"/></svg></button>
@@ -38,6 +38,7 @@
   <button class="btn" data-menu="menu-proj" aria-haspopup="menu" aria-controls="menu-proj" aria-expanded="false"><svg class="ic" style="width:15px;height:15px"><use href="#i-folder"/></svg>Проект<svg class="ic caret"><use href="#i-caret"/></svg></button>
   <button class="btn" data-menu="menu-out" aria-haspopup="menu" aria-controls="menu-out" aria-expanded="false">Выпуск<svg class="ic caret"><use href="#i-caret"/></svg></button>
   <button class="btn primary" id="btn-album">Собрать альбом</button>
+  <button class="iconbtn panel-visibility" id="btn-panel-visibility" title="Показать или скрыть панель слоёв" aria-label="Скрыть панель слоёв" aria-controls="panel" aria-expanded="true"><svg class="ic"><use href="#i-layers"/></svg></button>
 </header>
 
 <div id="main">
@@ -70,6 +71,21 @@
   <!-- ХОЛСТ: реальный canvas движка -->
   <div id="stage">
     <canvas id="cv" tabindex="0" aria-label="Холст чертежа. Выберите инструмент на панели слева; Enter завершает фигуру, Escape отменяет действие.">Интерактивный холст чертежа ГРАДО Студии.</canvas>
+    <section id="start-guide" class="start-guide" aria-labelledby="start-guide-title" hidden>
+      <div class="start-guide-kicker">Новый проект</div>
+      <h1 id="start-guide-title">Начните с границы территории</h1>
+      <p>Она задаёт расчётную площадь. После этого ТЭП будет обновляться автоматически по мере работы.</p>
+      <ol>
+        <li><b>Создайте границу</b><span>Мы сразу включим инструмент «Полигон».</span></li>
+        <li><b>Добавьте здания и зоны</b><span>Каждый тип попадёт в свой слой.</span></li>
+        <li><b>Проверьте ТЭП</b><span>Расчёты и замечания появятся справа.</span></li>
+      </ol>
+      <div class="start-guide-actions">
+        <button class="btn primary" id="start-boundary">Создать границу</button>
+        <button class="btn" id="start-demo">Открыть пример</button>
+      </div>
+      <small>Подсказка: клавиша G создаёт или выбирает слой границы.</small>
+    </section>
     <div id="cv-activelayer" class="cv-float" style="top:16px;left:16px;padding:6px 12px;font-size:var(--fs-12);font-weight:500"></div>
     <div class="cv-float cv-compass"><svg class="ic" style="width:20px;height:20px"><use href="#i-north"/></svg></div>
     <div class="cv-float cv-zoom">
@@ -104,6 +120,7 @@
       <button class="phbtn" data-pop="p-basemap" title="Подложка" aria-label="Настроить подложку" aria-controls="p-basemap" aria-expanded="false"><svg class="ic" style="width:17px;height:17px"><use href="#i-map"/></svg></button>
       <button class="phbtn" data-pop="p-grid" title="Сетка и привязки" aria-label="Настроить сетку и привязки" aria-controls="p-grid" aria-expanded="false"><svg class="ic" style="width:17px;height:17px"><use href="#i-grid"/></svg></button>
       <button class="phbtn" data-pop="p-src" title="Источники данных" aria-label="Показать источники данных" aria-controls="p-src" aria-expanded="false"><svg class="ic" style="width:17px;height:17px"><use href="#i-db"/></svg></button>
+      <button class="phbtn panel-close" id="btn-panel-close" title="Скрыть панель" aria-label="Скрыть панель слоёв"><svg class="ic" style="width:17px;height:17px"><use href="#ic-close"/></svg></button>
     </div>
     <div class="panel-scroll">
       <div class="card" id="card-props">
@@ -279,16 +296,16 @@
 </svg>
 
 <!-- реальный движок (тот же порядок, что в index.html) -->
-<script src="./app-transform.js?v=9011"></script>
-<script src="./app-snap.js?v=9011"></script>
-<script src="./app-data.js?v=9011"></script>
-<script src="./app-style-ui.js?v=9011"></script>
-<script src="./app-attr.js?v=9011"></script>
-<script src="./app.js?v=9011"></script>
-<script src="./app-import.js?v=9011"></script>
-<script src="./collab.js?v=9011"></script>
-<script src="./redesign/cmdk.js?v=9011"></script>
-<script src="./redesign/a11y.js?v=9011"></script>
+<script src="./app-transform.js?v=9012"></script>
+<script src="./app-snap.js?v=9012"></script>
+<script src="./app-data.js?v=9012"></script>
+<script src="./app-style-ui.js?v=9012"></script>
+<script src="./app-attr.js?v=9012"></script>
+<script src="./app.js?v=9012"></script>
+<script src="./app-import.js?v=9012"></script>
+<script src="./collab.js?v=9012"></script>
+<script src="./redesign/cmdk.js?v=9012"></script>
+<script src="./redesign/a11y.js?v=9012"></script>
 <script>
   // счётчик слоёв в заголовке карточки — следит за #layers-body (app.js не трогаем)
   (function () {
@@ -320,6 +337,29 @@
       if (willOpen) setTimeout(() => p.querySelector('input,select,button')?.focus(), 0);
     }));
     document.addEventListener('click', () => closeAll(null));
+  })();
+  // Панель слоёв остаётся доступной на компактных экранах как выезжающая
+  // рабочая область. Состояние сохраняется, но при первом запуске она видима.
+  (function () {
+    const toggle = document.getElementById('btn-panel-visibility');
+    const close = document.getElementById('btn-panel-close');
+    const setHidden = hidden => {
+      document.body.classList.toggle('panel-hidden', hidden);
+      toggle?.setAttribute('aria-expanded', String(!hidden));
+      if (toggle) toggle.setAttribute('aria-label', hidden ? 'Показать панель слоёв' : 'Скрыть панель слоёв');
+      try { localStorage.setItem('grado_panel_hidden', hidden ? '1' : '0'); } catch (_) {}
+    };
+    let saved = false;
+    try { saved = localStorage.getItem('grado_panel_hidden') === '1'; } catch (_) {}
+    setHidden(saved);
+    toggle?.addEventListener('click', () => setHidden(!document.body.classList.contains('panel-hidden')));
+    close?.addEventListener('click', () => setHidden(true));
+    window.addEventListener('keydown', event => {
+      if ((event.ctrlKey || event.metaKey) && event.key === '\\') {
+        event.preventDefault();
+        toggle?.click();
+      }
+    });
   })();
   // меню шапки (Данные/Проект/Выпуск) — открытие под кнопкой + клик по реальным
   // скрытым кнопкам движка (app.js не меняется)

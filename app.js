@@ -2640,8 +2640,12 @@ function renderTep(data) {
   if (data && data.has_territory === false) {
     fact.innerHTML = "";
     bodyEl.classList.add("muted");
-    bodyEl.innerHTML = `<div class="tep-empty">Граница территории разработки не задана.<br>` +
-      `Начертите границу — ТЭП считается внутри неё.</div>`;
+    bodyEl.innerHTML = `<div class="tep-empty"><b>Нет границы территории</b>` +
+      `ТЭП считается только внутри расчётного контура.` +
+      `<div class="tep-empty-actions"><button type="button" id="tep-start-boundary">Создать границу</button>` +
+      `<button type="button" id="tep-open-demo">Открыть пример</button></div></div>`;
+    bodyEl.querySelector("#tep-start-boundary")?.addEventListener("click", startBoundaryFlow);
+    bodyEl.querySelector("#tep-open-demo")?.addEventListener("click", () => document.getElementById("btn-demo")?.click());
     return;
   }
   let zonesHtml = "";
@@ -3151,6 +3155,7 @@ function renderLayers() {
     el.appendChild(row);
   }
   updateLayerStatus();   // чип «куда я черчу» — синхрон с активным слоем
+  updateStartExperience();
 }
 
 function initCollapsiblePanel() {
@@ -3310,37 +3315,94 @@ function applyLayerStyleToObjects(layer) {
 
 // ---------- новый слой («+» в панели «Слои») ----------
 const GEOM_LABEL = { point: "точка", polyline: "полилиния", polygon: "полигон", arc: "дуга", circle: "окружность" };
-// роли (семантические классы) для выбранной геометрии + «обычный слой»
-function roleOptions(geom) {
-  const roles = BASE_KINDS.filter(b => b.geometry_type === geom);
-  return `<option value="">обычный слой (без роли)</option>` +
-    roles.map(b => `<option value="${b.kind}">${b.label}</option>`).join("");
+function allRoleOptions(selected = "") {
+  return BASE_KINDS.map(b => `<option value="${b.kind}"${b.kind === selected ? " selected" : ""}>${b.label}</option>`).join("") +
+    `<option value=""${!selected ? " selected" : ""}>Обычный слой — без расчётной роли</option>`;
 }
-function openNewLayerDialog() {
+function startBoundaryFlow() {
+  const existing = LAYERS_V2.find(layer => layer.kind === "boundary" && !layer.import_only && !layer.annotation);
+  if (existing) {
+    setActiveLayer(existing.id);
+    setTool(naturalToolFor(existing), { keepLayer: true });
+    toast("Слой границы активен. Поставьте первую точку на холсте.");
+    return;
+  }
+  openNewLayerDialog({ role: "boundary" });
+}
+function updateStartExperience() {
+  const guide = document.getElementById("start-guide");
+  const hasLayer = LAYERS_V2.some(layer => layer.user_created && !layer.import_only && !layer.annotation);
+  const isEmpty = !state.features.length && !hasLayer;
+  if (guide) guide.hidden = !isEmpty;
+  const active = activeLayer();
+  const drawingTools = new Set(["point", "polyline", "polygon", "rect", "arc", "circle"]);
+  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror"]);
+  document.querySelectorAll("#toolbar button[data-tool]").forEach(button => {
+    if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
+    if (drawingTools.has(button.dataset.tool)) {
+      button.disabled = !active;
+      button.title = !active ? "Сначала создайте слой" : button.dataset.defaultTitle;
+    } else if (editingTools.has(button.dataset.tool)) {
+      button.disabled = !state.features.length;
+      button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
+    }
+  });
+  ["btn-join", "btn-buffer-open"].forEach(id => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
+    button.disabled = !state.features.length;
+    button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
+  });
+}
+function openNewLayerDialog(options = {}) {
   closePopups();
+  const suggestedRole = options.role !== undefined
+    ? options.role
+    : (LAYERS_V2.some(layer => layer.kind === "boundary") ? "" : "boundary");
+  const suggestedBase = BASE_KIND_BY_KIND[suggestedRole] || null;
+  const suggestedGeom = suggestedBase?.geometry_type || "polygon";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  overlay.innerHTML = `<div class="modal fmt-modal">
-    <div class="modal-head">Новый слой
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
-    <div class="modal-body compact">
-      <label>Название<input type="text" id="nl-title" placeholder="напр. Озеленение" autofocus></label>
-      <label>Геометрия<select id="nl-geom">${
-        Object.entries(GEOM_LABEL).map(([g, l]) => `<option value="${g}"${g === "polygon" ? " selected" : ""}>${l}</option>`).join("")}</select></label>
-      <label>Роль (для ТЭП / автостилей ЛГР)<select id="nl-role">${roleOptions("polygon")}</select></label>
-      <label>Стиль (библиотека)<select id="nl-style">${stylePickerOptions()}</select></label>
+  overlay.innerHTML = `<div class="modal new-layer-modal">
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Структура проекта</span><span>Новый слой</span></div>
+      <button class="modal-x" title="Закрыть" aria-label="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body compact new-layer-body">
+      <p class="new-layer-intro">Выберите назначение — Студия подставит правильную геометрию и знак. После создания можно сразу чертить.</p>
+      <div class="new-layer-purpose">
+        <label><span>Назначение слоя</span><select id="nl-role">${allRoleOptions(suggestedRole)}</select></label>
+        <label><span>Геометрия</span><select id="nl-geom">${
+          Object.entries(GEOM_LABEL).map(([g, l]) => `<option value="${g}"${g === suggestedGeom ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        <div class="new-layer-role-hint" id="nl-role-hint"></div>
+      </div>
+      <div class="new-layer-details">
+        <label class="wide"><span>Название</span><input type="text" id="nl-title" placeholder="${escHtml(suggestedBase?.label || "Например, озеленение")}" autofocus></label>
+        <label class="wide"><span>Оформление</span><select id="nl-style">${stylePickerOptions(suggestedBase?.style_id)}</select></label>
+      </div>
     </div>
     <div class="modal-actions">
       <span class="spacer"></span>
       <button id="nl-cancel">Отмена</button>
-      <button id="nl-create" class="primary">Создать</button>
+      <button id="nl-create" class="primary">Создать и чертить</button>
     </div></div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener("click", ev => ev.stopPropagation());
   const $ = id => overlay.querySelector("#" + id);
   $("nl-title").focus();
-  // при смене геометрии — обновить список ролей
-  $("nl-geom").addEventListener("change", () => { $("nl-role").innerHTML = roleOptions($("nl-geom").value); });
+  let styleTouched = false;
+  $("nl-style").addEventListener("change", () => { styleTouched = true; });
+  const syncRole = () => {
+    const base = BASE_KIND_BY_KIND[$("nl-role").value] || null;
+    $("nl-geom").disabled = !!base;
+    if (base) $("nl-geom").value = base.geometry_type;
+    $("nl-role-hint").textContent = base
+      ? `Участвует в расчётах и получает знак «${base.label}». Геометрия выбрана автоматически.`
+      : "Обычный слой хранит геометрию и атрибуты, но не влияет на ТЭП.";
+    $("nl-title").placeholder = base?.label || "Например, озеленение";
+    if (base && !styleTouched) $("nl-style").innerHTML = stylePickerOptions(base.style_id);
+  };
+  $("nl-role").addEventListener("change", syncRole);
+  syncRole();
   const create = async () => {
     const geom = $("nl-geom").value, role = $("nl-role").value;
     let styleRef = $("nl-style").value || null;
@@ -3354,9 +3416,10 @@ function openNewLayerDialog() {
       : createGenericLayer({ title, geometry_type: geom, styleId: styleRef });
     closePopups();
     renderLayers();
-    setActiveLayer(L.id);   // сразу готов чертить
+    setActiveLayer(L.id);
+    setTool(naturalToolFor(L), { keepLayer: true });
     persist();
-    toast(`Слой «${title}» создан и стал активным`);
+    toast(`Слой «${title}» создан. Поставьте первую точку на холсте.`);
   };
   $("nl-title").addEventListener("keydown", ev => { if (ev.key === "Enter") create(); });
   $("nl-create").addEventListener("click", () => create());
@@ -5603,6 +5666,13 @@ window.studio = { state, addFeature, refreshTep, fitView, snapPoint, gridStep,
 on("btn-refresh-src", "click", fetchSources);
 on("btn-shortcuts", "click", openShortcuts);
 on("btn-new-layer", "click", openNewLayerDialog);
+on("start-boundary", "click", startBoundaryFlow);
+on("start-demo", "click", () => {
+  document.getElementById("btn-demo")?.click();
+  if (window.matchMedia("(max-width: 900px)").matches && !document.body.classList.contains("panel-hidden")) {
+    window.setTimeout(() => document.getElementById("btn-panel-visibility")?.click(), 60);
+  }
+});
 on("btn-style-lib", "click", openStyleLibrary);
 on("btn-project-styles", "click", openProjectStyles);
 on("btn-recover", "click", openAutosaveRecovery);
