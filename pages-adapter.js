@@ -55,7 +55,12 @@
     if (path === "/api/hub") return json({ hub: false });
     if (path === "/api/inbox") return json({ bridge: true, items: [] });
     if (path === "/api/sources") return json([]);
-    if (path === "/api/styles") return json({});
+    if (path === "/api/styles") {
+      const stylesUrl = new URL("./styles.json", window.location.href);
+      const release = window.__GRADO_ASSET_VERSION__;
+      if (release) stylesUrl.searchParams.set("v", release);
+      return nativeFetch(stylesUrl, options);
+    }
     if (path === "/api/basemap-info") return json({
       origin_lon: 37.6176, origin_lat: 55.7558,
       attribution: "© OpenStreetMap contributors",
