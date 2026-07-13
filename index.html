@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ГРАДО Студия — локальная среда градпроектирования: ГИС, точное 2D-черчение, ТЭП и альбомы.">
+  <meta name="theme-color" content="#eef2f9">
+  <title>ГРАДО Студия</title>
+  <link rel="stylesheet" href="site.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">К содержанию</a>
+  <header class="topbar" aria-label="Основная навигация">
+    <a class="brand" href="#top" aria-label="ГРАДО Студия — начало страницы">
+      <span class="brand-mark" aria-hidden="true">Г</span>
+      <span>ГРАДО <b>Студия</b></span>
+    </a>
+    <nav>
+      <a href="#capabilities">Возможности</a>
+      <a href="#platforms">Платформы</a>
+      <a class="nav-action" href="https://github.com/tayeela/grado-studio-pages">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="content">
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow"><span></span> Рабочая beta <strong data-version>0.9.0-beta.5</strong></p>
+        <h1>Градпроектирование<br>в одном пространстве</h1>
+        <p class="lead">ГИС-анализ, точное 2D-черчение, живой расчёт ТЭП и выпуск альбомов работают над одной моделью проекта.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#platforms">Как запустить</a>
+          <a class="button secondary" href="#capabilities">Посмотреть возможности</a>
+        </div>
+        <p class="local-note">Студия работает локально: проектные данные остаются на компьютере.</p>
+      </div>
+
+      <div class="studio-preview" aria-label="Схематичный вид интерфейса ГРАДО Студии">
+        <div class="preview-bar">
+          <span class="preview-brand">ГРАДО</span>
+          <span class="preview-project">Концепция квартала</span>
+          <span class="preview-chip">Сохранено</span>
+        </div>
+        <div class="preview-body">
+          <aside class="preview-tools" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i>
+          </aside>
+          <div class="preview-canvas" aria-hidden="true">
+            <svg viewBox="0 0 680 400" role="img">
+              <defs>
+                <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+                  <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#b9c5dc" stroke-width=".6" opacity=".45"/>
+                </pattern>
+              </defs>
+              <rect width="680" height="400" fill="url(#grid)"/>
+              <path d="M105 78 L520 55 L590 260 L430 346 L120 315 Z" fill="#fff" stroke="#35415c" stroke-width="5"/>
+              <path d="M108 80 L330 68 L315 210 L122 205 Z" fill="#f0b766" fill-opacity=".46" stroke="#d68d28" stroke-width="2"/>
+              <path d="M335 68 L518 58 L552 160 L322 207 Z" fill="#7593ff" fill-opacity=".28" stroke="#3b63f6" stroke-width="2"/>
+              <path d="M124 211 L313 215 L430 342 L122 312 Z" fill="#65bd87" fill-opacity=".3" stroke="#2f9e5b" stroke-width="2"/>
+              <path d="M319 214 L555 165 L587 258 L433 340 Z" fill="#f098aa" fill-opacity=".24" stroke="#df4968" stroke-width="2"/>
+              <path d="M95 245 C220 235 355 260 575 205" fill="none" stroke="#e11d48" stroke-width="4" stroke-dasharray="11 7"/>
+              <g fill="#3b63f6"><circle cx="105" cy="78" r="6"/><circle cx="520" cy="55" r="6"/><circle cx="590" cy="260" r="6"/><circle cx="430" cy="346" r="6"/><circle cx="120" cy="315" r="6"/></g>
+            </svg>
+            <span class="canvas-scale">1:2000</span>
+          </div>
+          <aside class="preview-properties" aria-hidden="true">
+            <b>Свойства</b>
+            <span>Функциональная зона</span>
+            <label>Наименование</label><i></i>
+            <label>Площадь</label><i class="short"></i>
+            <label>Стиль</label><i></i>
+            <div class="preview-stat"><small>Плотность</small><strong>18 420</strong><small>м²/га</small></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="status-card" aria-labelledby="pages-title">
+      <div class="status-icon" aria-hidden="true">i</div>
+      <div>
+        <h2 id="pages-title">Что опубликовано на GitHub Pages</h2>
+        <p>Это презентационная страница проекта. Рабочая Студия использует локальный Python-сервер для файлов, карт и экспорта, поэтому запускается на компьютере, а не внутри статического Pages.</p>
+      </div>
+    </section>
+
+    <section class="section" id="capabilities">
+      <div class="section-heading">
+        <p class="eyebrow">Единая модель данных</p>
+        <h2>От исходных данных до готового альбома</h2>
+      </div>
+      <div class="feature-grid">
+        <article><span>01</span><h3>ГИС и импорт</h3><p>НСПД, ФГИС ТП, ГИС ОГД, GeoJSON и проекты <code>.grado</code>.</p></article>
+        <article><span>02</span><h3>Точное черчение</h3><p>Привязки, вершины, дуги, окружности, офсеты и красные линии.</p></article>
+        <article><span>03</span><h3>Живые ТЭП</h3><p>Показатели пересчитываются из геометрии после каждой правки.</p></article>
+        <article><span>04</span><h3>Выпуск</h3><p>Проверка проекта, PDF-альбомы, печать и DXF из одной среды.</p></article>
+      </div>
+    </section>
+
+    <section class="section platform-section" id="platforms">
+      <div class="section-heading">
+        <p class="eyebrow">Локальная работа</p>
+        <h2>Один проект на macOS и Windows</h2>
+      </div>
+      <div class="platform-grid">
+        <article>
+          <div class="platform-title"><span aria-hidden="true">⊞</span><h3>Windows</h3></div>
+          <p>Запуск двойным кликом через <code>ГРАДО Студия.bat</code>. Рабочие данные хранятся в профиле пользователя, системные шрифты и пути QGIS определяются автоматически.</p>
+          <span class="platform-access">Распространяется в закрытой beta</span>
+        </article>
+        <article>
+          <div class="platform-title"><span aria-hidden="true">⌘</span><h3>macOS</h3></div>
+          <p>Запуск через <code>ГРАДО Студия.command</code> или приложение <code>.app</code>. Поддерживается открытие файлов <code>.grado</code>.</p>
+          <span class="platform-access">Распространяется в закрытой beta</span>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>ГРАДО Студия · <span data-version>0.9.0-beta.5</span></span>
+    <span>© <span data-year>2026</span></span>
+  </footer>
+</body>
+</html>
