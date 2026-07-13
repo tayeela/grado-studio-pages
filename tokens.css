@@ -1,0 +1,205 @@
+/* =============================================================================
+   ГРАДО Студия — дизайн-токены  (ТЗ §5, §8)
+   Единый источник цвета/типографики/отступов/радиусов/теней/z-index.
+   Светлая и тёмная темы — из одного набора переменных.
+
+   Подключение (без сборки, offline-first — ТЗ §9):
+     <html data-theme="light"> … </html>
+     <link rel="stylesheet" href="tokens.css">   ← ПЕРВЫМ, до style.css
+   Переключение темы: document.documentElement.dataset.theme = 'dark' | 'light'
+   (см. canvas-theme.js → setTheme).
+   ============================================================================= */
+
+:root {
+  color-scheme: light;
+
+  /* ---- Шрифты (системный стек, без CDN) ------------------------------------ */
+  /* Хотите единый шрифт на всех ОС — положите файл в web/ и раскомментируйте
+     @font-face внизу, затем замените первый элемент стека. */
+  --font-ui:   -apple-system, "Segoe UI", "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", "Cascadia Mono", "Consolas", monospace;
+
+  /* ---- Типографическая шкала (ТЗ §5: 11/12/13/15/20) ---------------------- */
+  --fs-11: 11px;  --fs-12: 12px;  --fs-13: 13px;  /* базовый */
+  --fs-15: 15px;  --fs-20: 20px;
+  --fw-regular: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+  --lh-tight: 1.2; --lh-base: 1.45;
+
+  /* ---- Отступы (кратно 4) -------------------------------------------------- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-6: 24px;  --sp-8: 32px;
+
+  /* ---- Радиусы ------------------------------------------------------------- */
+  --r-sm: 8px;  --r-md: 12px;  --r-lg: 18px;  --r-xl: 22px;  --r-pill: 999px;
+
+  /* ---- Кривые движения (сильнее встроенных CSS-easing) --------------------- */
+  --ease-out:    cubic-bezier(.23, 1, .32, 1);      /* отклик: старт резкий      */
+  --ease-in-out: cubic-bezier(.77, 0, .175, 1);     /* морфинг/движение на экране */
+
+  /* ---- Z-index (именованная шкала — ТЗ §5) -------------------------------- */
+  --z-base: 1;  --z-panel: 30;  --z-header: 40;  --z-menu: 60;  --z-toast: 80;
+  --z-modal: 90;  --z-overlay: 95;
+
+  /* ---- Нейтральная шкала (10 ступеней) ------------------------------------ */
+  --n0:  #ffffff;  --n50: #f6f8fb;  --n100:#eef1f6;  --n150:#e6eaf2;  --n200:#dbe0ea;
+  --n300:#c7cedd;  --n400:#a4adc0;  --n500:#7b8498;  --n600:#586074;
+  --n700:#3a4150;  --n800:#232a3a;  --n900:#101627;
+
+  /* ---- Акцент + состояния ------------------------------------------------- */
+  --accent:        #3b63f6;
+  --accent-hover:  #2f52e0;
+  --accent-active: #2743c2;
+  --accent-weak:   rgba(59,99,246,.12);   /* фон активного состояния / tint */
+  --accent-line:   rgba(59,99,246,.32);   /* тонкая рамка активного          */
+  --on-accent:     #ffffff;
+
+  /* ---- Semantic (фон + текст) --------------------------------------------- */
+  --success: #15a34a;  --success-weak: rgba(21,163,74,.14);
+  --warning: #d97706;  --warning-weak: rgba(217,119,6,.16);
+  --danger:  #dc2626;  --danger-weak:  rgba(220,38,38,.12);
+  --info:    var(--accent);
+
+  /* ---- Текст -------------------------------------------------------------- */
+  --text:   #1b2233;   /* основной            */
+  --text-2: #49515f;   /* вторичный           */
+  --muted:  #7b8498;   /* подписи / метки     */
+  --faint:  #a4adc0;   /* диагностика/плейсхолдер */
+
+  /* ---- Поверхности / «жидкое стекло» -------------------------------------- */
+  --app-bg:       linear-gradient(135deg,#eef2f9 0%,#e4e9f3 100%);
+  --panel:        var(--n0);
+  --glass:        rgba(255,255,255,.68);
+  --glass-2:      rgba(255,255,255,.55);
+  --glass-strong: rgba(255,255,255,.82);   /* модалки / меню / тост          */
+  --glass-border: rgba(255,255,255,.85);
+  --glass-blur:   blur(24px) saturate(160%);
+  --glass-hi:     inset 0 1px 0 rgba(255,255,255,.7);   /* верхний блик стекла */
+
+  /* ---- Границы / поля ----------------------------------------------------- */
+  --hairline:    rgba(23,30,50,.09);
+  --hairline-2:  rgba(23,30,50,.14);
+  --field-bg:    rgba(255,255,255,.6);
+  --field-border:rgba(23,30,50,.13);
+
+  /* ---- Тени --------------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(16,22,42,.06), 0 1px 1px rgba(16,22,42,.04);
+  --shadow-md: 0 10px 30px rgba(16,22,42,.10), 0 2px 8px rgba(16,22,42,.06);
+  --shadow-lg: 0 30px 70px rgba(16,22,42,.22), 0 10px 24px rgba(16,22,42,.12);
+  --sb-thumb:  rgba(23,30,50,.2);
+
+  /* ---- Палитра холста (ТЗ §7.7) ------------------------------------------- */
+  /* Эти же переменные читает canvas-theme.js через getComputedStyle,
+     поэтому чертёж перекрашивается вместе с темой без второй копии значений. */
+  --canvas-bg:         #f5f8fc;
+  --canvas-grid:       rgba(23,40,80,.09);
+  --canvas-boundary:   #2b3550;   /* граница территории                 */
+  --canvas-selection:  #3b63f6;   /* маркер выделения / рамка bbox       */
+  --canvas-vertex:     #3b63f6;   /* ручки вершин                       */
+  --canvas-shared:     #15a34a;   /* общая вершина двух объектов         */
+  --canvas-redline:    #e11d48;   /* красные линии / пикетаж             */
+  --canvas-label:      #6b7590;   /* подписи объектов                   */
+  --zone-a:      rgba(232,161,60,.24);  --zone-a-line:     #d98e2b;  /* Ж-зоны  */
+  --zone-b:      rgba(59,99,246,.16);   --zone-b-line:     #3b63f6;  /* О-зоны  */
+  --zone-green:  rgba(47,158,91,.2);    --zone-green-line: #2f9e5b;  /* Р-зоны  */
+}
+
+/* =============================================================================
+   ТЁМНАЯ ТЕМА — вторая ступень тех же токенов (ТЗ §8)
+   ============================================================================= */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --n0:  #161b26;  --n50: #1a2130;  --n100:#1f2735;  --n150:#242d3d;  --n200:#2b3446;
+  --n300:#3a4459;  --n400:#586074;  --n500:#8a92a6;  --n600:#aab2c2;
+  --n700:#c9cfdc;  --n800:#e5e9f0;  --n900:#f3f5fa;
+
+  --accent:        #5b7cff;
+  --accent-hover:  #7089ff;
+  --accent-active: #4a6bf0;
+  --accent-weak:   rgba(91,124,255,.18);
+  --accent-line:   rgba(91,124,255,.4);
+  --on-accent:     #ffffff;
+
+  --success: #2fbe63;  --success-weak: rgba(47,190,99,.18);
+  --warning: #f0a13a;  --warning-weak: rgba(240,161,58,.18);
+  --danger:  #f4544f;  --danger-weak:  rgba(244,84,79,.16);
+
+  --text:   #e7eaf1;
+  --text-2: #aab2c2;
+  --muted:  #8a92a6;
+  --faint:  #5e6678;
+
+  --app-bg:       linear-gradient(135deg,#0b0e15 0%,#0d1119 100%);
+  --panel:        var(--n0);
+  --glass:        rgba(24,30,42,.62);
+  --glass-2:      rgba(20,26,37,.5);
+  --glass-strong: rgba(26,33,47,.86);
+  --glass-border: rgba(255,255,255,.08);
+  --glass-hi:     inset 0 1px 0 rgba(255,255,255,.08);
+
+  --hairline:    rgba(255,255,255,.07);
+  --hairline-2:  rgba(255,255,255,.12);
+  --field-bg:    rgba(255,255,255,.05);
+  --field-border:rgba(255,255,255,.11);
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-md: 0 12px 34px rgba(0,0,0,.5), 0 3px 10px rgba(0,0,0,.35);
+  --shadow-lg: 0 34px 80px rgba(0,0,0,.62), 0 12px 28px rgba(0,0,0,.45);
+  --sb-thumb:  rgba(255,255,255,.16);
+
+  --canvas-bg:         #0d1119;
+  --canvas-grid:       rgba(150,175,230,.08);
+  --canvas-boundary:   #8aa0d8;
+  --canvas-selection:  #5b7cff;
+  --canvas-vertex:     #5b7cff;
+  --canvas-shared:     #2fbe63;
+  --canvas-redline:    #ff5d7a;
+  --canvas-label:      #8a92a6;
+  --zone-a:      rgba(232,161,60,.16);  --zone-a-line:     #d98e2b;
+  --zone-b:      rgba(91,124,255,.16);  --zone-b-line:     #5b7cff;
+  --zone-green:  rgba(47,190,99,.14);   --zone-green-line: #2fbe63;
+}
+
+/* Автоподхват системной темы, пока пользователь не выбрал вручную.
+   Уберите блок, если нужен только ручной переключатель. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+}
+
+/* =============================================================================
+   ДОСТУПНОСТЬ ПРОЗРАЧНОСТИ/КОНТРАСТА (канон Apple §14): вся хромка на
+   backdrop-filter-стекле — по запросу делаем поверхности матовыми/непрозрачными
+   и усиливаем границы. Тема управляется атрибутом [data-theme], поэтому override
+   вешаем на тот же селектор.
+   ============================================================================= */
+@media (prefers-reduced-transparency: reduce) {
+  :root {                                   /* светлая (по умолчанию) */
+    --glass: #eceef2; --glass-2: #e6e9ef; --glass-strong: #f6f7f9;
+    --field-bg: #f2f3f6;
+    --glass-blur: none; --glass-hi: none;
+  }
+  [data-theme="dark"] {                      /* тёмная */
+    --glass: #171d29; --glass-2: #141a25; --glass-strong: #1e2634;
+    --field-bg: #1c2330;
+  }
+}
+@media (prefers-contrast: more) {
+  :root {
+    --glass-border: rgba(0,0,0,.5); --hairline: rgba(0,0,0,.28);
+    --hairline-2: rgba(0,0,0,.4); --field-border: rgba(0,0,0,.45);
+  }
+  [data-theme="dark"] {
+    --glass-border: rgba(255,255,255,.6); --hairline: rgba(255,255,255,.32);
+    --hairline-2: rgba(255,255,255,.5); --field-border: rgba(255,255,255,.55);
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   Опционально: единый шрифт оффлайн. Положите файлы в web/fonts/ и включите.
+   -----------------------------------------------------------------------------
+@font-face {
+  font-family: "Studio Sans";
+  src: url("fonts/StudioSans-Regular.woff2") format("woff2");
+  font-weight: 400; font-display: swap;
+}
+   Затем в :root:  --font-ui: "Studio Sans", -apple-system, "Segoe UI", sans-serif;
+----------------------------------------------------------------------------- */
