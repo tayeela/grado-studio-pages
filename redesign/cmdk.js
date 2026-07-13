@@ -22,6 +22,7 @@
   };
   const styleActive = () => { if (has("openLayerStyle") && has("activeLayer")) { const L = activeLayer(); if (L) openLayerStyle(L); } };
   const fitAll = () => { if (has("fitView")) fitView(); else click("btn-zoom-fit"); if (has("draw")) draw(); };
+  const modKey = key => `${/Mac|iPhone|iPad|iPod/.test(navigator.platform || "") ? "⌘" : "Ctrl+"}${key}`;
 
   const COMMANDS = [
     { sec: "Инструменты", items: [
@@ -63,8 +64,8 @@
       { t: "Вписать всё в экран", k: "F", run: fitAll },
       { t: "Переключить тему (свет / тёмная)", run: () => click("btn-theme") },
       { t: "Параметры расчёта ТЭП…", run: () => click("btn-tep-editor") },
-      { t: "Отменить", k: "⌘Z", run: () => click("btn-undo") },
-      { t: "Вернуть", k: "⌘⇧Z", run: () => click("btn-redo") },
+      { t: "Отменить", k: modKey("Z"), run: () => click("btn-undo") },
+      { t: "Вернуть", k: modKey("Shift+Z"), run: () => click("btn-redo") },
       { t: "Открыть проект…", run: () => click("btn-open") },
       { t: "Сохранить .grado", run: () => click("btn-grado") },
       { t: "Горячие клавиши", run: () => click("btn-shortcuts") },

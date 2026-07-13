@@ -3,6 +3,18 @@
   const previousFocus = new WeakMap();
   let dialogSeq = 0;
   let lastTrigger = null;
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || '');
+
+  document.querySelectorAll('[data-mod-key]').forEach(el => {
+    el.textContent = `${isMac ? '⌘' : 'Ctrl+'}${el.dataset.modKey}`;
+  });
+  const titleShortcuts = [
+    ['btn-undo', 'Отменить', 'Z'], ['btn-redo', 'Вернуть', 'Shift+Z']
+  ];
+  titleShortcuts.forEach(([id, title, key]) => {
+    const el = document.getElementById(id);
+    if (el) el.title = `${title} (${isMac ? '⌘' : 'Ctrl+'}${key})`;
+  });
 
   const visible = el => !!el && !el.hidden && el.getClientRects().length > 0;
   const focusables = root => [...root.querySelectorAll(

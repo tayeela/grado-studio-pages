@@ -2656,13 +2656,13 @@ function renderTep(data) {
   let html = "", group = null;
   for (const r of data.results) {
     if (r.group !== group) { group = r.group; html += `<div class="tep-group">${group}</div>`; }
-    html += `<div class="tep-row"><span>${r.title}</span><span class="v">${r.value} <small>${r.unit}</small></span></div>`;
+    html += `<div class="tep-row"><span>${escHtml(r.title)}</span><span class="v">${escHtml(r.value)} <small>${escHtml(r.unit)}</small></span></div>`;
   }
   if (data.checks && data.checks.length) {
     html += `<div class="tep-group">Проверки</div>`;
     for (const c of data.checks) {
       const col = c.ok ? "var(--success)" : "var(--warning)";
-      html += `<div class="tep-row" style="color:${col}"><span>${c.title}</span><span class="v">${c.msg}</span></div>`;
+      html += `<div class="tep-row" style="color:${col}"><span>${escHtml(c.title)}</span><span class="v">${escHtml(c.msg)}</span></div>`;
     }
   }
   body.innerHTML = html;
@@ -2902,7 +2902,7 @@ function renderProps() {
       userFields.map((cf, i) => userFieldHtml(cf, f, i)).join("\n")
     : "";
   const prov = f.prov
-    ? `<div class="metric prov">источник: ${f.prov.source}${f.prov.source_date ? " · " + f.prov.source_date : ""}</div>`
+    ? `<div class="metric prov">источник: ${escHtml(f.prov.source)}${f.prov.source_date ? " · " + escHtml(f.prov.source_date) : ""}</div>`
     : "";
   // === Унифицированный блок "Стиль и оформление объекта" ===
   // Цель: одна понятная секция вместо двух дублирующих ("Стиль (библиотека)" + "Оформление объекта").
@@ -2927,10 +2927,10 @@ function renderProps() {
       <label>Прозрачность, %<input type="range" id="f-fmt-op" min="10" max="100" step="5" value="${Math.round((f.fmt.fillOpacity ?? cur.fillOpacity ?? 1) * 100)}"></label>` : ""}
     <div class="metric" style="font-size:11px;color:var(--muted);margin-top:2px">Правки влияют только на экран и «знаки: как на холсте». Для стандартного PDF — используйте «Знак из библиотеки» или правила слоя.</div>`;
   }
-  el.innerHTML = `<div class="kind">${(L || {}).title || f.kind}</div>
+  el.innerHTML = `<div class="kind">${escHtml((L || {}).title || f.kind)}</div>
     <div class="metric">${metric}</div>${prov}${extra}${userFieldsHtml}${styleHtml}
     ${f.point ? "" : transformControlsHtml()}
-    <div class="metric" style="margin-top:6px">двойной клик по ребру — вершина,<br>Alt+клик по вершине — удалить,<br>R — поворот, ⌘D — дубликат</div>
+    <div class="metric" style="margin-top:6px">двойной клик по ребру — вершина,<br>Alt+клик по вершине — удалить,<br>R — поворот, ${modKeyLabel("D")} — дубликат</div>
     <button class="danger" id="f-del">Удалить (Del)</button>`;
   if (f.line && (f.props.radius || 0) > 0) {
     const b = document.createElement("button");
@@ -3177,7 +3177,8 @@ function initCollapsiblePanel() {
 
 // ---------- справка «Горячие клавиши» (клавиша ?) -------------------------
 // сгруппированный список — единственное полное место (строка-подсказка внизу
-// физически вмещает лишь часть). Клавиши в <kbd>, ⌘ = Cmd на Mac.
+// физически вмещает лишь часть). Модификатор показываем по текущей ОС.
+const modKeyLabel = key => `${/Mac|iPhone|iPad|iPod/.test(navigator.platform || "") ? "⌘" : "Ctrl+"}${key}`;
 const SHORTCUTS = [
   ["Инструменты", [
     ["V", "Выбор и правка объектов"], ["A", "Дуга"],
@@ -3197,7 +3198,7 @@ const SHORTCUTS = [
     ["Enter", "Завершить фигуру"], ["Esc", "Отменить действие"],
   ]],
   ["Правка объекта", [
-    ["R", "Повернуть на 90°"], ["⌘D", "Дубликат"], ["стрелки", "Сдвиг (с Shift — на 1 м)"],
+    ["R", "Повернуть на 90°"], [modKeyLabel("D"), "Дубликат"], ["стрелки", "Сдвиг (с Shift — на 1 м)"],
     ["Delete", "Удалить"], ["двойной клик по ребру", "Добавить вершину"],
     ["Alt + клик по вершине", "Удалить вершину"],
   ]],
@@ -3206,10 +3207,10 @@ const SHORTCUTS = [
     ["пробел + тянуть", "Сдвинуть холст"], ["X", "Привязка к объектам"], ["C", "Привязка к сетке"],
   ]],
   ["История", [
-    ["⌘Z", "Отменить"], ["⌘⇧Z", "Вернуть"], ["?", "Эта справка"],
+    [modKeyLabel("Z"), "Отменить"], [modKeyLabel("Shift+Z"), "Вернуть"], ["?", "Эта справка"],
   ]],
   ["Проект", [
-    ["⌘N", "Новый проект"], ["⌘O", "Открыть .grado"], ["⌘S", "Сохранить .grado"],
+    [modKeyLabel("N"), "Новый проект"], [modKeyLabel("O"), "Открыть .grado"], [modKeyLabel("S"), "Сохранить .grado"],
   ]],
 ];
 function openShortcuts() {
@@ -4833,7 +4834,7 @@ function setActiveLayer(id) {
   // несовместимый инструмент — переключается на естественный для слоя
   if (GEOM_OF_TOOL[state.tool] && !toolFitsLayer(state.tool, L))
     setTool(naturalToolFor(L), { keepLayer: true });
-  renderLayers(); updateLayerStatus(); persist(); draw();
+  renderLayers(); renderProps(); updateLayerStatus(); persist(); draw();
 }
 // быстрый слой по виду (клавиши G Z O B P L S): выбирает существующий слой
 // этого вида или заводит новый, затем ставит естественный инструмент. L2b:
@@ -5453,6 +5454,7 @@ on("btn-theme", "click", () => { if (window.toggleTheme) window.toggleTheme(); }
 window.onThemeChange = () => { draw(); renderLayers(); };
 setTool("select");
 renderLayers();
+renderProps();
 renderSources();
 requestAnimationFrame(resize);
 refreshTep();
@@ -5477,6 +5479,14 @@ function initPanelResizer() {
     const saved = localStorage.getItem('grado_panel_width');
     if (saved) panel.style.flexBasis = saved + 'px';
   } catch (e) {}
+  const setWidth = width => {
+    const value = Math.max(180, Math.min(600, Math.round(width)));
+    panel.style.flexBasis = value + 'px';
+    resizer.setAttribute('aria-valuenow', String(value));
+    resize();
+    return value;
+  };
+  setWidth(parseInt(panel.style.flexBasis) || panel.offsetWidth || 312);
   let startX = 0, startW = 0;
   resizer.addEventListener('mousedown', e => {
     startX = e.clientX;
@@ -5486,10 +5496,7 @@ function initPanelResizer() {
     const move = ev => {
       const dx = ev.clientX - startX;
       // panel on the right: drag resizer right (dx>0) → narrower panel
-      let w = Math.max(180, Math.min(600, startW - dx));
-      panel.style.flexBasis = w + 'px';
-      // live canvas resize
-      resize();
+      setWidth(startW - dx);
     };
     const up = () => {
       document.removeEventListener('mousemove', move);
@@ -5501,5 +5508,16 @@ function initPanelResizer() {
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up, { once: true });
+  });
+  resizer.addEventListener('keydown', e => {
+    let width = parseInt(panel.style.flexBasis) || panel.offsetWidth;
+    if (e.key === 'ArrowLeft') width += 20;
+    else if (e.key === 'ArrowRight') width -= 20;
+    else if (e.key === 'Home') width = 180;
+    else if (e.key === 'End') width = 600;
+    else return;
+    e.preventDefault();
+    width = setWidth(width);
+    try { localStorage.setItem('grado_panel_width', width); } catch (error) {}
   });
 }

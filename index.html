@@ -26,9 +26,9 @@
 <!-- ШАПКА (новый стиль, реальные кнопки движка) -->
 <header>
   <div class="logo" id="logo" title="ГРАДО Студия">ГРАДО <span>Студия</span></div>
-  <input class="projname" id="project-name" value="Концепция развития территории" spellcheck="false">
+  <input class="projname" id="project-name" value="Концепция развития территории" spellcheck="false" aria-label="Название проекта">
   <div class="spacer"></div>
-  <button class="kbar" id="open-cmdk" title="Командная палитра"><svg class="ic" style="width:14px;height:14px"><use href="#i-search"/></svg>Найти инструмент, слой, действие<kbd>⌘K</kbd></button>
+  <button class="kbar" id="open-cmdk" title="Командная палитра"><svg class="ic" style="width:14px;height:14px"><use href="#i-search"/></svg>Найти инструмент, слой, действие<kbd data-mod-key="K">⌘K</kbd></button>
   <button class="iconbtn" id="btn-theme" title="Светлая / тёмная тема" aria-label="Переключить светлую и тёмную тему"><svg class="ic"><use href="#i-theme"/></svg></button>
   <button class="iconbtn" id="btn-undo" title="Отменить (⌘Z)" aria-label="Отменить"><svg class="ic"><use href="#i-undo"/></svg></button>
   <button class="iconbtn" id="btn-redo" title="Вернуть (⌘⇧Z)" aria-label="Вернуть"><svg class="ic"><use href="#i-redo"/></svg></button>
@@ -42,14 +42,14 @@
 <div id="main">
   <!-- ЛЕВЫЙ ТУЛБАР (id=toolbar — контракт движка; новые иконки) -->
   <nav id="toolbar">
-    <button class="tool active" data-tool="select" title="Выбор и правка (V)"><svg class="ic"><use href="#i-cursor"/></svg>Выбор</button>
+    <button class="tool active" data-tool="select" title="Выбор и правка (V)" aria-label="Выбор и правка объектов"><svg class="ic"><use href="#i-cursor"/></svg>Выбор</button>
     <div class="rail-group">Рисование</div>
     <button class="tool" data-tool="point" title="Точка"><svg class="ic"><use href="#i-dot"/></svg>Точка</button>
     <button class="tool" data-tool="polyline" title="Линия"><svg class="ic"><use href="#i-line"/></svg>Линия</button>
     <button class="tool" data-tool="polygon" title="Полигон"><svg class="ic"><use href="#i-poly"/></svg>Полигон</button>
-    <button class="tool" data-tool="rect" title="Прямоугольник"><svg class="ic"><use href="#i-rect"/></svg>Прямоуг.</button>
-    <button class="tool" data-tool="arc" title="Дуга по 3 точкам"><svg class="ic"><use href="#i-arc"/></svg>Дуга</button>
-    <button class="tool" data-tool="circle" title="Окружность"><svg class="ic"><use href="#i-circle"/></svg>Окружн.</button>
+    <button class="tool" data-tool="rect" title="Прямоугольник" aria-label="Прямоугольник"><svg class="ic"><use href="#i-rect"/></svg>Прямоуг.</button>
+    <button class="tool" data-tool="arc" title="Дуга по 3 точкам" aria-label="Дуга по трём точкам"><svg class="ic"><use href="#i-arc"/></svg>Дуга</button>
+    <button class="tool" data-tool="circle" title="Окружность" aria-label="Окружность"><svg class="ic"><use href="#i-circle"/></svg>Окружн.</button>
     <div class="rail-group">Правка</div>
     <button class="tool" data-tool="trim" title="Обрезать (T)"><svg class="ic"><use href="#i-trim"/></svg>Обрезать</button>
     <button class="tool" data-tool="extend" title="Продлить (E)"><svg class="ic"><use href="#i-extend"/></svg>Продлить</button>
@@ -61,20 +61,20 @@
     <button class="tool" data-tool="mirror" title="Зеркало"><svg class="ic"><use href="#i-mirror"/></svg>Зеркало</button>
     <div class="rail-group">Мера</div>
     <button class="tool" data-tool="dim" title="Размер (D)"><svg class="ic"><use href="#i-dim"/></svg>Размер</button>
-    <button class="tool" data-tool="measure" title="Измерение (M)"><svg class="ic"><use href="#i-ruler"/></svg>Измер.</button>
+    <button class="tool" data-tool="measure" title="Измерение (M)" aria-label="Измерение расстояния"><svg class="ic"><use href="#i-ruler"/></svg>Измер.</button>
     <div class="rail-group">Привязки</div>
     <button class="tool active" id="btn-snap" title="Привязки (X)"><svg class="ic"><use href="#i-snap"/></svg>Привязки</button>
   </nav>
 
   <!-- ХОЛСТ: реальный canvas движка -->
   <div id="stage">
-    <canvas id="cv"></canvas>
+    <canvas id="cv" tabindex="0" aria-label="Холст чертежа. Выберите инструмент на панели слева; Enter завершает фигуру, Escape отменяет действие.">Интерактивный холст чертежа ГРАДО Студии.</canvas>
     <div id="cv-activelayer" class="cv-float" style="top:16px;left:16px;padding:6px 12px;font-size:var(--fs-12);font-weight:500"></div>
     <div class="cv-float cv-compass"><svg class="ic" style="width:20px;height:20px"><use href="#i-north"/></svg></div>
     <div class="cv-float cv-zoom">
-      <button id="btn-zoom-in" title="Приблизить">+</button>
-      <button id="btn-zoom-out" title="Отдалить">−</button>
-      <button id="btn-zoom-fit" title="Вписать всё (F)"><svg class="ic"><use href="#i-fit"/></svg></button>
+      <button id="btn-zoom-in" title="Приблизить" aria-label="Приблизить">+</button>
+      <button id="btn-zoom-out" title="Отдалить" aria-label="Отдалить">−</button>
+      <button id="btn-zoom-fit" title="Вписать всё (F)" aria-label="Вписать всё"><svg class="ic"><use href="#i-fit"/></svg></button>
     </div>
     <!-- статус-строка (реальные st-* id движка) -->
     <div class="statusbar">
@@ -94,7 +94,7 @@
     </div>
   </div>
 
-  <div id="panel-resizer" title="Перетащите — ширина панели"></div>
+  <div id="panel-resizer" title="Перетащите — ширина панели" role="separator" aria-label="Ширина панели слоёв" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="600" tabindex="0"></div>
 
   <!-- ПРАВАЯ ПАНЕЛЬ: Слои — реальный #layers-body движка в новом виде.
        Свойства/Данные/ТЭП — следующие шаги. -->
@@ -106,30 +106,29 @@
     </div>
     <div class="panel-scroll">
       <div class="card" id="card-props">
-        <div class="card-h"><svg class="ic cc"><use href="#i-caret"/></svg>Свойства</div>
-        <div class="card-b"><div id="props-body" class="muted"></div></div>
+        <div class="card-h"><button type="button" class="card-toggle" aria-expanded="true" aria-controls="props-card-body"><svg class="ic cc"><use href="#i-caret"/></svg>Свойства</button></div>
+        <div class="card-b" id="props-card-body"><div id="props-body" class="muted"></div></div>
       </div>
       <div class="card" id="card-layers">
-        <div class="card-h"><svg class="ic cc"><use href="#i-caret"/></svg>Слои <span class="lcount" id="lcount"></span>
+        <div class="card-h"><button type="button" class="card-toggle" aria-expanded="true" aria-controls="layers-card-body"><svg class="ic cc"><use href="#i-caret"/></svg>Слои <span class="lcount" id="lcount"></span></button>
           <span style="margin-left:auto;display:flex;gap:2px">
             <button class="h3-btn" id="btn-style-lib" title="Библиотека знаков — редактор эталонных знаков"><svg class="ic"><use href="#ic-format"/></svg></button>
             <button class="h3-btn" id="btn-project-styles" title="Стили проекта"><svg class="ic"><use href="#ic-label"/></svg></button>
-            <button class="h3-btn" id="btn-manage-kinds" title="Типы слоёв">⚙</button>
+            <button class="h3-btn" id="btn-manage-kinds" title="Типы слоёв" aria-label="Типы слоёв">⚙</button>
           </span>
         </div>
-        <div class="card-b" style="padding-bottom:9px">
+        <div class="card-b" id="layers-card-body" style="padding-bottom:9px">
           <div id="layers-body"></div>
           <button class="addlayer" id="btn-new-layer" style="margin-top:6px"><svg class="ic" style="width:15px;height:15px"><use href="#i-plus"/></svg>Добавить слой</button>
         </div>
       </div>
       <div class="card" id="tep-card">
-        <div class="card-h"><svg class="ic cc"><use href="#i-caret"/></svg><svg class="ic" style="width:15px;height:15px"><use href="#i-chart"/></svg>ТЭП
-          <span class="tep-status-badge" id="tep-status"></span>
-          <span class="tep-live">живой расчёт</span>
+        <div class="card-h"><button type="button" class="card-toggle" aria-expanded="true" aria-controls="tep-card-body"><svg class="ic cc"><use href="#i-caret"/></svg><svg class="ic" style="width:15px;height:15px"><use href="#i-chart"/></svg>ТЭП
+          <span class="tep-status-badge" id="tep-status"></span><span class="tep-live">живой расчёт</span></button>
           <button class="h3-btn" id="btn-tep-editor" title="Параметры расчёта ТЭП" aria-label="Параметры расчёта ТЭП" style="margin-left:6px"><svg class="ic"><use href="#ic-format"/></svg></button>
           <button class="h3-btn" id="btn-variants" title="Варианты концепции — снимки проекта и сравнение ТЭП" aria-label="Варианты концепции"><svg class="ic"><use href="#i-chart"/></svg></button>
         </div>
-        <div class="card-b">
+        <div class="card-b" id="tep-card-body">
           <div id="tep-fact"></div>
           <div id="tep-body" class="muted">Начертите границу территории</div>
         </div>
@@ -155,10 +154,10 @@
   <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-demo">Заполнить примером (демо)</div>
 </div>
 <div class="menu" id="menu-proj" role="menu" hidden>
-  <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-new-project">Новый проект<span class="sub">⌘N</span></div>
+  <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-new-project">Новый проект<span class="sub" data-mod-key="N">⌘N</span></div>
   <div class="menu-sep"></div>
-  <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-open">Открыть проект…<span class="sub">⌘O</span></div>
-  <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-grado">Сохранить проект (.grado)<span class="sub">⌘S</span></div>
+  <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-open">Открыть проект…<span class="sub" data-mod-key="O">⌘O</span></div>
+  <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-grado">Сохранить проект (.grado)<span class="sub" data-mod-key="S">⌘S</span></div>
   <div class="menu-row" role="menuitem" tabindex="-1" data-click="btn-recover">Восстановить автосохранение…</div>
   <div class="menu-sep"></div>
   <div class="menu-row danger" role="menuitem" tabindex="-1" data-click="btn-clear">Очистить холст</div>
@@ -367,15 +366,20 @@
     let collapsed = {};
     try { collapsed = JSON.parse(localStorage.getItem('grado_cards_collapsed') || '{}'); } catch (e) {}
     document.querySelectorAll('#panel .card[id]').forEach(card => {
-      const head = card.querySelector('.card-h');
-      if (!head) return;
+      const toggle = card.querySelector('.card-toggle');
+      if (!toggle) return;
       if (collapsed[card.id]) card.classList.add('collapsed');
-      head.addEventListener('click', e => {
-        // не сворачиваем, если кликнули по управляющему элементу в заголовке
-        if (e.target.closest('button,select,input,a')) return;
+      toggle.setAttribute('aria-expanded', String(!card.classList.contains('collapsed')));
+      toggle.addEventListener('click', () => {
         card.classList.toggle('collapsed');
+        toggle.setAttribute('aria-expanded', String(!card.classList.contains('collapsed')));
         collapsed[card.id] = card.classList.contains('collapsed');
         try { localStorage.setItem('grado_cards_collapsed', JSON.stringify(collapsed)); } catch (e) {}
+      });
+      toggle.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        toggle.click();
       });
     });
   })();
