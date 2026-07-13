@@ -3556,11 +3556,36 @@ function openManageKinds() {
 // (persist). Позволяет пробовать альтернативы посадки/зонирования и сравнивать
 // их ТЭП рядом, не теряя рабочее состояние.
 let _variantSeq = 0;
-function saveCurrentAsVariant(name) {
+function nextVariantId() {
+  _variantSeq += 1;
+  return `var-${Date.now().toString(36)}-${_variantSeq.toString(36)}`;
+}
+function cloneVariantValue(value) { return JSON.parse(JSON.stringify(value)); }
+function tepResultValue(data, title) {
+  const row = data && data.results && data.results.find(item => item.title === title);
+  return row ? row.value : null;
+}
+function summarizeVariantTep(data) {
+  if (!data) return null;
+  const warnings = (data.checks || []).filter(check => !check.ok).length +
+    (data.zones && !data.zones.ok ? 1 : 0);
+  return {
+    hasTerritory: data.has_territory !== false,
+    spp: data.fact ? data.fact.spp : null,
+    density: data.fact ? data.fact.density : null,
+    population: tepResultValue(data, "Расчётное население"),
+    warnings,
+    checkedAt: new Date().toISOString(),
+  };
+}
+function saveCurrentAsVariant(name, options = {}) {
   state.variants = state.variants || [];
-  const v = { id: "var" + (Date.now ? Date.now() : ++_variantSeq),
-    name, features: JSON.parse(JSON.stringify(state.features)),
-    params: params(), createdAt: new Date().toISOString().slice(0, 16).replace("T", " ") };
+  const v = { id: nextVariantId(), name,
+    features: cloneVariantValue(options.features || state.features),
+    params: cloneVariantValue(options.params || params()),
+    createdAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+    source: options.source || "manual" };
+  if (options.generator) v.generator = cloneVariantValue(options.generator);
   state.variants.push(v);
   persist();
   return v;
@@ -3583,30 +3608,79 @@ function openVariants() {
   overlay.className = "modal-overlay";
   const $ = id => overlay.querySelector("#" + id);
   const sel = new Set();   // id вариантов, отмеченных для сравнения
+  let currentSummary = summarizeVariantTep(window.lastTepData);
+  let calculating = false;
+  let generating = false;
+  function uniqueVariantName(base) {
+    const names = new Set((state.variants || []).map(v => v.name));
+    if (!names.has(base)) return base;
+    let index = 2;
+    while (names.has(`${base} ${index}`)) index += 1;
+    return `${base} ${index}`;
+  }
+  function metric(value, unit) {
+    const shown = value == null || value === "" ? "—" : escHtml(String(value));
+    return `<span class="var-metric"><b>${shown}</b><small>${escHtml(unit)}</small></span>`;
+  }
+  function summaryHtml(summary) {
+    if (!summary) return `<div class="var-summary loading">Рассчитываю паспорт ТЭП…</div>`;
+    if (!summary.hasTerritory) return `<div class="var-summary missing">Для расчёта нужна граница территории</div>`;
+    const status = summary.warnings
+      ? `<span class="var-health warning">Проверок: ${summary.warnings}</span>`
+      : `<span class="var-health ok">Без предупреждений</span>`;
+    return `<div class="var-summary">${metric(summary.spp, "тыс. м² СПП")}${metric(summary.density, "тыс. м²/га")}${
+      metric(summary.population, "чел.")}${status}</div>`;
+  }
+  function currentHtml() {
+    const p = params();
+    return `<div class="var-current-copy"><span class="var-eyebrow">Рабочее состояние</span><b>Текущий сценарий</b>
+      <small>Целевая плотность ${escHtml(String(p.density))} тыс. м²/га · жильё ${escHtml(String(p.ratio_zh))}%</small></div>
+      ${summaryHtml(currentSummary)}`;
+  }
   function rowsHtml() {
     const vs = state.variants || [];
-    if (!vs.length) return `<div class="muted" style="padding:var(--sp-3) var(--sp-4)">Вариантов пока нет. Сохраните текущее состояние как вариант, попробуйте другую посадку — и сравните ТЭП.</div>`;
-    return vs.map(v => `<div class="var-item" data-id="${escHtml(v.id)}">
-      <input type="checkbox" class="var-cmp" data-id="${escHtml(v.id)}" ${sel.has(v.id) ? "checked" : ""} title="сравнить ТЭП">
-      <span class="var-nm">${escHtml(v.name)}</span>
-      <span class="var-meta">${v.features.length} об. · ${escHtml(v.createdAt || "")}</span>
-      <button class="var-load" data-id="${escHtml(v.id)}" title="Загрузить этот вариант">Загрузить</button>
-      <button class="var-del" data-id="${escHtml(v.id)}" title="Удалить вариант"><svg class="ic"><use href="#ic-trash"/></svg></button>
-    </div>`).join("");
+    if (!vs.length) return `<div class="var-empty"><b>Сохранённых вариантов пока нет</b><span>Зафиксируйте текущую посадку или создайте три сценария плотности для первого сравнения.</span></div>`;
+    return vs.map(v => `<article class="var-item${v.baseline ? " baseline" : ""}" data-id="${escHtml(v.id)}">
+      <label class="var-select" title="Добавить в сравнение"><input type="checkbox" class="var-cmp" data-id="${escHtml(v.id)}" aria-label="Добавить вариант ${escHtml(v.name)} в сравнение" ${sel.has(v.id) ? "checked" : ""}><span></span></label>
+      <div class="var-card-main"><div class="var-title-row"><span class="var-nm">${escHtml(v.name)}</span>${v.baseline ? '<span class="var-baseline-badge">Базовый</span>' : ""}</div>
+        <span class="var-meta">${v.source === "generator" ? `Сценарий плотности · цель ${escHtml(String(v.params?.density ?? "—"))} тыс. м²/га` : "Снимок проекта"} · ${v.features.length} объектов · ${escHtml(v.createdAt || "")}</span>
+        ${summaryHtml(v.tepSummary)}</div>
+      <div class="var-card-actions">
+        <button class="var-base" data-id="${escHtml(v.id)}" aria-label="${v.baseline ? "Базовый вариант" : "Сделать базовым"}: ${escHtml(v.name)}">${v.baseline ? "Базовый вариант" : "Сделать базовым"}</button>
+        <button class="var-load" data-id="${escHtml(v.id)}" aria-label="Загрузить вариант ${escHtml(v.name)}">Загрузить</button>
+        <button class="var-del" data-id="${escHtml(v.id)}" aria-label="Удалить вариант ${escHtml(v.name)}" title="Удалить вариант"><svg class="ic"><use href="#ic-trash"/></svg></button>
+      </div>
+    </article>`).join("");
   }
   function render() {
+    $("var-current").innerHTML = currentHtml();
     $("var-list").innerHTML = rowsHtml();
+    const generateButton = $("var-generate");
+    if (generateButton) {
+      generateButton.disabled = generating;
+      generateButton.textContent = generating ? "Создаю сценарии…" : "Создать 3 сценария";
+    }
     overlay.querySelectorAll(".var-cmp").forEach(el => el.onchange = () => {
       if (el.checked) sel.add(el.dataset.id); else sel.delete(el.dataset.id);
       updateCompareButton();
     });
+    overlay.querySelectorAll(".var-base").forEach(el => el.onclick = () => setBaseline(el.dataset.id));
     overlay.querySelectorAll(".var-load").forEach(el => el.onclick = () => loadVariant(el.dataset.id));
     overlay.querySelectorAll(".var-del").forEach(el => el.onclick = () => delVariant(el.dataset.id));
     updateCompareButton();
   }
   function updateCompareButton() {
     const button = $("var-compare");
-    if (button) button.disabled = sel.size === 0;
+    if (button) {
+      button.disabled = sel.size === 0 || calculating || generating;
+      button.textContent = calculating ? "Считаю…" : sel.size ? `Сравнить · ${sel.size + 1}` : "Выберите варианты";
+    }
+  }
+  function setBaseline(id) {
+    const variants = state.variants || [];
+    variants.forEach(v => { v.baseline = v.id === id; });
+    persist(); render();
+    toast("Базовый вариант обновлён");
   }
   async function loadVariant(id) {
     const v = (state.variants || []).find(x => x.id === id);
@@ -3628,19 +3702,91 @@ function openVariants() {
     sel.delete(id); persist(); render();
     toast("Вариант удалён");
   }
-  overlay.innerHTML = `<div class="modal fmt-modal-lg var-modal">
-    <div class="modal-head">Варианты концепции
-      <button class="modal-x" title="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button></div>
-    <div class="modal-body compact">
-      <div class="lib-hint">Снимок текущего проекта: попробуйте другую посадку/зонирование в новом варианте, сравните их ТЭП рядом. Загрузка заменяет рабочее состояние.</div>
+  async function ensureSummary(v) {
+    if (v.tepSummary) return v.tepSummary;
+    const data = await tepForVariant(v.features, v.params);
+    v.tepSummary = summarizeVariantTep(data);
+    return v.tepSummary;
+  }
+  async function hydrateSummaries() {
+    const tasks = [tepForVariant(state.features, params()).then(data => {
+      currentSummary = summarizeVariantTep(data);
+    })];
+    for (const v of state.variants || []) if (!v.tepSummary) tasks.push(ensureSummary(v));
+    await Promise.all(tasks);
+    if (!overlay.isConnected) return;
+    persist(); render();
+  }
+  async function compareSelected() {
+    const chosen = (state.variants || []).filter(v => sel.has(v.id));
+    if (!chosen.length) { toast("Отметьте вариант для сравнения", "warn"); return; }
+    calculating = true; updateCompareButton();
+    $("var-cmp-out").innerHTML = `<div class="var-calculating">Собираю подробное сравнение ТЭП…</div>`;
+    const cols = [{ name: "Текущее", features: state.features, params: params(), current: true },
+                  ...chosen.map(v => ({ name: v.name, features: v.features, params: v.params, baseline: v.baseline }))];
+    const teps = await Promise.all(cols.map(c => tepForVariant(c.features, c.params)));
+    const rowKeys = [];
+    const add = (title, unit, vals, kind = "") => rowKeys.push({ title, unit, vals, kind });
+    add("Целевая плотность", "тыс. м²/га", cols.map(c => c.params.density), "input");
+    add("Доля жилья", "%", cols.map(c => c.params.ratio_zh), "input");
+    add("СПП факт", "тыс. м²", teps.map(t => t && t.fact ? t.fact.spp : "—"));
+    add("Плотность факт", "тыс. м²/га", teps.map(t => t && t.fact ? t.fact.density : "—"));
+    add("Нормативные предупреждения", "", teps.map(t => t ? (t.checks || []).filter(c => !c.ok).length + (t.zones && !t.zones.ok ? 1 : 0) : "—"), "health");
+    const resultTitles = [];
+    for (const t of teps) if (t && t.results) for (const row of t.results)
+      if (!resultTitles.find(item => item.title === row.title)) resultTitles.push({ title: row.title, unit: row.unit });
+    for (const result of resultTitles) add(result.title, result.unit, teps.map(t => {
+      const row = t && t.results && t.results.find(item => item.title === result.title);
+      return row ? row.value : "—";
+    }));
+    const head = `<tr><th>Показатель</th>${cols.map(c => `<th class="${c.baseline ? "baseline" : ""}">${escHtml(c.name)}${c.baseline ? " · базовый" : ""}</th>`).join("")}</tr>`;
+    const body = rowKeys.map(row => `<tr class="${row.kind}"><td>${escHtml(row.title)} <small>${escHtml(row.unit || "")}</small></td>${
+      row.vals.map(value => `<td class="var-v">${escHtml(String(value))}</td>`).join("")}</tr>`).join("");
+    $("var-cmp-out").innerHTML = `<section class="var-compare-section"><div class="var-compare-head"><span><b>Сравнение сценариев</b><small>Текущее состояние всегда остаётся первой колонкой</small></span></div>
+      <div class="var-cmp-wrap"><table class="attr-table var-cmp-table"><thead>${head}</thead><tbody>${body}</tbody></table></div></section>`;
+    calculating = false; updateCompareButton();
+  }
+  async function generateDensityScenarios() {
+    if (generating) return;
+    if (!currentSummary) currentSummary = summarizeVariantTep(
+      await tepForVariant(state.features, params()));
+    if (currentSummary && !currentSummary.hasTerritory) {
+      toast("Сначала задайте границу территории", "warn"); return;
+    }
+    generating = true; render();
+    const base = params();
+    const density = Number(base.density) || 25;
+    const profiles = [
+      { name: "Плотность −15%", factor: .85 },
+      { name: "Базовая плотность", factor: 1 },
+      { name: "Плотность +15%", factor: 1.15 },
+    ];
+    const created = profiles.map(profile => saveCurrentAsVariant(uniqueVariantName(profile.name), {
+      params: { ...base, density: Math.round(density * profile.factor * 10) / 10 },
+      source: "generator", generator: { kind: "density_range", factor: profile.factor },
+    }));
+    created.forEach(v => sel.add(v.id));
+    render();
+    await Promise.all(created.map(ensureSummary));
+    if (!overlay.isConnected) return;
+    persist(); generating = false; render();
+    toast("Созданы три сценария плотности");
+    await compareSelected();
+  }
+  overlay.innerHTML = `<div class="modal var-modal" role="dialog" aria-modal="true" aria-labelledby="variants-title">
+    <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Центр сценариев</span><span id="variants-title">Варианты концепции</span></span>
+      <button class="modal-x" title="Закрыть" aria-label="Закрыть варианты концепции"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body compact var-body">
+      <section id="var-current" class="var-current"></section>
+      <div class="var-toolbar"><span><b>Сохранённые варианты</b><small>Снимки геометрии и расчётных параметров проекта</small></span>
+        <button id="var-generate">Создать 3 сценария</button><button id="var-save" class="primary">Сохранить текущее</button></div>
       <div id="var-list" class="var-list"></div>
-      <button id="var-save" class="fmt-copy-btn">+ Сохранить текущее как вариант</button>
       <div id="var-cmp-out"></div>
     </div>
     <div class="modal-actions">
-      <button id="var-compare" disabled>Сравнить с текущим</button>
+      <span class="modal-action-note">Базовый вариант выбирает проектировщик</span>
       <span class="spacer"></span>
-      <button id="var-close" class="primary">Закрыть</button>
+      <button id="var-close">Закрыть</button><button id="var-compare" class="primary" disabled>Выберите варианты</button>
     </div></div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener("click", ev => ev.stopPropagation());
@@ -3648,40 +3794,19 @@ function openVariants() {
   $("var-save").onclick = async () => {
     const name = await uiPrompt("Название варианта:", `Вариант ${(state.variants || []).length + 1}`, { ok: "Сохранить" });
     if (name == null) return;
-    saveCurrentAsVariant(name.trim() || `Вариант ${(state.variants || []).length + 1}`);
+    const variant = saveCurrentAsVariant(name.trim() || `Вариант ${(state.variants || []).length + 1}`);
     render();
+    await ensureSummary(variant);
+    if (!overlay.isConnected) return;
+    persist(); render();
     toast("Вариант сохранён");
   };
-  $("var-compare").onclick = async () => {
-    const chosen = (state.variants || []).filter(v => sel.has(v.id));
-    if (!chosen.length) { toast("Отметьте вариант для сравнения", "warn"); return; }
-    $("var-cmp-out").innerHTML = `<div class="muted" style="padding:0 var(--sp-4)">Считаю ТЭП…</div>`;
-    // колонки: текущее (рабочее) + выбранные варианты
-    const cols = [{ name: "Текущее", features: state.features, params: params() },
-                  ...chosen.map(v => ({ name: v.name, features: v.features, params: v.params }))];
-    const teps = await Promise.all(cols.map(c => tepForVariant(c.features, c.params)));
-    // строки сравнения: факт СПП/плотность + результаты (по title)
-    const rowKeys = [];
-    const add = (title, unit, vals) => rowKeys.push({ title, unit, vals });
-    add("СПП факт", "тыс. м²", teps.map(t => t && t.fact ? t.fact.spp : "—"));
-    add("Плотность факт", "тыс. м²/га", teps.map(t => t && t.fact ? t.fact.density : "—"));
-    // результаты — по объединению title (население, площади и т.п.)
-    const resultTitles = [];
-    for (const t of teps) if (t && t.results) for (const r of t.results)
-      if (!resultTitles.find(x => x.title === r.title)) resultTitles.push({ title: r.title, unit: r.unit });
-    for (const rt of resultTitles)
-      add(rt.title, rt.unit, teps.map(t => {
-        const r = t && t.results && t.results.find(x => x.title === rt.title);
-        return r ? r.value : "—";
-      }));
-    const head = `<tr><th>Показатель</th>${cols.map(c => `<th>${escHtml(c.name)}</th>`).join("")}</tr>`;
-    const body = rowKeys.map(rk => `<tr><td>${escHtml(rk.title)} <small class="muted">${escHtml(rk.unit || "")}</small></td>${
-      rk.vals.map(v => `<td class="var-v">${escHtml(String(v))}</td>`).join("")}</tr>`).join("");
-    $("var-cmp-out").innerHTML = `<div class="var-cmp-wrap"><table class="attr-table var-cmp-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
-  };
+  $("var-generate").onclick = generateDensityScenarios;
+  $("var-compare").onclick = compareSelected;
   $("var-close").onclick = () => overlay.remove();
   overlay.querySelector(".modal-x").onclick = () => overlay.remove();
   overlay.addEventListener("click", ev => { if (ev.target === overlay) overlay.remove(); });
+  hydrateSummaries();
 }
 
 function openAlbumConfig() {
