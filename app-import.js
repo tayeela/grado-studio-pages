@@ -25,19 +25,21 @@ async function pollInbox() {
     // сообщаем только когда канал занят (в QGIS открыт тот же порт)
     document.getElementById("st-bridge").textContent =
       data.bridge ? "" : "приём данных из браузера занят (закрыт в QGIS?)";
-    let added = 0, dup = 0, snapped = false;
+    let added = 0, dup = 0, invalid = 0, snapped = false;
     for (const item of data.items) {
       if (!item.features.length) continue;
       if (!snapped) { snapshot(); snapped = true; }
       const r = importSourceFeatures(item.features);
-      added += r.added; dup += r.dup;
+      added += r.added; dup += r.dup; invalid += r.invalid;
       recordSource(item.snapshot, item.diff);   // снимок моста → журнал
     }
-    if (added || dup) {
+    if (added || dup || invalid) {
       afterChange();
       fitView();
       const src = data.items[0].source === "fgis_tp" ? "ФГИС ТП" : "НСПД";
-      toast(`Получено из браузера: +${plObjects(added)} (${src})` + (dup ? ` · ${dup} уже были` : ""));
+      toast(`Получено из браузера: +${plObjects(added)} (${src})` +
+        (dup ? ` · ${dup} уже были` : "") +
+        (invalid ? ` · ${invalid} поврежд. пропущено` : ""), invalid ? "warn" : undefined);
     }
   } catch (e) {
     if (!serverDown) {
@@ -71,12 +73,14 @@ on("nspd-file", "change", async e => {
     const data = await r.json();
     if (!data.features.length) { toast("В захвате нет полигонов НСПД", "warn"); return; }
     snapshot();
-    const { added, dup } = importSourceFeatures(data.features);
+    const { added, dup, invalid } = importSourceFeatures(data.features);
     state.selected = null;
     recordSource(data.snapshot, data.diff);   // снимок импорта → журнал
     afterChange();
     fitView();
-    if (dup) toast(`НСПД: +${added} · ${dup} уже были (пропущены)`);
+    if (dup || invalid) toast(`НСПД: +${added}` +
+      (dup ? ` · ${dup} уже были` : "") +
+      (invalid ? ` · ${invalid} поврежд. пропущено` : ""), invalid ? "warn" : undefined);
   } catch (err) {
     toast("Не удалось импортировать захват: " + String(err).slice(0, 200), "error");
   }
@@ -97,7 +101,7 @@ async function applyGisogdData(data, askText) {
     { ok: "Импортировать", cancel: "Отмена" });
   if (!ok) return false;
   snapshot();
-  const { added, dup } = importSourceFeatures(data.features);
+  const { added, dup, invalid } = importSourceFeatures(data.features);
   state.selected = null;
   recordSource(data.snapshot, data.diff);
   // атрибуты ОГД → колонки таблицы соответствующих слоёв (как в «Данных»)
@@ -118,8 +122,10 @@ async function applyGisogdData(data, askText) {
   fitView();
   renderLayers();
   const dupNote = dup ? ` · ${dup} уже были (пропущены)` : "";
+  const invalidNote = invalid ? ` · ${invalid} поврежд. пропущено` : "";
   toast(`ОГД: +${added} объектов${dupNote}` +
-        (data.notes && data.notes.length ? ` · ${data.notes.join("; ")}` : ""));
+        invalidNote + (data.notes && data.notes.length ? ` · ${data.notes.join("; ")}` : ""),
+        invalid ? "warn" : undefined);
   return true;
 }
 async function importGisogd(fetchArgs, askText, errText) {

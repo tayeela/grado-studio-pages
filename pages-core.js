@@ -31,8 +31,18 @@
   ]);
 
   const number = (value, fallback) => {
+    if (value === null || value === undefined ||
+        (typeof value === "string" && !value.trim())) return fallback;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const bounded = (value, minimum, maximum, fallback) => {
+    const parsed = number(value, fallback);
+    return parsed >= minimum && parsed <= maximum ? parsed : fallback;
+  };
+  const floorCount = value => {
+    const floors = Math.trunc(number(value, 9));
+    return floors >= 1 && floors <= 75 ? floors : 9;
   };
   const roundBits = new DataView(new ArrayBuffer(8));
   const compareDoubleToDecimalHalf = (value, lower, factor) => {
@@ -135,13 +145,13 @@
     const terrArea = rounded(rawTerrArea, 4);
     const restrictArea = rounded(rawRestrictArea, 4);
     const calcArea = terrArea - restrictArea;
-    const density = number(params.density, 25);
-    const ratioZh = number(params.ratio_zh, 80);
-    const percentVpp = number(params.percent_vpp, 6);
+    const density = bounded(params.density, 0, 1000, 25);
+    const ratioZh = bounded(params.ratio_zh, 0, 100, 80);
+    const percentVpp = bounded(params.percent_vpp, 0, 100, 6);
     const educationZone = number(params.education_zone, 1) === 2 ? 2 : 1;
     const territoryMode = number(params.territory_mode, 1) === 2 ? 2 : 1;
-    const kRail = number(params.k_rail, 1);
-    const kBa = number(params.k_ba, 0.5);
+    const kRail = bounded(params.k_rail, 0, 10, 1);
+    const kBa = bounded(params.k_ba, 0, 10, 0.5);
     const spp = density * calcArea;
     const np = spp * 0.9;
     const sppZh = spp * ratioZh / 100;
@@ -162,7 +172,7 @@
     const adultRecreation = rounded(territoryMode === 2 ? populationThs * 1000 * 0.1 : 0);
     const parking = rounded(populationThs * 257 * kRail * kBa);
     const factSpp = features.filter(feature => feature.kind === "building" && feature.ring)
-      .reduce((sum, feature) => sum + ringArea(feature.ring) * Math.trunc(number(feature.props && feature.props.floors, 9)) / 1000, 0);
+      .reduce((sum, feature) => sum + ringArea(feature.ring) * floorCount(feature.props && feature.props.floors) / 1000, 0);
     const factDensity = calcArea > 0 ? factSpp / calcArea : 0;
     const results = [
       result("calc_area", "Территория", "Расчётная площадь территории", calcArea, "га", 2),
@@ -213,17 +223,21 @@
     };
   }
 
+  const MAX_COORDINATE = 1e9;
+  const finiteCoordinate = value => value !== null && value !== undefined &&
+    !(typeof value === "string" && !value.trim()) && Number.isFinite(Number(value)) &&
+    Math.abs(Number(value)) <= MAX_COORDINATE;
   const finitePoint = value => Array.isArray(value) && value.length >= 2 &&
-    Number.isFinite(Number(value[0])) && Number.isFinite(Number(value[1]));
+    finiteCoordinate(value[0]) && finiteCoordinate(value[1]);
   const validGeometry = feature => {
     if (!feature || typeof feature !== "object" || Array.isArray(feature)) return false;
     if (feature.kind === "social") return finitePoint(feature.point);
     if (feature.kind === "redline")
       return Array.isArray(feature.line) && feature.line.length >= 2 && feature.line.every(finitePoint);
-    if (feature.circle) return Number.isFinite(Number(feature.circle.cx)) &&
-      Number.isFinite(Number(feature.circle.cy)) && Number(feature.circle.r) > 0;
-    if (feature.arc) return Number.isFinite(Number(feature.arc.cx)) &&
-      Number.isFinite(Number(feature.arc.cy)) && Number(feature.arc.r) > 0;
+    if (feature.circle) return finiteCoordinate(feature.circle.cx) &&
+      finiteCoordinate(feature.circle.cy) && finiteCoordinate(feature.circle.r) && Number(feature.circle.r) > 0;
+    if (feature.arc) return finiteCoordinate(feature.arc.cx) &&
+      finiteCoordinate(feature.arc.cy) && finiteCoordinate(feature.arc.r) && Number(feature.arc.r) > 0;
     if (["boundary", "restrict", "zone", "building", "public", "parcel"].includes(feature.kind))
       return Array.isArray(feature.ring) && feature.ring.length >= 3 && feature.ring.every(finitePoint);
     if (feature.point) return finitePoint(feature.point);

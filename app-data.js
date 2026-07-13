@@ -184,11 +184,11 @@ async function openDataFetch() {
         return;
       }
       snapshot();
-      let addedAll = 0, dupAll = 0;
+      let addedAll = 0, dupAll = 0, invalidAll = 0;
       const parts = [];
       for (const g of groups) {
-        const { added, dup } = importSourceFeatures(g.features);  // дедуп повторной выгрузки
-        addedAll += added; dupAll += dup;
+        const { added, dup, invalid } = importSourceFeatures(g.features);  // дедуп + валидация
+        addedAll += added; dupAll += dup; invalidAll += invalid;
         parts.push(`${g.title} ${added}`);
         const L = LAYER_BY_ID[g.layer_id];
         if (!L) continue;
@@ -208,7 +208,9 @@ async function openDataFetch() {
       close();
       if (!addedAll && dupAll) { toast(`Данные: всё уже загружено (${dupAll} объектов — без дубликатов)`); return; }
       const dupNote = dupAll ? ` · ${dupAll} уже были` : "";
-      toast(`Данные: +${plObjects(addedAll)} (${parts.join(" · ")})${dupNote}`);
+      const invalidNote = invalidAll ? ` · ${invalidAll} поврежд. пропущено` : "";
+      toast(`Данные: +${plObjects(addedAll)} (${parts.join(" · ")})${dupNote}${invalidNote}`,
+        invalidAll ? "warn" : undefined);
       if (data.notes && data.notes.length)
         console.info("Данные по области:", data.notes.join("\n"));
     } catch (err) {
