@@ -319,7 +319,7 @@ async function deleteLayer(layer) {
   const isBuiltin = !layer.user_created;
   const count = featuresOnLayer(layer.id).length;
   const msg = count
-    ? `В слое «${layer.title}» ${count} объект(ов).${isBuiltin ? " Это встроенный/импортный слой." : ""} Удалить вместе с объектами?`
+    ? `В слое «${layer.title}» ${ruCount(count, "объект", "объекта", "объектов")}.${isBuiltin ? " Это встроенный/импортный слой." : ""} Удалить вместе с объектами?`
     : `Удалить слой «${layer.title}»?${isBuiltin ? " (встроенный/импортный)" : ""}`;
   if (count && !(await uiConfirm(msg, { ok: "Удалить", danger: true }))) return;
   if (!count && isBuiltin && !(await uiConfirm(`Удалить встроенный слой «${layer.title}»?`, { ok: "Удалить", danger: true }))) return;
@@ -2651,9 +2651,14 @@ function renderTep(data) {
   let zonesHtml = "";
   if (data.zones) {
     zonesHtml = data.zones.ok
-      ? `<div class="tep-row" style="color:var(--success)"><span>Зонирование: покрытие корректно</span>
-           <span class="v">${data.zones.total_ha} <small>га · общих границ ${data.zones.shared_edges}</small></span></div>`
-      : `<div class="tep-row" style="color:var(--warning)"><span>Зонирование: ${data.zones.error}</span><span></span></div>`;
+      ? `<div class="tep-zone-status ok" role="status">
+           <span class="tep-zone-title">Покрытие функциональных зон корректно</span>
+           <span class="tep-zone-meta"><b>${escHtml(data.zones.total_ha)} га</b><small>Общих границ: ${escHtml(data.zones.shared_edges)}</small></span>
+         </div>`
+      : `<div class="tep-zone-status warning" role="status">
+           <span class="tep-zone-title">Требуется проверить зонирование</span>
+           <span class="tep-zone-error">${escHtml(data.zones.error)}</span>
+         </div>`;
   }
   fact.innerHTML = `<div class="tep-row"><span>По посадке зданий</span><span></span></div>
     <div class="tep-row"><span>СПП факт</span><span class="v">${data.fact.spp} <small>тыс. м²</small></span></div>
@@ -2849,7 +2854,7 @@ function renderGroupProps(el, ids) {
     snapshot();
     for (const f of selectionFeatures()) { f.layer_id = tid; if (L) f.kind = L.kind; }
     afterChange();
-    toast(`Перемещено ${ids.length} объект(ов) на «${L.title}»`);
+    toast(`Перемещено ${ruCount(ids.length, "объект", "объекта", "объектов")} на «${L.title}»`);
   };
   const ga = document.getElementById("g-attr-apply");
   if (ga) ga.onclick = () => {
@@ -2863,7 +2868,7 @@ function renderGroupProps(el, ids) {
       else f.props[a.key] = v;
     }
     afterChange();
-    toast(`Записано «${a.title}» в ${ids.length} объект(ов)`);
+    toast(`Записано «${a.title}» в ${ruCount(ids.length, "объект", "объекта", "объектов")}`);
   };
   document.getElementById("g-del").onclick = deleteSelected;
   bindTransformControls();
@@ -4053,13 +4058,23 @@ function escHtml(s) {
   return String(s).replace(/[&<>"]/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+function ruCount(value, one, few, many) {
+  const number = Math.abs(Number(value)) || 0;
+  const mod100 = number % 100;
+  const mod10 = number % 10;
+  const word = mod100 >= 11 && mod100 <= 14 ? many
+    : mod10 === 1 ? one
+    : mod10 >= 2 && mod10 <= 4 ? few : many;
+  return `${value} ${word}`;
+}
 // подтверждение: Promise<bool>. danger — красная кнопка для необратимого.
-function uiConfirm(msg, { ok = "OK", cancel = "Отмена", danger = false } = {}) {
+function uiConfirm(msg, { title = "", ok = "OK", cancel = "Отмена", danger = false } = {}) {
   return new Promise(resolve => {
     // do not close other modals — allow nested (e.g. create project style from inside layer style dialog)
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.innerHTML = `<div class="modal ask-modal">
+      ${title ? `<div class="ask-title">${escHtml(title)}</div>` : ""}
       <div class="ask-msg">${escHtml(msg)}</div>
       <div class="modal-actions"><span class="spacer"></span>
         <button class="ask-cancel">${escHtml(cancel)}</button>
@@ -4072,7 +4087,7 @@ function uiConfirm(msg, { ok = "OK", cancel = "Отмена", danger = false } =
     overlay.querySelector(".ask-cancel").addEventListener("click", () => done(false));
     overlay.addEventListener("click", ev => { if (ev.target === overlay) done(false); });
     overlay.addEventListener("keydown", ev => { if (ev.key === "Escape") done(false); });
-    overlay.querySelector(".ask-ok").focus();
+    overlay.querySelector(danger ? ".ask-cancel" : ".ask-ok").focus();
   });
 }
 // ввод строки: Promise<string|null> (null — отмена).
@@ -4135,7 +4150,7 @@ async function openAutosaveRecovery() {
         dateStyle: "medium", timeStyle: "short",
       }) : "Старая копия";
       return `<div class="recovery-item">
-        <div class="recovery-main"><strong>${escHtml(item.name)}</strong><span>${escHtml(date)} · ${item.feature_count} объект(ов)</span></div>
+        <div class="recovery-main"><strong>${escHtml(item.name)}</strong><span>${escHtml(date)} · ${ruCount(item.feature_count, "объект", "объекта", "объектов")}</span></div>
         <button data-recover="${item.id}">Восстановить</button>
       </div>`;
     }).join("");
@@ -5127,7 +5142,7 @@ on("btn-clear", "click", async () => {
   if (!state.features.length) { toast("Холст уже пуст"); return; }
   const count = state.features.length;
   if (!(await uiConfirm(
-    `Очистить холст и удалить ${count} объект(ов)? Действие можно отменить сразу после очистки.`,
+    `Очистить холст и удалить ${ruCount(count, "объект", "объекта", "объектов")}? Действие можно отменить сразу после очистки.`,
     { ok: "Очистить", danger: true }))) return;
   snapshot(); state.features = []; state.selected = null; afterChange();
 });
@@ -5389,8 +5404,8 @@ async function newProject() {
     toast("Новый общий проект создаётся из списка совместной работы", "warn"); return;
   }
   if (hasProjectContent() && !(await uiConfirm(
-    `Создать новый проект? Текущий проект (${state.features.length} объект(ов)) останется в автосохранениях.`,
-    { ok: "Новый проект" }))) return;
+    `Текущий проект содержит ${ruCount(state.features.length, "объект", "объекта", "объектов")}. Его копия останется в автосохранениях.`,
+    { title: "Создать новый проект?", ok: "Новый проект" }))) return;
   if (!(await checkpointBeforeReplace())) return;
   resetProjectState();
   setTool("select");

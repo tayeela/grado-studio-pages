@@ -107,8 +107,14 @@
       if (!heading.id) heading.id = `dialog-title-${++dialogSeq}`;
       dialog.setAttribute('aria-labelledby', heading.id);
     } else if (!dialog.hasAttribute('aria-label')) {
-      const message = dialog.querySelector('.ask-msg');
-      dialog.setAttribute('aria-label', (message && message.textContent.trim()) || 'Диалоговое окно');
+      const title = dialog.querySelector('.ask-title');
+      if (title) {
+        if (!title.id) title.id = `dialog-title-${++dialogSeq}`;
+        dialog.setAttribute('aria-labelledby', title.id);
+      } else {
+        const message = dialog.querySelector('.ask-msg');
+        dialog.setAttribute('aria-label', (message && message.textContent.trim()) || 'Диалоговое окно');
+      }
     }
 
     labelIconButtons(dialog);

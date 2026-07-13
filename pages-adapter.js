@@ -217,8 +217,6 @@
         row.classList.add("web-disabled");
         row.title = "Требуется настольная версия";
       }
-      if (row.dataset.click === "btn-grado") row.childNodes[0].textContent = "Скачать проект браузера";
-      if (row.dataset.click === "btn-open") row.childNodes[0].textContent = "Открыть проект браузера…";
     });
     const style = document.createElement("style");
     style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.web-disabled{opacity:.45}.pages-mode #st-bridge{display:none!important}`;

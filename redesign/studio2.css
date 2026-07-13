@@ -19,6 +19,15 @@
 .tep-row>span:first-child{min-width:0;overflow-wrap:anywhere}
 .tep-row .v{color:var(--text);font-weight:600;font-family:var(--font-mono);white-space:nowrap;min-width:0;text-align:right}
 .tep-row .v small{font-weight:400;color:var(--muted);font-family:var(--font-ui);font-size:10px;margin-left:3px}
+.tep-zone-status{display:flex;flex-direction:column;gap:5px;margin:6px 0 3px;padding:8px 10px;
+  border:1px solid var(--field-border);border-radius:var(--r-sm);background:var(--field-bg);line-height:1.35}
+.tep-zone-status.ok{border-color:color-mix(in srgb,var(--success) 26%,var(--field-border));background:color-mix(in srgb,var(--success) 7%,var(--field-bg))}
+.tep-zone-status.warning{border-color:color-mix(in srgb,var(--warning) 32%,var(--field-border));background:color-mix(in srgb,var(--warning) 8%,var(--field-bg))}
+.tep-zone-title{font-size:11px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.tep-zone-status.ok .tep-zone-title{color:var(--success)}
+.tep-zone-meta{display:flex;align-items:baseline;justify-content:space-between;gap:8px;color:var(--text-2)}
+.tep-zone-meta b{font:600 11px/1.2 var(--font-mono);color:var(--text);white-space:nowrap}
+.tep-zone-meta small,.tep-zone-error{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
 .tep-check{display:grid;grid-template-columns:9px minmax(0,1fr);gap:8px;padding:7px 8px;margin-top:5px;
   border:1px solid var(--field-border);border-radius:var(--r-sm);background:var(--field-bg)}
 .tep-check-mark{width:7px;height:7px;margin-top:4px;border-radius:50%;background:var(--warning)}
@@ -151,6 +160,7 @@
 
 /* компактные диалоги подтверждения/ввода (uiConfirm/uiPrompt) */
 .modal.ask-modal{width:min(430px,92vw)}
+.ask-title{padding:4px 4px 0;font-size:var(--fs-15);line-height:1.35;font-weight:650;color:var(--text)}
 .ask-msg{padding:4px 4px 2px;font-size:var(--fs-13);line-height:1.5;color:var(--text);white-space:pre-line}
 .ask-input{margin:12px 4px 2px;width:calc(100% - 8px);height:36px;border-radius:var(--r-sm);
   border:1px solid var(--field-border);background:var(--field-bg);color:var(--text);font:inherit;

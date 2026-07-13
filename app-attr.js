@@ -415,7 +415,12 @@ function openFieldCalc(layer, getFeats, onDone) {
       catch (e) { bad++; }
     }
     draw(); refreshTep(); persist(); close(); onDone();
-    toast(`Вычислено: ${ok} объект(ов) → «${out}»${bad ? `, пропущено ${bad}` : ""}`);
+    const objectWord = n => {
+      const value = Math.abs(Number(n)) || 0, mod100 = value % 100, mod10 = value % 10;
+      return mod100 >= 11 && mod100 <= 14 ? "объектов"
+        : mod10 === 1 ? "объект" : mod10 >= 2 && mod10 <= 4 ? "объекта" : "объектов";
+    };
+    toast(`Вычислено: ${ok} ${objectWord(ok)} → «${out}»${bad ? `, пропущено ${bad}` : ""}`);
   });
   q("fc-cancel").addEventListener("click", close);
   ov.querySelector(".modal-x").addEventListener("click", close);
