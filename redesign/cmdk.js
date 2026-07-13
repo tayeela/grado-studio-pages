@@ -7,6 +7,16 @@
    ============================================================================= */
 (function () {
   const $ = id => document.getElementById(id);
+  const isWeb = !!window.GRADO_STATIC;
+  const buttonEnabled = id => {
+    const element = $(id);
+    return !!element && !element.disabled && !element.hidden &&
+      element.getAttribute("aria-disabled") !== "true";
+  };
+  const toolEnabled = name => {
+    const element = document.querySelector(`#toolbar button[data-tool="${name}"]`);
+    return !!element && !element.disabled;
+  };
   const click = id => {
     const e = $(id);
     if (!e) return;
@@ -18,7 +28,7 @@
   };
   const has = fn => typeof window[fn] === "function";
   const call = (fn, ...a) => { if (has(fn)) try { window[fn](...a); } catch (e) { console.warn(fn, e); } };
-  const tool = t => () => { if (has("setTool")) setTool(t); };
+  const tool = t => () => { if (has("setTool") && toolEnabled(t)) setTool(t); };
   const setBasemap = src => () => {
     const sel = $("basemap-source"), show = $("basemap-show");
     if (show && !show.checked) { show.checked = true; show.dispatchEvent(new Event("change", { bubbles: true })); }
@@ -38,27 +48,27 @@
 
   const COMMANDS = [
     { sec: "Инструменты", items: [
-      { t: "Выбор и правка объектов", k: "V", run: tool("select") },
-      { t: "Точка", run: tool("point") },
-      { t: "Линия", run: tool("polyline") },
-      { t: "Полигон", run: tool("polygon") },
-      { t: "Прямоугольник", run: tool("rect") },
-      { t: "Дуга по трём точкам", run: tool("arc") },
-      { t: "Окружность", run: tool("circle") },
-      { t: "Обрезать по границе", k: "T", run: tool("trim") },
-      { t: "Продлить до границы", k: "E", run: tool("extend") },
-      { t: "Сопрячь угол (fillet)", run: tool("fillet") },
-      { t: "Буфер вокруг выбранных объектов…", run: () => click("btn-buffer-open") },
-      { t: "Поворот выделения", k: "R", run: tool("rotate") },
-      { t: "Масштаб выделения", run: tool("scale") },
-      { t: "Зеркало", run: tool("mirror") },
-      { t: "Размерная линия", k: "D", run: tool("dim") },
-      { t: "Измерение расстояния", k: "M", run: tool("measure") },
+      { t: "Выбор и правка объектов", k: "V", run: tool("select"), available: () => toolEnabled("select") },
+      { t: "Точка", run: tool("point"), available: () => toolEnabled("point") },
+      { t: "Линия", run: tool("polyline"), available: () => toolEnabled("polyline") },
+      { t: "Полигон", run: tool("polygon"), available: () => toolEnabled("polygon") },
+      { t: "Прямоугольник", run: tool("rect"), available: () => toolEnabled("rect") },
+      { t: "Дуга по трём точкам", run: tool("arc"), available: () => toolEnabled("arc") },
+      { t: "Окружность", run: tool("circle"), available: () => toolEnabled("circle") },
+      { t: "Обрезать по границе", k: "T", run: tool("trim"), available: () => toolEnabled("trim") },
+      { t: "Продлить до границы", k: "E", run: tool("extend"), available: () => toolEnabled("extend") },
+      { t: "Сопрячь угол (fillet)", run: tool("fillet"), available: () => toolEnabled("fillet") },
+      { t: "Буфер вокруг выбранных объектов…", run: () => click("btn-buffer-open"), desktop: true, available: () => buttonEnabled("btn-buffer-open") },
+      { t: "Поворот выделения", k: "R", run: tool("rotate"), available: () => toolEnabled("rotate") },
+      { t: "Масштаб выделения", run: tool("scale"), available: () => toolEnabled("scale") },
+      { t: "Зеркало", run: tool("mirror"), available: () => toolEnabled("mirror") },
+      { t: "Размерная линия", k: "D", run: tool("dim"), available: () => toolEnabled("dim") },
+      { t: "Измерение расстояния", k: "M", run: tool("measure"), available: () => toolEnabled("measure") },
     ]},
     { sec: "Данные", items: [
-      { t: "Данные по видимой области…", run: () => call("openDataFetch") },
-      { t: "Импорт ГИС ОГД (ZIP / GeoJSON / папка)", run: () => click("btn-gisogd") },
-      { t: "Импорт НСПД (файл расширения)", run: () => click("btn-nspd") },
+      { t: "Данные по видимой области…", run: () => call("openDataFetch"), desktop: true },
+      { t: "Импорт ГИС ОГД (ZIP / GeoJSON / папка)", run: () => click("btn-gisogd"), desktop: true },
+      { t: "Импорт НСПД (файл расширения)", run: () => click("btn-nspd"), desktop: true },
       { t: "Заполнить примером (демо)", run: () => click("btn-demo") },
       { t: "Подложка: спутник Sentinel-2 (Copernicus)", run: setBasemap("s2") },
       { t: "Подложка: спутник ESRI (высокое разрешение)", run: setBasemap("sat") },
@@ -67,7 +77,7 @@
     ]},
     { sec: "Слои", items: [
       { t: "Новый слой", run: () => click("btn-new-layer") },
-      { t: "Оформление активного слоя…", run: styleActive },
+      { t: "Оформление активного слоя…", run: styleActive, available: () => has("activeLayer") && !!activeLayer() },
       { t: "Библиотека знаков", run: () => click("btn-style-lib") },
       { t: "Типы слоёв", run: () => click("btn-manage-kinds") },
       { t: "Варианты концепции", run: () => click("btn-variants") },
@@ -79,16 +89,16 @@
       { t: "Показать / скрыть инспектор", run: () => click("btn-panel-visibility") },
       { t: "Переключить тему (свет / тёмная)", run: () => click("btn-theme") },
       { t: "Параметры расчёта ТЭП…", run: () => click("btn-tep-editor") },
-      { t: "Отменить", k: modKey("Z"), run: () => click("btn-undo") },
-      { t: "Вернуть", k: modKey("Shift+Z"), run: () => click("btn-redo") },
+      { t: "Отменить", k: modKey("Z"), run: () => click("btn-undo"), available: () => buttonEnabled("btn-undo") },
+      { t: "Вернуть", k: modKey("Shift+Z"), run: () => click("btn-redo"), available: () => buttonEnabled("btn-redo") },
       { t: "Открыть проект…", run: () => click("btn-open") },
-      { t: "Сохранить .grado", run: () => click("btn-grado") },
+      { t: isWeb ? "Сохранить проект (.grado-web.json)" : "Сохранить .grado", run: () => click("btn-grado") },
       { t: "Горячие клавиши", run: () => click("btn-shortcuts") },
     ]},
     { sec: "Выпуск", items: [
-      { t: "Экспорт чертежа (DXF)", run: () => click("btn-dxf") },
-      { t: "Печать в масштабе (PDF)", run: () => click("btn-print") },
-      { t: "Собрать альбом АГК (PDF)", run: () => click("btn-album") },
+      { t: "Экспорт чертежа (DXF)", run: () => click("btn-dxf"), desktop: true },
+      { t: "Печать в масштабе (PDF)", run: () => click("btn-print"), desktop: true },
+      { t: "Собрать альбом АГК (PDF)", run: () => click("btn-album"), desktop: true },
       { t: "Состав альбома…", run: () => call("openAlbumConfig") },
     ]},
   ];
@@ -101,7 +111,8 @@
     query = (query || "").trim().toLowerCase();
     flat = []; let html = "";
     for (const g of COMMANDS) {
-      const items = g.items.filter(i => !query || i.t.toLowerCase().includes(query));
+      const items = g.items.filter(i => (!isWeb || !i.desktop) &&
+        (!i.available || i.available()) && (!query || i.t.toLowerCase().includes(query)));
       if (!items.length) continue;
       html += `<div class="cmdk-sec">${g.sec}</div>`;
       for (const i of items) {

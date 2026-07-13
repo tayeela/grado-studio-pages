@@ -64,6 +64,10 @@ on("nspd-file", "change", async e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = "";
+  if (file.size > MAX_JSON_IMPORT_BYTES) {
+    toast("Файл НСПД больше 64 МБ — уменьшите область выгрузки", "error");
+    return;
+  }
   try {
     const payload = JSON.parse(await file.text());
     const r = await fetch("/api/import-nspd", { method: "POST",
@@ -163,6 +167,10 @@ on("gisogd-file", "change", async e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = "";
+  if (file.size > MAX_PROJECT_FILE_BYTES) {
+    toast("Выгрузка больше 256 МБ — уменьшите набор слоёв или область", "error");
+    return;
+  }
   await importGisogd(
     ["/api/import-gisogd", { method: "POST",
       headers: { "Content-Type": "application/octet-stream",

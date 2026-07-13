@@ -23,7 +23,18 @@
   };
   const bodyJson = async (input, options) => {
     const text = await bodyText(input, options);
-    return text ? JSON.parse(text) : {};
+    if (!text) return {};
+    try { return JSON.parse(text); }
+    catch (error) { return null; }
+  };
+  const isRecord = value => !!value && typeof value === "object" && !Array.isArray(value);
+  const projectBodyError = payload => {
+    if (!isRecord(payload)) return "Тело запроса должно быть объектом";
+    if (!Array.isArray(payload.features)) return "features должно быть массивом";
+    if (payload.params != null && !isRecord(payload.params)) return "params должно быть объектом";
+    if (payload.layers != null && (!Array.isArray(payload.layers) ||
+        payload.layers.some(layer => !isRecord(layer)))) return "layers должно быть массивом объектов";
+    return null;
   };
 
   function browserTep(payload) {
@@ -76,8 +87,14 @@
     if (path === "/api/autosave") {
       if (method === "POST") {
         const state = await bodyJson(input, options);
+        if (!isRecord(state) || !Array.isArray(state.features))
+          return json({ error: "Некорректное состояние автосохранения" }, 400);
         const savedAt = new Date().toISOString();
-        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ state, saved_at: savedAt }));
+        try {
+          localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ state, saved_at: savedAt }));
+        } catch (error) {
+          return json({ error: "Недостаточно места для автосохранения" }, 507);
+        }
         return json({ ok: true, saved_at: savedAt });
       }
       try { return json(JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || "null")); }
@@ -85,19 +102,43 @@
     }
     if (path === "/api/style-overrides") {
       if (method === "POST") {
-        localStorage.setItem(OVERRIDES_KEY, await bodyText(input, options));
+        const text = await bodyText(input, options);
+        let parsed;
+        try {
+          parsed = text ? JSON.parse(text) : {};
+        } catch (error) {
+          return json({ error: "Некорректные стили" }, 400);
+        }
+        if (!isRecord(parsed)) return json({ error: "Некорректные стили" }, 400);
+        try {
+          localStorage.setItem(OVERRIDES_KEY, JSON.stringify(parsed));
+        } catch (error) {
+          return json({ error: "Не удалось сохранить стили" }, 507);
+        }
         return json({ ok: true });
       }
       try { return json(JSON.parse(localStorage.getItem(OVERRIDES_KEY) || "{}")); }
       catch (error) { return json({}); }
     }
-    if (path === "/api/tep") return json(browserTep(await bodyJson(input, options)));
+    if (path === "/api/tep") {
+      const payload = await bodyJson(input, options);
+      const error = projectBodyError(payload);
+      return error ? json({ error }, 400) : json(browserTep(payload));
+    }
     if (path === "/api/preflight") {
       const payload = await bodyJson(input, options);
+      const error = projectBodyError(payload);
+      if (error) return json({ error }, 400);
       return json(pagesCore.preflightProject(payload));
     }
     if (path === "/api/grado") {
-      const project = webProject(await bodyJson(input, options));
+      const payload = await bodyJson(input, options);
+      const error = projectBodyError(payload);
+      if (error) return json({ error }, 400);
+      const report = pagesCore.preflightProject({ ...payload, target: "grado" });
+      if (!report.can_export)
+        return json({ error: "project preflight failed", report }, 400);
+      const project = webProject(payload);
       return new Response(JSON.stringify(project, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" },
       });

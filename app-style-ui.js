@@ -216,7 +216,7 @@ function openLayerStyle(layer, opts = {}) {
       <div class="style-editor-grid">
         <div class="style-controls">
           <section class="style-section">
-            <div class="style-section-head"><span><b>Заливка</b><small>Цвет и прозрачность полигона</small></span><label class="switch-control" title="Включить заливку"><input type="checkbox" id="fmt-hasfill" ${hasFill ? "checked" : ""}><span></span></label></div>
+            <div class="style-section-head"><span><b>Заливка</b><small>Цвет и прозрачность полигона</small></span><label class="switch-control" title="Включить заливку"><input type="checkbox" id="fmt-hasfill" aria-label="Включить заливку" ${hasFill ? "checked" : ""}><span></span></label></div>
             <div class="fmt-body" id="fmt-fill-body" style="display:${hasFill ? "" : "none"}"><div class="fmt-row">
               <label>Цвет<div id="fmt-fill"></div></label>
               <label>Непрозрачность<input type="range" id="fmt-opacity" min="10" max="100" step="5" value="${opacity}"></label>
@@ -234,7 +234,7 @@ function openLayerStyle(layer, opts = {}) {
                 <input type="text" id="fmt-dash-custom" placeholder="8, 3, 2, 3" value="${escHtml(dashToStr(dp === "custom" ? cur.dash : null))}"></label></div>
           </section>
           <section class="style-section">
-            <div class="style-section-head"><span><b>Штриховка</b><small>Дополнительный рисунок зоны</small></span><label class="switch-control" title="Включить штриховку"><input type="checkbox" id="fmt-hatch" ${cur.hatch ? "checked" : ""}><span></span></label></div>
+            <div class="style-section-head"><span><b>Штриховка</b><small>Дополнительный рисунок зоны</small></span><label class="switch-control" title="Включить штриховку"><input type="checkbox" id="fmt-hatch" aria-label="Включить штриховку" ${cur.hatch ? "checked" : ""}><span></span></label></div>
             <div class="fmt-body" id="fmt-hatch-body" style="display:${cur.hatch ? "" : "none"}"><div class="fmt-row">
               <label>Угол<select id="fmt-hangle">${
                 opt(hAngle, "0", "0° —") + opt(hAngle, "45", "45° ╱") + opt(hAngle, "90", "90° │") +
@@ -244,7 +244,7 @@ function openLayerStyle(layer, opts = {}) {
             </div></div>
           </section>
           <section class="style-section">
-            <div class="style-section-head"><span><b>Маркеры линии</b><small>Засечки и направление границы</small></span><label class="switch-control" title="Включить маркеры"><input type="checkbox" id="fmt-marker" ${baseMarker ? "checked" : ""}><span></span></label></div>
+            <div class="style-section-head"><span><b>Маркеры линии</b><small>Засечки и направление границы</small></span><label class="switch-control" title="Включить маркеры"><input type="checkbox" id="fmt-marker" aria-label="Включить маркеры линии" ${baseMarker ? "checked" : ""}><span></span></label></div>
             <div class="fmt-body" id="fmt-marker-fields" style="display:${baseMarker ? "" : "none"}">
               <div class="fmt-row"><label>Форма<select id="fmt-marker-shape">${MARKER_SHAPES.map(([v, lbl]) => opt((baseMarker && baseMarker.shape) || "tick", v, lbl)).join("")}</select></label>
                 <label>Направление<select id="fmt-marker-dir">${opt((baseMarker && baseMarker.dir) || "in", "in", "Внутрь зоны") + opt((baseMarker && baseMarker.dir) || "in", "out", "Наружу")}</select></label></div>
@@ -274,11 +274,12 @@ function openLayerStyle(layer, opts = {}) {
       </div>
     </div>
     <div id="ls-rules" style="display:${mode === "rules" ? "" : "none"}">
-      <div class="fc-help">Знак объекта выбирается по значению его атрибута.
-        Первое совпавшее правило побеждает; объекты без совпадения рисуются единым стилем слоя (вкладка слева).</div>
+      <div class="fc-help" id="cr-help">${fieldCols.length
+        ? "Знак объекта выбирается по значению его атрибута. Первое совпавшее правило побеждает; объекты без совпадения рисуются единым стилем слоя (вкладка слева)."
+        : "В этом слое пока нет полей. Сначала добавьте поле через таблицу атрибутов слоя — после этого здесь можно будет создать правило."}</div>
       <div class="mf-table-wrap"><table class="attr-table mf-table"><thead><tr><th>Поле</th><th>Оп</th><th>Значение</th><th>Знак</th><th></th></tr></thead>
         <tbody id="cr-body"></tbody></table></div>
-      <button id="cr-add" class="fmt-copy-btn">+ правило</button>
+      <button id="cr-add" class="fmt-copy-btn" aria-describedby="cr-help"${fieldCols.length ? "" : " disabled"}>+ правило</button>
     </div>
     </div>
     <div class="modal-actions">
@@ -452,13 +453,15 @@ function openLayerStyle(layer, opts = {}) {
   const ops = ["=", ">", "<", ">=", "<=", "contains", "starts"];
   const opOpts = (cur) => ops.map(o => `<option value="${o}"${o === (cur || "=") ? " selected" : ""}>${o}</option>`).join("");
   const rulesRowsHtml = () => work.length ? work.map((r, i) => `<tr>
-      <td><select class="cr-field" data-i="${i}">${fieldOpts(r.field)}</select></td>
-      <td><select class="cr-op" data-i="${i}">${opOpts(r.op)}</select></td>
-      <td><input class="cr-value" data-i="${i}" value="${escHtml(r.value ?? "")}" placeholder="значение"></td>
-      <td><select class="cr-style" data-i="${i}">${stylePickerOptions(r.style_id)}</select></td>
-      <td class="mf-ord"><button class="mf-del cr-del" data-i="${i}" title="Удалить правило">✕</button></td>
+      <td><select class="cr-field" data-i="${i}" aria-label="Поле правила ${i + 1}">${fieldOpts(r.field)}</select></td>
+      <td><select class="cr-op" data-i="${i}" aria-label="Оператор правила ${i + 1}">${opOpts(r.op)}</select></td>
+      <td><input class="cr-value" data-i="${i}" aria-label="Значение правила ${i + 1}" value="${escHtml(r.value ?? "")}" placeholder="значение"></td>
+      <td><select class="cr-style" data-i="${i}" aria-label="Стиль правила ${i + 1}">${stylePickerOptions(r.style_id)}</select></td>
+      <td class="mf-ord"><button class="mf-del cr-del" data-i="${i}" aria-label="Удалить правило ${i + 1}">✕</button></td>
     </tr>`).join("")
-    : `<tr><td colspan="5" class="muted" style="padding:10px">Правил пока нет — добавьте кнопкой «+ правило».</td></tr>`;
+    : `<tr><td colspan="5" class="muted" style="padding:10px">${fieldCols.length
+      ? "Правил пока нет — добавьте первое правило."
+      : "Нет доступных полей для правил."}</td></tr>`;
   const syncRules = () => {
     overlay.querySelectorAll(".cr-field").forEach(el => { work[+el.dataset.i].field = el.value; });
     overlay.querySelectorAll(".cr-op").forEach(el => { work[+el.dataset.i].op = el.value; });
@@ -494,6 +497,7 @@ function openLayerStyle(layer, opts = {}) {
   };
   renderRules();
   $("cr-add").addEventListener("click", () => {
+    if (!fieldCols.length) return;
     syncRules();
     work.push({ field: fieldCols[0] ? fieldCols[0].name : "", op: "=", value: "", style_id: "" });
     renderRules();

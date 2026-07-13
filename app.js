@@ -692,6 +692,8 @@ function featuresOnLayer(id) {
 // геометрически lossless, но проект ужимается ~вдвое (меньше памяти, снимков
 // отмены, автосейва). Применяется на всех загрузках/импортах через upgradeFeature.
 const MAX_PROJECT_COORDINATE = 1e9;
+const MAX_PROJECT_FILE_BYTES = 256 * 1024 * 1024;
+const MAX_JSON_IMPORT_BYTES = 64 * 1024 * 1024;
 function isProjectCoordinate(value) {
   if (value === null || value === undefined ||
       (typeof value === "string" && !value.trim())) return false;
@@ -3293,14 +3295,15 @@ function renderLayers() {
     if (layer.fmt && Object.keys(layer.fmt).length > 0) {
       badges += `<span class="lrow-badge" title="есть переопределения оформления слоя">fmt</span>`;
     }
-    row.innerHTML = `<span class="grip" title="перетащить — порядок отрисовки"><svg class="ic"><use href="#ic-grip"/></svg></span>
-      <input type="checkbox" title="видимость" ${layer.visible ? "checked" : ""}>
+    const layerTitle = escHtml(layer.title);
+    row.innerHTML = `<span class="grip" aria-hidden="true" title="перетащить — порядок отрисовки"><svg class="ic"><use href="#ic-grip"/></svg></span>
+      <input type="checkbox" aria-label="Показывать слой «${layerTitle}»" title="видимость слоя «${layerTitle}»" ${layer.visible ? "checked" : ""}>
       <span class="${swCls}" style="${swStyle}"></span>
-      <span class="nm" title="${escHtml(layer.title)} — клик делает слой активным (сюда чертят инструменты)">${escHtml(layer.title)}</span><span class="cnt">${count || ""}</span>
+      <span class="nm" title="${layerTitle} — клик делает слой активным (сюда чертят инструменты)">${layerTitle}</span><span class="cnt">${count || ""}</span>
       ${badges}
-      <button class="lrow-lock" title="${layer.locked ? "разблокировать слой" : "заблокировать слой (защита от случайной правки)"}">
+      <button class="lrow-lock" aria-label="${layer.locked ? "Разблокировать" : "Заблокировать"} слой «${layerTitle}»" title="${layer.locked ? "разблокировать" : "заблокировать"} слой «${layerTitle}»">
         <svg class="ic"><use href="#${layer.locked ? "ic-lock" : "ic-unlock"}"/></svg></button>
-      <button class="lrow-menu" title="действия со слоем"><svg class="ic"><use href="#ic-menu-dots"/></svg></button>`;
+      <button class="lrow-menu" aria-label="Действия со слоем «${layerTitle}»" title="действия со слоем «${layerTitle}»"><svg class="ic"><use href="#ic-menu-dots"/></svg></button>`;
     row.addEventListener("mouseenter", () => { state.hoverLayerId = layer.id; draw(); });
     row.addEventListener("mouseleave", () => { state.hoverLayerId = null; draw(); });
     row.querySelector(".lrow-lock").addEventListener("click", ev => {
@@ -3461,11 +3464,18 @@ function openLayerMenu(layer, x, y) {
   closePopups();
   const menu = document.createElement("div");
   menu.className = "ctx-menu";
+  const displayed = layerRowsTopFirst();
+  const displayIndex = displayed.indexOf(layer);
   const items = [
     ["Сделать активным", () => setActiveLayer(layer.id)],
     ["Таблица атрибутов…", () => openAttributeTable(layer)],
     ["Оформление слоя…", () => openLayerStyle(layer)],
     ["Приблизить к слою", () => zoomToLayer(layer.id)],
+    ...(displayIndex > 0 ? [["Переместить выше", () =>
+      reorderLayer(layer.id, displayed[displayIndex - 1].id, true)]] : []),
+    ...(displayIndex >= 0 && displayIndex < displayed.length - 1
+      ? [["Переместить ниже", () =>
+        reorderLayer(layer.id, displayed[displayIndex + 1].id, false)]] : []),
     ["Переименовать…", () => renameLayer(layer)],
     [layer.locked ? "Разблокировать слой" : "Заблокировать слой", () => toggleLayerLock(layer)],
     ["Сбросить оформление слоя", () => resetLayerFormatting(layer)],
@@ -5758,6 +5768,10 @@ on("grado-file", "change", async e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = "";
+  if (file.size > MAX_PROJECT_FILE_BYTES) {
+    toast("Файл проекта больше 256 МБ — разделите проект или удалите лишние данные", "error");
+    return;
+  }
   try {
     toast("Проверяю файл проекта…");
     const r = await fetch("/api/open-grado", { method: "POST",
