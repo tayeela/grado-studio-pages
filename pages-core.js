@@ -21,7 +21,10 @@
     "source.constraints.restrict", "source.nspd.parcels", "project.apo.buildings",
     "project.apo.red_lines", "project.social.objects", "source.fgistp.func_zones",
     "source.gisogd.func_zones", "source.gisogd.red_lines", "source.gisogd.restrict",
-    "source.gisogd.other",
+    "source.gisogd.other", "source.nspd.buildings", "source.nspd.constructions",
+    "source.nspd.zouit", "source.osm.roads", "source.osm.buildings",
+    "source.osm.landuse", "source.osm.water", "source.osm.boundaries",
+    "source.terrain.contours",
   ]);
   const LEGACY_KINDS = new Set([
     "boundary", "restrict", "zone", "building", "redline", "social", "public", "parcel",
@@ -31,7 +34,33 @@
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
   };
-  const rounded = (value, digits = 0) => Number(number(value, 0).toFixed(digits));
+  const roundBits = new DataView(new ArrayBuffer(8));
+  const compareDoubleToDecimalHalf = (value, lower, factor) => {
+    roundBits.setFloat64(0, value, false);
+    const bits = roundBits.getBigUint64(0, false);
+    const exponentBits = Number((bits >> 52n) & 0x7ffn);
+    const fractionBits = bits & ((1n << 52n) - 1n);
+    const mantissa = exponentBits === 0 ? fractionBits : (1n << 52n) | fractionBits;
+    const exponent = exponentBits === 0 ? -1074 : exponentBits - 1023 - 52;
+    const numerator = BigInt(lower) * 2n + 1n;
+    const denominator = BigInt(factor) * 2n;
+    let left = mantissa * denominator;
+    let right = numerator;
+    if (exponent >= 0) left <<= BigInt(exponent);
+    else right <<= BigInt(-exponent);
+    return left < right ? -1 : left > right ? 1 : 0;
+  };
+  const rounded = (value, digits = 0) => {
+    const parsed = number(value, 0);
+    if (!parsed) return 0;
+    const factor = 10 ** digits;
+    const absolute = Math.abs(parsed);
+    const lower = Math.floor(absolute * factor);
+    const side = compareDoubleToDecimalHalf(absolute, lower, factor);
+    const integer = side < 0 ? lower : side > 0 ? lower + 1
+      : (lower % 2 === 0 ? lower : lower + 1);
+    return (parsed < 0 ? -integer : integer) / factor;
+  };
   const ringArea = ring => {
     if (!Array.isArray(ring) || ring.length < 3) return 0;
     let area = 0;
@@ -97,12 +126,14 @@
     const params = payload.params && typeof payload.params === "object" ? payload.params : {};
     const hasTerritory = rawFeatures.some(feature => feature.kind === "boundary" && feature.ring);
     const features = clippedToTerritory(rawFeatures);
-    const terrArea = hasTerritory
+    const rawTerrArea = hasTerritory
       ? features.filter(feature => feature.kind === "boundary" && feature.ring)
         .reduce((sum, feature) => sum + ringArea(feature.ring), 0) / 10000
       : 15;
-    const restrictArea = features.filter(feature => feature.kind === "restrict" && feature.ring)
+    const rawRestrictArea = features.filter(feature => feature.kind === "restrict" && feature.ring)
       .reduce((sum, feature) => sum + ringArea(feature.ring), 0) / 10000;
+    const terrArea = rounded(rawTerrArea, 4);
+    const restrictArea = rounded(rawRestrictArea, 4);
     const calcArea = terrArea - restrictArea;
     const density = number(params.density, 25);
     const ratioZh = number(params.ratio_zh, 80);
@@ -119,19 +150,19 @@
     const sppZhNet = sppZh - sppVpp;
     const sqFlats = sppZhNet * 0.65;
     const populationThs = sqFlats / 33;
-    const population = Math.round(populationThs * 1000);
-    const flats = Math.round(populationThs * 1000 / 2.1);
-    const dooNorm = Math.round(populationThs * (educationZone === 2 ? 63 : 44));
-    const schoolNorm = Math.round(populationThs * (educationZone === 2 ? 124 : 90));
-    const policlinicNorm = Math.round(populationThs * 19);
-    const retail = Math.round(populationThs * 270);
-    const services = Math.round(populationThs * 100);
-    const green = Math.round(territoryMode === 2 ? calcArea * 10000 * 0.25 : populationThs * 1000 * 5);
-    const playground = Math.round(territoryMode === 2 ? populationThs * 1000 * 0.5 : 0);
-    const adultRecreation = Math.round(territoryMode === 2 ? populationThs * 1000 * 0.1 : 0);
-    const parking = Math.round(populationThs * 257 * kRail * kBa);
+    const population = rounded(populationThs * 1000);
+    const flats = rounded(populationThs * 1000 / 2.1);
+    const dooNorm = rounded(populationThs * (educationZone === 2 ? 63 : 44));
+    const schoolNorm = rounded(populationThs * (educationZone === 2 ? 124 : 90));
+    const policlinicNorm = rounded(populationThs * 19);
+    const retail = rounded(populationThs * 270);
+    const services = rounded(populationThs * 100);
+    const green = rounded(territoryMode === 2 ? calcArea * 10000 * 0.25 : populationThs * 1000 * 5);
+    const playground = rounded(territoryMode === 2 ? populationThs * 1000 * 0.5 : 0);
+    const adultRecreation = rounded(territoryMode === 2 ? populationThs * 1000 * 0.1 : 0);
+    const parking = rounded(populationThs * 257 * kRail * kBa);
     const factSpp = features.filter(feature => feature.kind === "building" && feature.ring)
-      .reduce((sum, feature) => sum + ringArea(feature.ring) * number(feature.props && feature.props.floors, 9) / 1000, 0);
+      .reduce((sum, feature) => sum + ringArea(feature.ring) * Math.trunc(number(feature.props && feature.props.floors, 9)) / 1000, 0);
     const factDensity = calcArea > 0 ? factSpp / calcArea : 0;
     const results = [
       result("calc_area", "Территория", "Расчётная площадь территории", calcArea, "га", 2),
@@ -156,7 +187,7 @@
       result("playground_area_required", "Жилые территории", "Детские площадки при реконструкции", playground, "м²"),
       result("adult_recreation_area_required", "Жилые территории", "Площадки отдыха взрослых при реконструкции", adultRecreation, "м²"),
       result("parking_perm", "Транспорт", "Машино-места — предварительный расчёт", parking, "м/м"),
-      result("parking_guest", "Транспорт", "Гостевые машино-места — предварительно", Math.round(parking / 10), "м/м"),
+      result("parking_guest", "Транспорт", "Гостевые машино-места — предварительно", rounded(parking / 10), "м/м"),
     ];
     const checks = [];
     if (factDensity > 0) checks.push({
@@ -189,13 +220,13 @@
     if (feature.kind === "social") return finitePoint(feature.point);
     if (feature.kind === "redline")
       return Array.isArray(feature.line) && feature.line.length >= 2 && feature.line.every(finitePoint);
-    if (["boundary", "restrict", "zone", "building", "public", "parcel"].includes(feature.kind))
-      return Array.isArray(feature.ring) && feature.ring.length >= 3 && feature.ring.every(finitePoint);
-    if (feature.point) return finitePoint(feature.point);
     if (feature.circle) return Number.isFinite(Number(feature.circle.cx)) &&
       Number.isFinite(Number(feature.circle.cy)) && Number(feature.circle.r) > 0;
     if (feature.arc) return Number.isFinite(Number(feature.arc.cx)) &&
       Number.isFinite(Number(feature.arc.cy)) && Number(feature.arc.r) > 0;
+    if (["boundary", "restrict", "zone", "building", "public", "parcel"].includes(feature.kind))
+      return Array.isArray(feature.ring) && feature.ring.length >= 3 && feature.ring.every(finitePoint);
+    if (feature.point) return finitePoint(feature.point);
     if (feature.line) return Array.isArray(feature.line) && feature.line.length >= 2 && feature.line.every(finitePoint);
     return Array.isArray(feature.ring) && feature.ring.length >= 3 && feature.ring.every(finitePoint);
   };

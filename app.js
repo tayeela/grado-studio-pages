@@ -375,6 +375,7 @@ async function renameLayer(layer) {
 function toggleLayerLock(layer) {
   snapshot();
   layer.locked = !layer.locked;
+  let fallback = null;
   if (layer.locked) {
     // снять выделение с уже выбранных объектов этого слоя — иначе их
     // можно было бы двигать стрелками/Delete в обход блокировки
@@ -386,8 +387,20 @@ function toggleLayerLock(layer) {
       for (const id of stale) state.selectedIds.delete(id);
       if (state.selected != null && stale.includes(state.selected)) state.selected = null;
     }
+    if (state.activeLayerId === layer.id) {
+      fallback = LAYERS_V2.find(item => item !== layer && isDrawableLayer(item)) || null;
+      state.activeLayerId = fallback?.id || null;
+      state.drawing = null;
+      state.typed = "";
+      if (!fallback) startGuideDismissed = false;
+    }
   }
-  renderLayers(); renderProps(); draw(); persist();
+  if (fallback && GEOM_OF_TOOL[state.tool] && !toolFitsLayer(state.tool, fallback))
+    setTool(naturalToolFor(fallback), { keepLayer: true });
+  else if (layer.locked && !fallback)
+    setTool("select", { keepLayer: true });
+  renderLayers(); renderProps(); updateLayerStatus(); updateStartExperience();
+  syncHistoryControls(); draw(); persist();
 }
 
 // Стили выше — встроенный fallback; на старте они переопределяются из
@@ -638,10 +651,14 @@ const TOOL_GEOM = { ...GEOM_OF_TOOL, dim: "polyline" };
 
 function activeLayer() { return LAYER_BY_ID[state.activeLayerId] || null; }
 
+function isDrawableLayer(layer) {
+  return !!layer && !layer.annotation && !layer.import_only && !layer.locked;
+}
+
 function toolFitsLayer(tool, L) {
   const g = GEOM_OF_TOOL[tool];
   if (!g) return true;
-  if (!L || L.annotation || L.import_only) return false;
+  if (!isDrawableLayer(L)) return false;
   if (g === 'circle') return true; // все слои теперь поддерживают окружности
   return L.geometry_type === g;
 }
@@ -3452,33 +3469,44 @@ function allRoleOptions(selected = "") {
     `<option value=""${!selected ? " selected" : ""}>Обычный слой — без расчётной роли</option>`;
 }
 function startBoundaryFlow() {
-  startGuideDismissed = true;
   const existing = LAYERS_V2.find(layer => layer.kind === "boundary" && !layer.import_only && !layer.annotation);
   if (existing) {
+    if (existing.locked) {
+      startGuideDismissed = false;
+      updateStartExperience();
+      toast("Слой границы заблокирован — сначала разблокируйте его", "warn");
+      return;
+    }
+    startGuideDismissed = true;
     setActiveLayer(existing.id);
     setTool(naturalToolFor(existing), { keepLayer: true });
     toast("Слой границы активен. Поставьте первую точку на холсте.");
     return;
   }
+  startGuideDismissed = true;
   quickLayerByKind("boundary");
   toast("Граница готова. Поставьте первую точку на холсте.");
 }
 let startGuideDismissed = false;
 function updateStartExperience() {
   const guide = document.getElementById("start-guide");
-  const drawableLayers = LAYERS_V2.filter(layer => layer.user_created && !layer.import_only && !layer.annotation);
-  const hasLayer = drawableLayers.length > 0;
+  const projectLayers = LAYERS_V2.filter(layer => layer.user_created && !layer.import_only && !layer.annotation);
+  const drawableLayers = projectLayers.filter(isDrawableLayer);
+  const hasLayer = projectLayers.length > 0;
   const hasFeatures = state.features.length > 0;
   const emptyLayer = hasLayer && !hasFeatures;
   if (guide) {
     guide.hidden = hasFeatures || (emptyLayer && startGuideDismissed);
-    const layer = activeLayer() || drawableLayers[0];
+    const current = activeLayer();
+    const layer = isDrawableLayer(current) ? current : drawableLayers[0];
+    const lockedLayer = !layer ? projectLayers.find(item => item.locked) : null;
     const kicker = document.getElementById("start-guide-kicker");
     const title = document.getElementById("start-guide-title");
     const copy = document.getElementById("start-guide-copy");
     const steps = document.getElementById("start-guide-steps");
     const boundaryButton = document.getElementById("start-boundary");
     const drawButton = document.getElementById("start-draw");
+    const unlockButton = document.getElementById("start-unlock");
     const hint = document.getElementById("start-guide-hint");
     if (emptyLayer && layer) {
       if (kicker) kicker.textContent = "Проект готов к работе";
@@ -3487,7 +3515,17 @@ function updateStartExperience() {
       if (steps) steps.hidden = true;
       if (boundaryButton) boundaryButton.hidden = true;
       if (drawButton) drawButton.hidden = false;
+      if (unlockButton) unlockButton.hidden = true;
       if (hint) hint.textContent = `Тип геометрии слоя: ${GEOM_LABEL[layer.geometry_type] || layer.geometry_type}. Escape отменяет действие.`;
+    } else if (emptyLayer && lockedLayer) {
+      if (kicker) kicker.textContent = "Слой защищён";
+      if (title) title.textContent = "Разблокируйте слой для рисования";
+      if (copy) copy.textContent = `Слой «${lockedLayer.title}» защищён от изменений. Разблокируйте его или создайте другой слой.`;
+      if (steps) steps.hidden = true;
+      if (boundaryButton) boundaryButton.hidden = true;
+      if (drawButton) drawButton.hidden = true;
+      if (unlockButton) unlockButton.hidden = false;
+      if (hint) hint.textContent = "После разблокировки Студия включит подходящий инструмент автоматически.";
     } else {
       if (kicker) kicker.textContent = "Новый проект";
       if (title) title.textContent = "Начните с границы территории";
@@ -3495,17 +3533,22 @@ function updateStartExperience() {
       if (steps) steps.hidden = false;
       if (boundaryButton) boundaryButton.hidden = false;
       if (drawButton) drawButton.hidden = true;
+      if (unlockButton) unlockButton.hidden = true;
       if (hint) hint.textContent = "Подсказка: клавиша G создаёт или выбирает слой границы.";
     }
   }
   const active = activeLayer();
+  const canDraw = isDrawableLayer(active);
+  const drawBlockReason = !active ? "Сначала создайте слой"
+    : active.locked ? "Активный слой заблокирован"
+      : (active.import_only || active.annotation) ? "Выберите проектный слой" : "Сначала создайте слой";
   const drawingTools = new Set(["point", "polyline", "polygon", "rect", "arc", "circle"]);
   const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror"]);
   document.querySelectorAll("#toolbar button[data-tool]").forEach(button => {
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
     if (drawingTools.has(button.dataset.tool)) {
-      button.disabled = !active;
-      button.title = !active ? "Сначала создайте слой" : button.dataset.defaultTitle;
+      button.disabled = !canDraw;
+      button.title = !canDraw ? drawBlockReason : button.dataset.defaultTitle;
     } else if (editingTools.has(button.dataset.tool)) {
       button.disabled = !state.features.length;
       button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
@@ -3648,6 +3691,7 @@ function resetProjectState(name = "Новый проект") {
   state._fitted = false;
   state._ix = null;
   state._snapIndex = null;
+  startGuideDismissed = false;
   rebuildKinds();
   clearSelection();
   document.getElementById("project-name").value = name;
@@ -4463,8 +4507,14 @@ function deleteSelected() {
 // в панели) объект всегда падал бы в первый слой этого kind, игнорируя
 // реально активный слой (тот же класс бага, что был в MODEL-01 на бэкенде).
 function addFeature(layerId, geom) {
-  snapshot();
   const L = LAYER_BY_ID[layerId];
+  const dimensionLayer = L && L.kind === "dim" && L.annotation;
+  if (!L || L.locked || L.import_only || (L.annotation && !dimensionLayer)) {
+    toast(L?.locked ? `Слой «${L.title}» заблокирован — объект не создан`
+      : "Выберите доступный проектный слой", "warn");
+    return null;
+  }
+  snapshot();
   const f = { id: state.nextId++, layer_id: layerId,
              props: L ? L.defaults() : {}, ...geom };
   // значения по умолчанию произвольных полей слоя — на новый объект
@@ -4492,8 +4542,10 @@ function dedupePts(pts, closed) {
 function finishDrawing() {
   const d = state.drawing;
   const L = activeLayer();
-  if (d && !L) toast("Активный слой не найден — создайте или выберите слой", "warn");
-  if (!d || !L) { state.drawing = null; return; }
+  if (d && !isDrawableLayer(L)) toast(L?.locked
+    ? `Слой «${L.title}» заблокирован — рисование отменено`
+    : "Активный слой недоступен — создайте или выберите проектный слой", "warn");
+  if (!d || !isDrawableLayer(L)) { state.drawing = null; return; }
   const geom = TOOL_GEOM[state.tool];
   const pts = Array.isArray(d.pts) ? d.pts : null;
   if (geom === "polygon" && pts) {
@@ -4868,15 +4920,24 @@ cv.addEventListener("mousedown", e => {
     xfClickBase(s.p);
   } else if (state.tool === "point") {
     const L = activeLayer();
-    if (!L) { toast("Создайте слой, чтобы рисовать", "warn"); return; }
+    if (!isDrawableLayer(L)) {
+      toast(L?.locked ? "Активный слой заблокирован" : "Создайте слой, чтобы рисовать", "warn");
+      return;
+    }
     if (L.geometry_type === "point") addFeature(L.id, { point: s.p });
   } else if (state.tool === "rect" && !state.drawing) {
-    if (!activeLayer()) { toast("Создайте слой, чтобы рисовать", "warn"); return; }
+    if (!isDrawableLayer(activeLayer())) {
+      toast(activeLayer()?.locked ? "Активный слой заблокирован" : "Создайте слой, чтобы рисовать", "warn");
+      return;
+    }
     // протягивание — прямоугольник; одиночный клик — контур по точкам
     state.drag = { a: s.p, b: s.p, rect: true, moved: false };
   } else if (state.tool === "circle") {
     const L = activeLayer();
-    if (!L) { toast("Создайте слой, чтобы рисовать", "warn"); return; }
+    if (!isDrawableLayer(L)) {
+      toast(L?.locked ? "Активный слой заблокирован" : "Создайте слой, чтобы рисовать", "warn");
+      return;
+    }
     if (!toolFitsLayer("circle", L)) {
       toast("Этот слой не поддерживает окружности (выберите/создайте слой с геометрией окружность)", "warn");
       return;
@@ -4887,8 +4948,9 @@ cv.addEventListener("mousedown", e => {
   } else if (state.tool === "dim" || TOOL_GEOM[state.tool]) {
     // рисование геометрии требует активный слой; размеры пишутся в свой
     // аннотационный слой и активного слоя не требуют
-    if (state.tool !== "dim" && !activeLayer()) {
-      toast("Создайте слой, чтобы рисовать", "warn"); return;
+    if (state.tool !== "dim" && !isDrawableLayer(activeLayer())) {
+      toast(activeLayer()?.locked ? "Активный слой заблокирован" : "Создайте слой, чтобы рисовать", "warn");
+      return;
     }
     if (!state.drawing) { state.drawing = { pts: [] }; state.typed = ""; }
     if (state.tool === "dim") {
@@ -5249,7 +5311,7 @@ function setTool(tool, opts = {}) {
   // геом-инструмент против несовместимого слоя — слой переключается сам
   if (!opts.keepLayer && GEOM_OF_TOOL[tool] && !toolFitsLayer(tool, activeLayer())) {
     // подходящий слой рисуемой геометрии — но не приёмник импорта и не аннотация
-    const fit = LAYERS_V2.find(l => !l.annotation && !l.import_only &&
+    const fit = LAYERS_V2.find(l => isDrawableLayer(l) &&
                                     l.geometry_type === GEOM_OF_TOOL[tool]);
     if (fit) { state.activeLayerId = fit.id; renderLayers(); }
     else if (!activeLayer()) toast("Создайте слой для рисования", "warn");
@@ -5290,7 +5352,14 @@ function setActiveLayer(id) {
 function quickLayerByKind(kind) {
   const base = BASE_KIND_BY_KIND[kind];
   if (!base) return;
-  let L = LAYERS_V2.find(l => l.kind === kind && !l.import_only && !l.annotation);
+  let L = LAYERS_V2.find(l => l.kind === kind && isDrawableLayer(l));
+  if (!L) {
+    const locked = LAYERS_V2.find(l => l.kind === kind && !l.import_only && !l.annotation && l.locked);
+    if (locked) {
+      toast(`Слой «${locked.title}» заблокирован — сначала разблокируйте его`, "warn");
+      return;
+    }
+  }
   if (!L) {
     snapshot();
     L = createUserLayer({ kind, title: base.label });
@@ -6072,7 +6141,9 @@ on("btn-shortcuts", "click", openShortcuts);
 on("btn-new-layer", "click", openNewLayerDialog);
 on("start-boundary", "click", startBoundaryFlow);
 on("start-draw", "click", () => {
-  const layer = activeLayer() || LAYERS_V2.find(item => item.user_created && !item.import_only && !item.annotation);
+  const current = activeLayer();
+  const layer = isDrawableLayer(current) ? current
+    : LAYERS_V2.find(item => item.user_created && isDrawableLayer(item));
   if (!layer) return startBoundaryFlow();
   startGuideDismissed = true;
   setActiveLayer(layer.id);
@@ -6080,6 +6151,17 @@ on("start-draw", "click", () => {
   document.getElementById("start-guide")?.setAttribute("hidden", "");
   document.getElementById("cv")?.focus();
   toast(`Слой «${layer.title}» активен. Поставьте первую точку на холсте.`);
+});
+on("start-unlock", "click", () => {
+  const layer = LAYERS_V2.find(item => item.user_created && !item.import_only && !item.annotation && item.locked);
+  if (!layer) return updateStartExperience();
+  toggleLayerLock(layer);
+  setActiveLayer(layer.id);
+  startGuideDismissed = true;
+  setTool(naturalToolFor(layer), { keepLayer: true });
+  document.getElementById("start-guide")?.setAttribute("hidden", "");
+  document.getElementById("cv")?.focus();
+  toast(`Слой «${layer.title}» разблокирован. Поставьте первую точку на холсте.`);
 });
 on("start-demo", "click", () => {
   document.getElementById("btn-demo")?.click();
