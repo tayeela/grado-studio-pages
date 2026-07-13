@@ -115,9 +115,9 @@ header{
   color:var(--accent);font-weight:650;margin-bottom:8px}
 .start-guide h1{font-size:19px;line-height:1.22;letter-spacing:-.02em;margin:0 0 8px}
 .start-guide>p{font-size:var(--fs-12);line-height:1.5;color:var(--muted);max-width:38em}
-.start-guide ol{list-style:none;display:grid;gap:10px;margin:18px 0}
-.start-guide li{position:relative;display:flex;flex-direction:column;gap:2px;padding-left:28px}
-.start-guide li::before{content:counter(list-item);position:absolute;left:0;top:0;width:19px;height:19px;
+.start-guide ol{list-style:none;display:grid;gap:10px;margin:18px 0;counter-reset:start-step}
+.start-guide li{position:relative;display:flex;flex-direction:column;gap:2px;padding-left:28px;counter-increment:start-step}
+.start-guide li::before{content:counter(start-step);position:absolute;left:0;top:0;width:19px;height:19px;
   display:grid;place-items:center;border-radius:6px;background:var(--accent-weak);color:var(--accent);
   font-family:var(--font-mono);font-size:9px;font-weight:650}
 .start-guide li b{font-size:var(--fs-12);font-weight:650}

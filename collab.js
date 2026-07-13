@@ -22,7 +22,8 @@
 
   // ---- shared/personal ----------------------------------------------------
   const SHARED_KEYS = ["features", "nextId", "name", "density", "ratio",
-    "krail", "kba", "layersVisible", "layerLocked", "layerRules", "layerOrder",
+    "educationZone", "territoryMode", "krail", "kba", "layersVisible",
+    "layerLocked", "layerRules", "layerOrder",
     "layerFmt", "layerFields", "layerTitles", "userLayers", "projectStyles",
     "projectCustomKinds", "sources", "albumConfig"];
 
@@ -85,10 +86,15 @@
       opt.headers["Content-Type"] = "application/json";
       opt.body = JSON.stringify(body);
     }
-    const r = await fetch(url, opt);
-    let data = null;
-    try { data = await r.json(); } catch (e) {}
-    return { ok: r.ok, status: r.status, data };
+    try {
+      const r = await fetch(url, opt);
+      let data = null;
+      try { data = await r.json(); } catch (e) {}
+      return { ok: r.ok, status: r.status, data };
+    } catch (error) {
+      return { ok: false, status: 0,
+        data: { error: "Нет связи с сервером. Проверьте интернет и повторите." } };
+    }
   }
 
   // ---- отправка своих правок (вызывается вместо autosave в hub-режиме) ----
@@ -131,11 +137,17 @@
           continue;
         }
         if (res.status === 401) { onSessionLost(); return; }
-        break;                              // прочие ошибки — не зацикливаемся
+        Collab.dirty = true;                // сервер не принял — правку не теряем
+        setSyncBadge("offline");
+        break;                              // повтор ниже, без горячего цикла
       }
-      setSyncBadge(Collab.dirty ? "dirty" : "ok");
+      if (!Collab.dirty) setSyncBadge("ok");
     } finally {
       Collab.syncing = false;
+      if (Collab.dirty && Collab.active && Collab.pid) {
+        clearTimeout(pushTimer);
+        pushTimer = setTimeout(pushNow, 2500);
+      }
     }
   }
 
@@ -143,7 +155,12 @@
   async function poll() {
     if (!Collab.active || !Collab.pid || Collab.syncing || Collab.dirty) return;
     const res = await api("GET", `/api/projects/${Collab.pid}/state?since=${Collab.rev}`);
-    if (!res.ok) { if (res.status === 401) onSessionLost(); return; }
+    if (!res.ok) {
+      if (res.status === 401) onSessionLost();
+      else setSyncBadge("offline");
+      return;
+    }
+    setSyncBadge("ok");
     Collab.online = res.data.online || [];
     updatePresence();
     if (res.data.state && res.data.rev !== Collab.rev) {
@@ -183,7 +200,8 @@
     const el = document.getElementById("collab-sync");
     if (!el) return;
     const map = { ok: ["● синхронизировано", "ok"], sync: ["⟳ сохранение…", "sync"],
-                  dirty: ["● есть изменения", "dirty"], off: ["", ""] };
+                  dirty: ["● есть изменения", "dirty"],
+                  offline: ["● нет связи · повторяем", "offline"], off: ["", ""] };
     const [text, cls] = map[kind] || map.off;
     el.textContent = text; el.className = "collab-badge " + cls;
   }
@@ -206,6 +224,13 @@
   }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  function countObjects(value) {
+    const n = Math.abs(Number(value)) || 0, m100 = n % 100, m10 = n % 10;
+    const word = m100 >= 11 && m100 <= 14 ? "объектов"
+      : m10 === 1 ? "объект" : m10 >= 2 && m10 <= 4 ? "объекта" : "объектов";
+    return `${value} ${word}`;
+  }
 
   let authOverlay = null;
   function showAuth(mode) {
@@ -252,16 +277,16 @@
     if (projOverlay) projOverlay.remove();
     const res = await api("GET", "/api/projects");
     if (res.status === 401) { showAuth(); return; }
-    const projects = (res.data && res.data.projects) || [];
+    const projects = res.ok && res.data && Array.isArray(res.data.projects) ? res.data.projects : [];
     const rows = projects.length ? projects.map(p => `
       <div class="collab-proj" data-pid="${p.id}">
         <div class="collab-proj-main">
           <div class="collab-proj-name">${esc(p.name)}</div>
-          <div class="collab-proj-meta">${p.objects} об. · ред. ${p.owner === Collab.user ? "вы" : esc(p.owner)}${p.members.length ? " +" + p.members.length : ""}</div>
+          <div class="collab-proj-meta">${countObjects(p.objects)} · редактор: ${p.owner === Collab.user ? "вы" : esc(p.owner)}${p.members.length ? " +" + p.members.length : ""}</div>
         </div>
         <div class="collab-proj-actions">
           ${p.owner === Collab.user ? `<button class="collab-share" data-pid="${p.id}" title="Дать доступ коллеге">Поделиться</button>
-          <button class="collab-del" data-pid="${p.id}" title="Удалить проект">✕</button>` : `<span class="muted">общий</span>`}
+          <button class="collab-del" data-pid="${p.id}" title="Удалить проект" aria-label="Удалить проект"><svg class="ic"><use href="#ic-close"/></svg></button>` : `<span class="muted">общий</span>`}
         </div>
       </div>`).join("") : `<div class="collab-empty">Пока нет проектов. Создайте первый.</div>`;
     projOverlay = overlay(`<div class="modal collab-projects">
@@ -272,22 +297,28 @@
       <div class="collab-newproj">
         <input id="pj-name" placeholder="Название нового проекта">
         <button class="primary" id="pj-create">Создать</button></div>
-      <div class="collab-list">${rows}</div>
+      <div class="collab-list">${res.ok ? rows : `<div class="collab-empty">${esc(res.data && res.data.error || "Не удалось загрузить проекты")}</div>`}</div>
     </div>`);
     const $ = id => projOverlay.querySelector("#" + id);
     $("pj-create").addEventListener("click", async () => {
       const name = $("pj-name").value.trim();
+      $("pj-create").disabled = true;
       const r = await api("POST", "/api/projects", { name });
+      $("pj-create").disabled = false;
       if (r.ok) openProject(r.data.id);
+      else if (window.toast) window.toast(r.data && r.data.error || "Не удалось создать проект", "error");
     });
     $("pj-name").addEventListener("keydown", e => { if (e.key === "Enter") $("pj-create").click(); });
     $("pj-logout").addEventListener("click", async () => {
-      await api("POST", "/api/auth/logout");
-      location.reload();
+      const r = await api("POST", "/api/auth/logout");
+      if (r.ok) location.reload();
+      else if (window.toast) window.toast(r.data && r.data.error || "Не удалось выйти", "error");
     });
     if ($("pj-invite")) $("pj-invite").addEventListener("click", async () => {
       const r = await api("POST", "/api/invites");
-      if (r.ok) window.prompt("Передайте этот инвайт-код коллеге (одноразовый):", r.data.invite);
+      if (r.ok && window.uiCopyText) window.uiCopyText(
+        "Передайте этот одноразовый код коллеге.", r.data.invite,
+        { title: "Инвайт-код", copy: "Скопировать код" });
       else if (window.toast) window.toast(r.data && r.data.error || "ошибка", "error");
     });
     projOverlay.querySelectorAll(".collab-proj-main").forEach(el =>
@@ -295,7 +326,9 @@
     projOverlay.querySelectorAll(".collab-share").forEach(btn =>
       btn.addEventListener("click", async e => {
         e.stopPropagation();
-        const login = window.prompt("Логин коллеги, которому дать доступ:");
+        const login = window.uiPrompt
+          ? await window.uiPrompt("Логин коллеги, которому дать доступ:", "", { ok: "Дать доступ", placeholder: "login" })
+          : null;
         if (!login) return;
         const r = await api("POST", `/api/projects/${btn.dataset.pid}/share`, { login: login.trim() });
         if (window.toast) window.toast(r.ok ? "Доступ выдан: " + login : (r.data && r.data.error || "ошибка"), r.ok ? "ok" : "error");
@@ -303,21 +336,35 @@
     projOverlay.querySelectorAll(".collab-del").forEach(btn =>
       btn.addEventListener("click", async e => {
         e.stopPropagation();
-        if (!window.confirm("Удалить проект безвозвратно?")) return;
-        await api("POST", `/api/projects/${btn.dataset.pid}/delete`);
-        showProjects();
+        const confirmed = window.uiConfirm
+          ? await window.uiConfirm("Удалить проект безвозвратно?", { title: "Удаление проекта", ok: "Удалить", danger: true })
+          : false;
+        if (!confirmed) return;
+        const r = await api("POST", `/api/projects/${btn.dataset.pid}/delete`);
+        if (r.ok) showProjects();
+        else if (window.toast) window.toast(r.data && r.data.error || "Не удалось удалить проект", "error");
       }));
   }
 
   async function openProject(pid) {
     const res = await api("GET", `/api/projects/${pid}/state`);
-    if (!res.ok) { if (window.toast) window.toast("не удалось открыть проект", "error"); return; }
+    if (!res.ok) {
+      if (window.toast) window.toast(res.data && res.data.error || "Не удалось открыть проект", "error");
+      return;
+    }
     if (projOverlay) { projOverlay.remove(); projOverlay = null; }
+    clearTimeout(pushTimer);
+    Collab.dirty = false;
     Collab.pid = pid; Collab.rev = res.data.rev;
-    Collab.base = res.data.state || {};
+    const shared = { features: [], name: res.data.name || "Новый проект",
+      ...(res.data.state || {}) };
+    Collab.base = shared;
     Collab.online = res.data.online || [];
-    // применяем серверное shared-состояние (пустое для нового проекта — ок)
-    applyShared({ ...(res.data.state || {}) }, false);
+    // Полный сброс обязателен: иначе пустой проект наследует слои и объекты
+    // предыдущего проекта, а отсутствующие shared-ключи не могут их удалить.
+    if (window.resetProjectForExternalState)
+      window.resetProjectForExternalState(res.data.name || "Новый проект");
+    applyShared(shared, false);
     setSyncBadge("ok"); updatePresence();
     showCollabBar(res.data.name || "проект");
     if (Collab.pollTimer) clearInterval(Collab.pollTimer);
@@ -333,7 +380,16 @@
     const back = document.getElementById("collab-back");
     if (back && !back._wired) {
       back._wired = true;
-      back.addEventListener("click", () => {
+      back.addEventListener("click", async () => {
+        back.disabled = true;
+        clearTimeout(pushTimer);
+        if (Collab.dirty) await pushNow();
+        back.disabled = false;
+        if (Collab.dirty) {
+          if (window.toast) window.toast(
+            "Изменения ещё не сохранены. Дождитесь восстановления связи.", "warn");
+          return;
+        }
         // вернуться к списку: остановить синк текущего проекта
         if (Collab.pollTimer) clearInterval(Collab.pollTimer);
         Collab.pid = null; Collab.rev = 0; Collab.base = null;

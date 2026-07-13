@@ -172,8 +172,10 @@ function makeColorField(host, initial, onChange) {
 // служит стилем по умолчанию для объектов без совпадения.
 function openLayerStyle(layer, opts = {}) {
   closePopups();
-  const origFmt = layer.fmt ? { ...layer.fmt } : null;   // для отмены
-  const origRules = layer.rules ? layer.rules.map(r => ({ ...r })) : null;
+  const historyBefore = window.captureHistoryState ? window.captureHistoryState() : null;
+  const clone = value => value == null ? null : JSON.parse(JSON.stringify(value));
+  const origFmt = clone(layer.fmt);   // для отмены
+  const origRules = clone(layer.rules);
   let mode = opts.mode || (origRules && origRules.length ? "rules" : "single");
   const cur = layerStyle(layer);
   const hasFill = cur.fill != null && cur.fill !== "transparent";
@@ -185,6 +187,8 @@ function openLayerStyle(layer, opts = {}) {
   let baseMarker = cur.line_marker || null, baseLabel = cur.line_label || null,
       baseDouble = cur.double || null;
   const targets = LAYERS_V2.filter(l => l !== layer && !l.annotation && !l.import_only);
+  const targetOriginals = new Map(targets.map(target => [target, clone(target.fmt)]));
+  const copiedTargets = new Set();
   const opt = (sel, v, lbl) => `<option value="${v}"${sel === v ? " selected" : ""}>${lbl}</option>`;
   // рабочая копия правил для режима «по значению поля»
   const fieldCols = attrColumns(layer).filter(c => !c.virtual);
@@ -436,8 +440,8 @@ function openLayerStyle(layer, opts = {}) {
     const fmt = collect(); layer.fmt = fmt;
     const to = $("fmt-copy-to").value;
     const dest = to === "__all__" ? targets : targets.filter(l => l.id === to);
-    for (const l of dest) l.fmt = { ...fmt };
-    renderLayers(); draw(); persist();
+    for (const l of dest) { l.fmt = clone(fmt); copiedTargets.add(l); }
+    renderLayers(); draw();
     toast(`Оформление скопировано на ${dest.length} слой(ёв)`);
   });
 
@@ -515,6 +519,10 @@ function openLayerStyle(layer, opts = {}) {
     closeColorFields();
     if (origFmt) layer.fmt = origFmt; else delete layer.fmt;
     if (origRules) layer.rules = origRules; else delete layer.rules;
+    for (const target of copiedTargets) {
+      const original = targetOriginals.get(target);
+      if (original) target.fmt = original; else delete target.fmt;
+    }
     closePopups(); renderLayers(); draw();
   };
   $("ls-apply").addEventListener("click", () => {
@@ -527,6 +535,7 @@ function openLayerStyle(layer, opts = {}) {
     } else {
       delete layer.rules;
     }
+    if (window.commitHistoryFrom) window.commitHistoryFrom(historyBefore);
     closePopups(); renderLayers(); draw(); persist();
     toast(mode === "rules" && layer.rules ? `Оформление по значению поля: ${layer.rules.length} правил(о)` : "Оформление слоя применено");
   });
@@ -535,6 +544,7 @@ function openLayerStyle(layer, opts = {}) {
   $("ls-reset").addEventListener("click", () => {
     closeColorFields();
     delete layer.fmt; delete layer.rules;
+    if (window.commitHistoryFrom) window.commitHistoryFrom(historyBefore);
     closePopups(); renderLayers(); draw(); persist();
     toast("Оформление сброшено к стандартному");
   });

@@ -628,6 +628,7 @@ label.data-src input[type=checkbox]{width:18px;height:18px;accent-color:var(--ac
 .collab-badge.ok{color:var(--success)}
 .collab-badge.sync{color:var(--accent)}
 .collab-badge.dirty{color:var(--warning)}
+.collab-badge.offline{color:var(--danger);background:color-mix(in srgb,var(--danger) 9%,var(--field-bg))}
 .collab-overlay{z-index:2000}
 .modal-overlay .collab-auth{width:min(380px,94vw);gap:10px;padding:22px}
 .collab-brand{font-size:20px;font-weight:700;text-align:center;color:var(--text);line-height:1.15}
@@ -641,6 +642,8 @@ label.data-src input[type=checkbox]{width:18px;height:18px;accent-color:var(--ac
   padding:8px 10px;font-size:var(--fs-12)}
 .modal-overlay .collab-projects{width:min(520px,95vw)}
 .modal-overlay .collab-mini,.modal-overlay .collab-share,.modal-overlay .collab-del{height:30px;padding:0 10px;font-size:var(--fs-11)}
+.modal-overlay .collab-del{width:30px;padding:0;display:inline-grid;place-items:center}
+.modal-overlay .collab-del .ic{width:14px;height:14px}
 .collab-newproj{display:flex;gap:8px;padding:4px 4px 12px}
 .collab-newproj input{flex:1}
 .collab-list{overflow-y:auto;padding:0 4px 4px;display:flex;flex-direction:column;gap:8px}

@@ -365,6 +365,7 @@ async function renameLayer(layer) {
   if (next == null) return;                 // отмена
   const title = next.trim();
   if (!title) return;
+  snapshot();
   layer.title = title;
   renderLayers(); renderProps(); persist();
 }
@@ -372,6 +373,7 @@ async function renameLayer(layer) {
 // блокировка слоя (только просмотр): нельзя выбрать/подвинуть/удалить его
 // объекты и нельзя сделать слой активным для черчения
 function toggleLayerLock(layer) {
+  snapshot();
   layer.locked = !layer.locked;
   if (layer.locked) {
     // снять выделение с уже выбранных объектов этого слоя — иначе их
@@ -478,6 +480,7 @@ async function createProjectStyle() {
   }
   const title = await uiPrompt("Название (для выбора и легенды):", cleanId) || cleanId;
   // Базовый стиль по умолчанию (пользователь может сразу использовать и править через слой/объект)
+  snapshot();
   state.projectStyles[cleanId] = {
     title: title,
     fill: "#f0e8d8",
@@ -539,6 +542,7 @@ function openProjectStyles() {
       dl.title = "Удалить";
       dl.onclick = async () => {
         if (await uiConfirm(`Удалить стиль проекта «${id}»?`)) {
+          snapshot();
           delete state.projectStyles[id];
           renderList();
           afterChange();
@@ -571,6 +575,7 @@ function openProjectStyles() {
     document.body.appendChild(ed);
     const $e = id => ed.querySelector("#" + id);
     $e("ps-ok").onclick = () => {
+      snapshot();
       st.title = $e("ps-t").value.trim() || id;
       st.fill = $e("ps-f").value;
       st.stroke = $e("ps-s").value;
@@ -2433,11 +2438,83 @@ function undoDepth() {
   const n = state.features.length;
   return n > 20000 ? 5 : n > 8000 ? 15 : 100;
 }
-function snapshot() {
-  state.undo.push(JSON.stringify(state.features));
+function serializeHistoryState() {
+  const saved = collectState();
+  delete saved.undo;
+  delete saved.redo;
+  // Эти настройки не принадлежат геометрической истории: пользователь не
+  // ожидает, что Undo чертежа переключит подложку, состав альбома или вариант.
+  delete saved.name;
+  delete saved.basemapSource;
+  delete saved.exportStyle;
+  delete saved.variants;
+  delete saved.accessRadii;
+  delete saved.albumConfig;
+  return JSON.stringify({ history_version: 2, ...saved });
+}
+function syncHistoryControls() {
+  const undoButton = document.getElementById("btn-undo");
+  const redoButton = document.getElementById("btn-redo");
+  if (undoButton) undoButton.disabled = !state.undo.length;
+  if (redoButton) redoButton.disabled = !state.redo.length;
+}
+function pushHistoryEntry(serialized = serializeHistoryState()) {
+  state.undo.push(serialized);
   const max = undoDepth();
   while (state.undo.length > max) state.undo.shift();
   state.redo = [];
+  syncHistoryControls();
+}
+function snapshot() {
+  pushHistoryEntry();
+}
+function commitHistoryFrom(serialized) {
+  if (serialized && serialized !== serializeHistoryState()) pushHistoryEntry(serialized);
+}
+function restoreHistoryEntry(serialized) {
+  const restored = JSON.parse(serialized);
+  if (Array.isArray(restored)) {
+    state.features = normalizeFeatureList(restored).map(upgradeFeature);
+    syncNextId();
+    return;
+  }
+  if (!isRecord(restored) || restored.history_version !== 2 || !Array.isArray(restored.features))
+    throw new Error("unsupported history entry");
+
+  const personal = {
+    name: document.getElementById("project-name").value,
+    variants: state.variants,
+    accessRadii: state.accessRadii,
+    albumConfig: state.albumConfig,
+    basemapSource: basemap.source,
+    exportStyle: exportStyleMode(),
+  };
+  state.projectCustomKinds = [];
+  rebuildKinds();
+  resetLayerModel();
+  if (!applyRestoredState(restored)) throw new Error("invalid history entry");
+
+  // layerOrder в истории — также точный список слоёв. Это позволяет корректно
+  // отменять создание/удаление, включая встроенные импортные слои.
+  const desiredIds = new Set(restored.layerOrder || []);
+  if (Array.isArray(restored.layerOrder)) {
+    const kept = LAYERS_V2.filter(layer => desiredIds.has(layer.id));
+    LAYERS_V2.splice(0, LAYERS_V2.length, ...kept);
+    rebuildLayerIndexes();
+  }
+  if (!LAYER_BY_ID[state.activeLayerId]) {
+    const fallback = LAYERS_V2.find(layer => !layer.annotation && !layer.import_only);
+    state.activeLayerId = fallback?.id || null;
+  }
+  document.getElementById("project-name").value = personal.name;
+  state.variants = personal.variants;
+  state.accessRadii = personal.accessRadii;
+  state.albumConfig = personal.albumConfig;
+  if (basemap.source !== personal.basemapSource) setBasemapSource(personal.basemapSource);
+  const exportSelect = document.getElementById("export-style");
+  if (exportSelect) exportSelect.value = personal.exportStyle;
+  syncProjectControls();
+  syncNextId();
 }
 function syncNextId() {
   const maxId = state.features.reduce((max, feature) =>
@@ -2446,18 +2523,40 @@ function syncNextId() {
 }
 function undo() {
   if (!state.undo.length) return;
-  state.redo.push(JSON.stringify(state.features));
-  state.features = JSON.parse(state.undo.pop());
-  syncNextId();
-  clearSelection(); afterChange();
+  const entry = state.undo.pop();
+  const current = serializeHistoryState();
+  state.redo.push(current);
+  while (state.redo.length > undoDepth()) state.redo.shift();
+  try {
+    restoreHistoryEntry(entry);
+  } catch (error) {
+    state.redo.pop();
+    state.undo.push(entry);
+    reportUiError(error, "Не удалось отменить действие");
+    syncHistoryControls();
+    return;
+  }
+  clearSelection(); syncHistoryControls(); afterChange();
 }
 function redo() {
   if (!state.redo.length) return;
-  state.undo.push(JSON.stringify(state.features));
-  state.features = JSON.parse(state.redo.pop());
-  syncNextId();
-  clearSelection(); afterChange();
+  const entry = state.redo.pop();
+  const current = serializeHistoryState();
+  state.undo.push(current);
+  while (state.undo.length > undoDepth()) state.undo.shift();
+  try {
+    restoreHistoryEntry(entry);
+  } catch (error) {
+    state.undo.pop();
+    state.redo.push(entry);
+    reportUiError(error, "Не удалось вернуть действие");
+    syncHistoryControls();
+    return;
+  }
+  clearSelection(); syncHistoryControls(); afterChange();
 }
+window.captureHistoryState = serializeHistoryState;
+window.commitHistoryFrom = commitHistoryFrom;
 let autosaveTimer = null;
 // полный снимок состояния студии (общий проектный + личный вид). Один
 // источник и для localStorage/autosave, и для веб-синхронизации (collab.js
@@ -2519,6 +2618,7 @@ function collectPersonal() {
   return {
     activeLayerId: state.activeLayerId, basemapSource: basemap.source,
     exportStyle: exportStyleMode(), undo: state.undo || [], redo: state.redo || [],
+    variants: state.variants || [], accessRadii: state.accessRadii,
     layersVisible: Object.fromEntries(LAYERS_V2.map(L => [L.id, L.visible])),
   };
 }
@@ -2601,6 +2701,7 @@ function maybeRefreshStations() {
 
 function afterChange() {
   state._ix = null; state._snapIndex = null;
+  syncHistoryControls();
   // страховка: убрать из выделения id несуществующих объектов (после
   // импорта/очистки/undo, где features заменяются целиком)
   if (state.selectedIds && state.selectedIds.size) {
@@ -3077,6 +3178,7 @@ function reorderLayer(srcId, targetId, before) {
   let to = disp.findIndex(L => L.id === targetId);
   if (to < 0) return;
   if (!before) to += 1;
+  snapshot();
   disp.splice(to, 0, moved);
   LAYERS_V2.splice(0, LAYERS_V2.length, ...disp.reverse());  // обратно в порядок отрисовки
   renderLayers(); draw(); persist();
@@ -3131,6 +3233,7 @@ function renderLayers() {
       ev.stopPropagation(); toggleLayerLock(layer);
     });
     row.querySelector("input").addEventListener("change", ev => {
+      snapshot();
       layer.visible = ev.target.checked;
       const sel = selectedFeature();
       if (!layer.visible && sel && layerOf(sel) === layer) {
@@ -3356,7 +3459,8 @@ function startBoundaryFlow() {
     toast("Слой границы активен. Поставьте первую точку на холсте.");
     return;
   }
-  openNewLayerDialog({ role: "boundary" });
+  quickLayerByKind("boundary");
+  toast("Граница готова. Поставьте первую точку на холсте.");
 }
 function updateStartExperience() {
   const guide = document.getElementById("start-guide");
@@ -3443,6 +3547,7 @@ function openNewLayerDialog(options = {}) {
     }
     const title = $("nl-title").value.trim() ||
       (role ? BASE_KIND_BY_KIND[role].label : GEOM_LABEL[geom] + " — слой");
+    snapshot();
     const L = role
       ? createUserLayer({ kind: role, title, styleId: styleRef })
       : createGenericLayer({ title, geometry_type: geom, styleId: styleRef });
@@ -3529,7 +3634,11 @@ function resetProjectState(name = "Новый проект") {
   if (accessShow) accessShow.checked = false;
   if (accessRadius) accessRadius.value = 300;
   if (accessWrap) accessWrap.style.display = "none";
+  syncHistoryControls();
 }
+// Веб-хаб использует тот же полный сброс при переключении проектов. Без него
+// пустой проект наследовал объекты и пользовательские слои предыдущего.
+window.resetProjectForExternalState = resetProjectState;
 
 function openManageKinds() {
   closePopups();
@@ -4015,6 +4124,7 @@ function openTepPresetEditor() {
   </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector("#ed-apply").onclick = () => {
+    snapshot();
     document.getElementById("p-density").value = overlay.querySelector("#ed-d").value;
     document.getElementById("p-ratio").value = overlay.querySelector("#ed-r").value;
     document.getElementById("p-education-zone").value = overlay.querySelector("#ed-ez").value;
@@ -4141,6 +4251,45 @@ function uiPrompt(msg, def = "", { ok = "OK", placeholder = "" } = {}) {
     overlay.addEventListener("click", ev => { if (ev.target === overlay) done(null); });
   });
 }
+// Показывает значение для передачи коллеге без нативного prompt: поле сразу
+// выделено, копирование работает и через Clipboard API, и в старых браузерах.
+function uiCopyText(msg, value, { title = "", copy = "Скопировать" } = {}) {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal ask-modal" role="dialog" aria-modal="true">
+      ${title ? `<div class="ask-title">${escHtml(title)}</div>` : ""}
+      <div class="ask-msg">${escHtml(msg)}</div>
+      <input type="text" class="ask-input" readonly aria-label="Значение для копирования">
+      <div class="modal-actions"><span class="spacer"></span>
+        <button class="ask-cancel">Закрыть</button>
+        <button class="ask-copy primary">${escHtml(copy)}</button>
+      </div></div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", event => event.stopPropagation());
+    const input = overlay.querySelector(".ask-input");
+    input.value = String(value == null ? "" : value);
+    const done = copied => { overlay.remove(); resolve(copied); };
+    const select = () => { input.focus(); input.select(); };
+    overlay.querySelector(".ask-copy").addEventListener("click", async () => {
+      select();
+      let copied = false;
+      try { await navigator.clipboard.writeText(input.value); copied = true; }
+      catch (error) {
+        try { copied = document.execCommand("copy"); } catch (fallbackError) { copied = false; }
+      }
+      if (copied) { toast("Скопировано", "ok"); done(true); }
+      else toast("Не удалось скопировать — выделите текст вручную", "error");
+    });
+    overlay.querySelector(".ask-cancel").addEventListener("click", () => done(false));
+    overlay.addEventListener("click", event => { if (event.target === overlay) done(false); });
+    overlay.addEventListener("keydown", event => { if (event.key === "Escape") done(false); });
+    select();
+  });
+}
+window.uiConfirm = uiConfirm;
+window.uiPrompt = uiPrompt;
+window.uiCopyText = uiCopyText;
 
 async function openAutosaveRecovery() {
   const overlay = document.createElement("div");
@@ -5076,7 +5225,11 @@ function setTool(tool, opts = {}) {
   }
   updateLayerStatus();
   document.querySelectorAll("#toolbar button[data-tool]").forEach(
-    b => b.classList.toggle("active", b.dataset.tool === tool));
+    b => {
+      const active = b.dataset.tool === tool;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-pressed", String(active));
+    });
   cv.style.cursor = tool === "select" ? "default" : "crosshair";
   draw();
 }
@@ -5108,13 +5261,14 @@ function quickLayerByKind(kind) {
   if (!base) return;
   let L = LAYERS_V2.find(l => l.kind === kind && !l.import_only && !l.annotation);
   if (!L) {
+    snapshot();
     L = createUserLayer({ kind, title: base.label });
     renderLayers(); persist();
     toast(`Слой «${base.label}» создан`);
   }
   state.activeLayerId = L.id;
   setTool(naturalToolFor(L), { keepLayer: true });
-  renderLayers();
+  renderLayers(); renderProps(); updateLayerStatus();
 }
 document.querySelectorAll("#toolbar button[data-tool]").forEach(
   b => b.addEventListener("click", () => setTool(b.dataset.tool)));
@@ -5611,9 +5765,12 @@ function safeHistoryStack(value) {
   return value.flatMap(snapshot => {
     if (typeof snapshot !== "string") return [];
     try {
-      const features = JSON.parse(snapshot);
-      if (!Array.isArray(features)) return [];
-      return [JSON.stringify(normalizeFeatureList(features))];
+      const parsed = JSON.parse(snapshot);
+      if (Array.isArray(parsed))
+        return [JSON.stringify(normalizeFeatureList(parsed))];
+      if (!isRecord(parsed) || parsed.history_version !== 2 || !Array.isArray(parsed.features))
+        return [];
+      return [JSON.stringify({ ...parsed, features: normalizeFeatureList(parsed.features) })];
     } catch (error) { return []; }
   });
 }
@@ -5674,7 +5831,7 @@ function normalizeRestoredState(payload) {
   };
   const skipped = restored.features.length - features.length;
   if (skipped) console.warn(`Пропущено повреждённых объектов: ${skipped}`);
-  return {
+  const normalized = {
     ...restored,
     features,
     userLayers,
@@ -5692,12 +5849,17 @@ function normalizeRestoredState(payload) {
     kba: numberInRange(restored.kba, 0, 10, 0.5),
     basemapSource: ["osm", "sat", "s2"].includes(restored.basemapSource)
       ? restored.basemapSource : "osm",
-    undo: safeHistoryStack(restored.undo),
-    redo: safeHistoryStack(restored.redo),
     _skippedFeatures: skipped,
     nextId: Number.isSafeInteger(Number(restored.nextId)) && Number(restored.nextId) > 0
       ? Number(restored.nextId) : 1,
   };
+  // Частичные payload (совместная работа, история) не должны стирать личную
+  // историю. Полные автосейвы передают эти ключи явно и проходят валидацию.
+  if (Array.isArray(restored.undo)) normalized.undo = safeHistoryStack(restored.undo);
+  else delete normalized.undo;
+  if (Array.isArray(restored.redo)) normalized.redo = safeHistoryStack(restored.redo);
+  else delete normalized.redo;
+  return normalized;
 }
 
 function applyRestoredState(d) {
@@ -5825,6 +5987,7 @@ function applyRestoredState(d) {
   document.getElementById("p-territory-mode").value = d.territoryMode;
   document.getElementById("p-krail").value = d.krail;
   document.getElementById("p-kba").value = d.kba;
+  syncHistoryControls();
   return true;
 }
 // применить состояние, пришедшее извне (веб-синхронизация): пересобрать
@@ -5893,6 +6056,7 @@ on("btn-variants", "click", openVariants);
 on("btn-theme", "click", () => { if (window.toggleTheme) window.toggleTheme(); });
 window.onThemeChange = () => { draw(); renderLayers(); };
 setTool("select");
+syncHistoryControls();
 renderLayers();
 renderProps();
 renderSources();
