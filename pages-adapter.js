@@ -256,7 +256,7 @@
       return nativeFetch(stylesUrl, options);
     }
     if (path === "/api/basemap-info") return json({
-      origin_lon: 37.6176, origin_lat: 55.7558,
+      origin_lon: pagesCore.originWgs84[0], origin_lat: pagesCore.originWgs84[1],
       attribution: "© OpenStreetMap contributors",
       attributions: {
         osm: "© OpenStreetMap contributors",

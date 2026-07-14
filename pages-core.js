@@ -298,6 +298,10 @@
   // Keeping the projection here lets the regular canvas/import pipeline stay
   // identical to the desktop edition instead of maintaining a second UI.
   const ORIGIN = [413000, 6178000];
+  // Exact EPSG:4326 position of the project's EPSG:32637 origin above.
+  // Keep basemap/extent requests on this datum: using Moscow's nominal city
+  // centre here shifts every imported source roughly 1.8 km north.
+  const ORIGIN_WGS84 = [37.61429248873298, 55.73988778495184];
   const WGS_A = 6378137;
   const WGS_F = 1 / 298.257223563;
   const WGS_E2 = WGS_F * (2 - WGS_F);
@@ -752,5 +756,6 @@
   }
 
   return { computeTep, preflightProject, webProject, importNspd, importGeoJson,
+    originWgs84: ORIGIN_WGS84.slice(),
     buildOsmExtentRequest, importOsmExtent, buildNspdExtentRequest, importNspdExtent };
 });
