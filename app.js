@@ -2645,6 +2645,7 @@ function redo() {
 window.captureHistoryState = serializeHistoryState;
 window.commitHistoryFrom = commitHistoryFrom;
 let autosaveTimer = null;
+let saveStateQueue = Promise.resolve();
 // полный снимок состояния студии (общий проектный + личный вид). Один
 // источник и для localStorage/autosave, и для веб-синхронизации (collab.js
 // берёт из него только «общие» ключи проекта).
@@ -2720,7 +2721,7 @@ function setSaveStatus(text, kind = "") {
   el.textContent = text;
   el.className = kind ? `save-${kind}` : "";
 }
-async function saveStateNow(payload, options = {}) {
+async function saveStateRequest(payload, options = {}) {
   setSaveStatus("Сохранение…", "busy");
   try {
     const headers = { "Content-Type": "application/json" };
@@ -2743,6 +2744,17 @@ async function saveStateNow(payload, options = {}) {
     setSaveStatus("Не сохранено", "error");
     throw error;
   }
+}
+function saveStateNow(payload, options = {}) {
+  // Автосейв, контрольная копия и замена проекта обязаны завершаться в том
+  // же порядке, в котором пользователь их запустил. ThreadingHTTPServer и
+  // IndexedDB иначе могут последними записать более старый снимок.
+  const pending = saveStateQueue.then(
+    () => saveStateRequest(payload, options),
+    () => saveStateRequest(payload, options),
+  );
+  saveStateQueue = pending.catch(() => {});
+  return pending;
 }
 function persist() {
   const payload = collectState();

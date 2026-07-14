@@ -413,6 +413,8 @@
     const res = await api("GET", "/api/projects");
     if (res.status === 401) { showAuth(); return; }
     const projects = res.ok && res.data && Array.isArray(res.data.projects) ? res.data.projects : [];
+    const damaged = res.ok && res.data && Number.isInteger(res.data.damaged)
+      ? res.data.damaged : 0;
     const rows = projects.length ? projects.map(p => `
       <div class="collab-proj" data-pid="${p.id}">
         <div class="collab-proj-main">
@@ -432,6 +434,7 @@
       <div class="collab-newproj">
         <input id="pj-name" placeholder="Название нового проекта">
         <button class="primary" id="pj-create">Создать</button></div>
+      ${damaged ? `<div class="collab-warning" role="status">Повреждённых файлов проектов: ${damaged}. Остальные проекты доступны; восстановите повреждённые файлы из резервной копии.</div>` : ""}
       <div class="collab-list">${res.ok ? rows : `<div class="collab-empty">${esc(res.data && res.data.error || "Не удалось загрузить проекты")}</div>`}</div>
     </div>`);
     const $ = id => projOverlay.querySelector("#" + id);

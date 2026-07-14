@@ -690,6 +690,7 @@ footer span { flex-shrink: 0; }
 .collab-newproj { display: flex; gap: var(--sp-2); padding: var(--sp-3); }
 .collab-newproj input { flex: 1; padding: 7px var(--sp-2); border: 1px solid var(--field-border);
   border-radius: var(--r-sm); background: var(--field-bg); color: var(--text); font: inherit; }
+.collab-warning { margin: 0 var(--sp-3) var(--sp-2); padding: 9px 11px; border: 1px solid var(--warning); border-radius: var(--r-sm); color: var(--text-2); font-size: var(--fs-12); }
 .collab-list { overflow-y: auto; padding: 0 var(--sp-3) var(--sp-3); display: flex;
   flex-direction: column; gap: 6px; }
 .collab-proj { display: flex; align-items: center; gap: var(--sp-2); padding: 10px var(--sp-3);

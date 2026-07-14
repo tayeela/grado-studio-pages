@@ -12,6 +12,7 @@
   const DB_NAME = "grado-studio-pages";
   const DB_STORE = "project-state";
   let databasePromise = null;
+  let autosaveWriteQueue = Promise.resolve();
 
   const json = (value, status = 200) => new Response(JSON.stringify(value), {
     status,
@@ -51,16 +52,33 @@
   const openDatabase = () => {
     if (typeof indexedDB === "undefined") return Promise.resolve(null);
     if (databasePromise) return databasePromise;
-    databasePromise = new Promise((resolve, reject) => {
+    let guardedOpening;
+    const opening = new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, 1);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains(DB_STORE))
           request.result.createObjectStore(DB_STORE);
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const database = request.result;
+        const release = () => {
+          if (databasePromise === guardedOpening) databasePromise = null;
+        };
+        database.onversionchange = () => { database.close(); release(); };
+        database.onclose = release;
+        resolve(database);
+      };
       request.onerror = () => reject(request.error || new Error("IndexedDB unavailable"));
       request.onblocked = () => reject(new Error("IndexedDB upgrade blocked"));
     });
+    // Заблокированное обновление или временный сбой не должны навсегда
+    // приклеивать вкладку к отклонённому Promise. Следующий автосейв попробует
+    // открыть IndexedDB снова, что особенно важно для больших проектов.
+    guardedOpening = opening.catch(error => {
+      if (databasePromise === guardedOpening) databasePromise = null;
+      throw error;
+    });
+    databasePromise = guardedOpening;
     return databasePromise;
   };
   const databaseRequest = async (mode, action) => {
@@ -109,6 +127,13 @@
       }
     }
     localStorage.setItem(key, JSON.stringify(value));
+  };
+  const queueAutosaveWrite = action => {
+    // Порядок берём в момент вызова fetch, до чтения body. Иначе более старый
+    // медленный запрос способен завершиться после нового и затереть его.
+    const pending = autosaveWriteQueue.then(action, action);
+    autosaveWriteQueue = pending.catch(() => {});
+    return pending;
   };
   const backupMeta = payload => {
     const state = isRecord(payload && payload.state) ? payload.state : payload;
@@ -196,24 +221,26 @@
     if (path.startsWith("/api/autosave/backups/")) return json(null, 404);
     if (path === "/api/autosave") {
       if (method === "POST") {
-        const state = await bodyJson(input, options);
-        if (!isRecord(state) || !Array.isArray(state.features))
-          return json({ error: "Некорректное состояние автосохранения" }, 400);
-        const savedAt = new Date().toISOString();
-        const envelope = { state, saved_at: savedAt };
-        try {
-          // Контрольная копия создаётся только перед заменой проекта. Обычный
-          // автосейв хранит одну версию. IndexedDB не ограничивает рабочий
-          // проект крошечной синхронной квотой localStorage.
-          if (requestHeader(input, options, "X-Grado-Checkpoint") === "1")
-            await storedProjectSet(AUTOSAVE_BACKUP_KEY, envelope);
-          await storedProjectSet(AUTOSAVE_KEY, envelope);
-          if (typeof localStorage.removeItem === "function")
-            localStorage.removeItem(LEGACY_AUTOSAVE_KEY);
-        } catch (error) {
-          return json({ error: "Недостаточно места для автосохранения" }, 507);
-        }
-        return json({ ok: true, saved_at: savedAt });
+        return queueAutosaveWrite(async () => {
+          const state = await bodyJson(input, options);
+          if (!isRecord(state) || !Array.isArray(state.features))
+            return json({ error: "Некорректное состояние автосохранения" }, 400);
+          const savedAt = new Date().toISOString();
+          const envelope = { state, saved_at: savedAt };
+          try {
+            // Контрольная копия создаётся только перед заменой проекта. Обычный
+            // автосейв хранит одну версию. IndexedDB не ограничивает рабочий
+            // проект крошечной синхронной квотой localStorage.
+            if (requestHeader(input, options, "X-Grado-Checkpoint") === "1")
+              await storedProjectSet(AUTOSAVE_BACKUP_KEY, envelope);
+            await storedProjectSet(AUTOSAVE_KEY, envelope);
+            if (typeof localStorage.removeItem === "function")
+              localStorage.removeItem(LEGACY_AUTOSAVE_KEY);
+          } catch (error) {
+            return json({ error: "Недостаточно места для автосохранения" }, 507);
+          }
+          return json({ ok: true, saved_at: savedAt });
+        });
       }
       try {
         const current = await storedProjectGet(AUTOSAVE_KEY);
