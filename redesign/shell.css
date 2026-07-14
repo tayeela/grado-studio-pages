@@ -156,7 +156,7 @@ body.panel-resizing iframe{pointer-events:none!important}
 
 /* ==== ПРАВАЯ ПАНЕЛЬ ==== */
 #panel{
-  flex:0 0 auto;width:312px;min-width:300px;max-width:min(640px,55vw);display:flex;flex-direction:column;min-height:0;
+  flex:0 0 auto;width:312px;min-width:300px;max-width:min(640px,48vw);display:flex;flex-direction:column;min-height:0;
   background:var(--glass);backdrop-filter:var(--glass-blur);
   box-shadow:var(--glass-hi),-1px 0 0 var(--hairline);z-index:var(--z-panel);
 }

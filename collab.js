@@ -69,12 +69,83 @@
     return { features: out, conflicts };
   }
 
-  // слияние всего shared-состояния: features — по объектам; прочие shared-ключи
-  // (слои/стили/настройки) — «последний победил» (мой), кроме отсутствующих
+  const MISSING = Symbol("missing");
+  const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+  function isPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function sameValue(left, right) {
+    if (left === right) return true;
+    if (left === MISSING || right === MISSING) return false;
+    if (Array.isArray(left) || Array.isArray(right)) {
+      if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+      return left.every((value, index) => sameValue(value, right[index]));
+    }
+    if (!isPlainObject(left) || !isPlainObject(right)) return false;
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every((key, index) => key === rightKeys[index]
+        && sameValue(left[key], right[key]));
+  }
+
+  // Обычный 3-way для одного значения. Если менял только один участник,
+  // берём его версию. Одновременные правки объектов сливаем по вложенным
+  // ключам; неразрешимый конфликт оставляет локальную версию инициатора.
+  function mergeValue(base, mine, theirs) {
+    if (sameValue(mine, theirs)) return { value: mine, conflicts: 0 };
+    if (sameValue(mine, base)) return { value: theirs, conflicts: 0 };
+    if (sameValue(theirs, base)) return { value: mine, conflicts: 0 };
+
+    if (isPlainObject(mine) && isPlainObject(theirs)
+        && (base === MISSING || isPlainObject(base))) {
+      const ancestor = base === MISSING ? {} : base;
+      const keys = new Set([
+        ...Object.keys(ancestor), ...Object.keys(mine), ...Object.keys(theirs),
+      ]);
+      const value = {};
+      let conflicts = 0;
+      for (const key of keys) {
+        const result = mergeValue(
+          hasOwn(ancestor, key) ? ancestor[key] : MISSING,
+          hasOwn(mine, key) ? mine[key] : MISSING,
+          hasOwn(theirs, key) ? theirs[key] : MISSING,
+        );
+        conflicts += result.conflicts;
+        if (result.value !== MISSING) value[key] = result.value;
+      }
+      return { value, conflicts };
+    }
+    return { value: mine, conflicts: 1 };
+  }
+
+  // Слияние всего shared-состояния. Геометрия объединяется по id объектов,
+  // остальные поля — настоящим 3-way. Это важно не только при 409: во время
+  // обычного poll локальное состояние равно base, поэтому удалённая правка
+  // плотности, слоя или стиля должна примениться, а не затереться локальным.
   function mergeShared(base, mine, theirs) {
-    const { features, conflicts } = mergeFeatures(
-      (base || {}).features, mine.features, (theirs || {}).features);
-    const merged = { ...theirs, ...mine, features };
+    const ancestor = base || {};
+    const local = mine || {};
+    const remote = theirs || {};
+    const featureResult = mergeFeatures(
+      ancestor.features, local.features, remote.features);
+    const merged = { features: featureResult.features };
+    let conflicts = featureResult.conflicts;
+    const keys = new Set([
+      ...Object.keys(ancestor), ...Object.keys(local), ...Object.keys(remote),
+    ]);
+    keys.delete("features");
+    for (const key of keys) {
+      const result = mergeValue(
+        hasOwn(ancestor, key) ? ancestor[key] : MISSING,
+        hasOwn(local, key) ? local[key] : MISSING,
+        hasOwn(remote, key) ? remote[key] : MISSING,
+      );
+      conflicts += result.conflicts;
+      if (result.value !== MISSING) merged[key] = result.value;
+    }
     return { merged, conflicts };
   }
   Collab._mergeShared = mergeShared;   // тестовый хук (см. проверку слияния)
@@ -209,7 +280,7 @@
     const el = document.getElementById("collab-online");
     if (!el) return;
     const others = Collab.online.filter(u => u !== Collab.user);
-    el.textContent = others.length ? "👥 " + others.join(", ") : "";
+    el.textContent = others.length ? "В проекте: " + others.join(", ") : "";
     el.title = others.length ? "Сейчас в проекте: " + others.join(", ") : "";
   }
 

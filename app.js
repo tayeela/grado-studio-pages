@@ -6344,21 +6344,38 @@ function initPanelResizer() {
   const resizer = document.getElementById('panel-resizer');
   const panel = document.getElementById('panel');
   if (!resizer || !panel) return;
-  // restore saved width
-  try {
-    const saved = localStorage.getItem('grado_panel_width');
-    if (saved) panel.style.flexBasis = saved + 'px';
-  } catch (e) {}
+  const toolbar = document.getElementById('toolbar');
   const MIN_PANEL_WIDTH = 300;
   const MAX_PANEL_WIDTH = 640;
-  const setWidth = width => {
-    const value = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, Math.round(width)));
+  const MIN_STAGE_WIDTH = 480;
+  let preferredWidth = 312;
+  // Restore the user's preferred desktop width. The effective width is
+  // clamped separately, so a temporarily narrow window does not destroy the
+  // preference and a wider window can restore it later.
+  try {
+    const saved = localStorage.getItem('grado_panel_width');
+    if (saved) preferredWidth = parseInt(saved, 10) || preferredWidth;
+  } catch (e) {}
+
+  const effectiveMaxWidth = () => {
+    const railWidth = toolbar?.offsetWidth || 76;
+    const available = window.innerWidth - railWidth - resizer.offsetWidth - MIN_STAGE_WIDTH;
+    const viewportShare = Math.floor(window.innerWidth * 0.48);
+    return Math.max(MIN_PANEL_WIDTH,
+      Math.min(MAX_PANEL_WIDTH, viewportShare, Math.max(MIN_PANEL_WIDTH, available)));
+  };
+  const setWidth = (width, remember = false) => {
+    const maxWidth = effectiveMaxWidth();
+    const value = Math.max(MIN_PANEL_WIDTH, Math.min(maxWidth, Math.round(width)));
+    if (remember) preferredWidth = value;
     panel.style.flexBasis = value + 'px';
+    resizer.setAttribute('aria-valuemax', String(maxWidth));
     resizer.setAttribute('aria-valuenow', String(value));
+    resizer.setAttribute('aria-valuetext', `${value} пикселей`);
     resize();
     return value;
   };
-  setWidth(parseInt(panel.style.flexBasis) || panel.offsetWidth || 312);
+  setWidth(preferredWidth);
   let startX = 0, startW = 0;
   resizer.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
@@ -6371,7 +6388,7 @@ function initPanelResizer() {
     const move = ev => {
       const dx = ev.clientX - startX;
       // panel on the right: drag resizer right (dx>0) → narrower panel
-      setWidth(startW - dx);
+      setWidth(startW - dx, true);
     };
     let finished = false;
     const finish = () => {
@@ -6384,7 +6401,7 @@ function initPanelResizer() {
       window.removeEventListener('blur', finish);
       if (resizer.hasPointerCapture(pointerId)) resizer.releasePointerCapture(pointerId);
       document.body.classList.remove('panel-resizing');
-      try { localStorage.setItem('grado_panel_width', parseInt(panel.style.flexBasis) || 312); } catch (e) {}
+      try { localStorage.setItem('grado_panel_width', preferredWidth); } catch (e) {}
       resize();
     };
     resizer.addEventListener('pointermove', move);
@@ -6398,10 +6415,11 @@ function initPanelResizer() {
     if (e.key === 'ArrowLeft') width += 20;
     else if (e.key === 'ArrowRight') width -= 20;
     else if (e.key === 'Home') width = MIN_PANEL_WIDTH;
-    else if (e.key === 'End') width = MAX_PANEL_WIDTH;
+    else if (e.key === 'End') width = effectiveMaxWidth();
     else return;
     e.preventDefault();
-    width = setWidth(width);
+    width = setWidth(width, true);
     try { localStorage.setItem('grado_panel_width', width); } catch (error) {}
   });
+  window.addEventListener('resize', () => setWidth(preferredWidth));
 }
