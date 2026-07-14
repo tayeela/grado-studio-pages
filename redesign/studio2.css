@@ -235,11 +235,15 @@
 
 /* ---- Диалог «Данные по области» (.data-modal) ---- */
 .modal-head{position:relative}
-.modal-x{position:absolute;top:4px;right:0;width:34px;height:34px;padding:0;border:none!important;
-  background:transparent!important;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted);line-height:0}
-.modal-x:hover{background:var(--field-bg)!important;color:var(--text)}
-.modal-x:active{transform:scale(.94)!important}
-.modal-x .ic{display:block;width:16px;height:16px;pointer-events:none}
+/* Specificity is intentional: legacy .modal-head .modal-x must not shift the
+   glyph or restore horizontal padding in any dialog. */
+.modal-head .modal-x{position:absolute;top:4px;right:0;width:34px;height:34px;margin:0;padding:0!important;
+  border:none!important;background:transparent!important;border-radius:var(--r-sm);display:grid;
+  place-items:center;color:var(--muted);line-height:0;cursor:pointer;user-select:none;-webkit-user-select:none}
+.modal-head .modal-x:hover{background:var(--field-bg)!important;color:var(--text)}
+.modal-head .modal-x:active{transform:scale(.94)!important}
+.modal-head .modal-x:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.modal-head .modal-x .ic{display:block;width:16px;height:16px;margin:0;pointer-events:none}
 .data-area-bar{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;
   background:var(--field-bg);border:1px solid var(--field-border);border-radius:var(--r-md);
   font-size:var(--fs-12);color:var(--muted)}
