@@ -16,24 +16,24 @@ function stylePickerOptions(selectedId) {
   const groups = new Map();
   for (const [sid, s] of Object.entries(STYLES_V2)) {
     if (!s.title) continue;              // безымянные/служебные не предлагаем
-    const g = s.group || "Базовые";
+    const g = String(s.group || "Базовые");
     if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push([sid, s.title]);
+    groups.get(g).push([sid, String(s.title)]);
   }
   // Стили проекта — своя группа, полностью кастомные внутри проекта
   const proj = state.projectStyles || {};
   if (Object.keys(proj).length) {
     const items = [];
     for (const [sid, s] of Object.entries(proj)) {
-      items.push([sid, s.title || sid]);
+      items.push([sid, String(s.title || sid)]);
     }
     if (items.length) groups.set("Стили этого проекта", items);
   }
   let html = `<option value=""${!selectedId ? " selected" : ""}>— по умолчанию —</option>`;
   for (const [g, items] of groups) {
-    html += `<optgroup label="${g}">`;
+    html += `<optgroup label="${escHtml(g)}">`;
     for (const [sid, title] of items.sort((a, b) => a[1].localeCompare(b[1], "ru")))
-      html += `<option value="${sid}"${sid === selectedId ? " selected" : ""}>${title}</option>`;
+      html += `<option value="${escHtml(sid)}"${sid === selectedId ? " selected" : ""}>${escHtml(title)}</option>`;
     html += `</optgroup>`;
   }
   // опция создания нового (будет обработана в onchange если нужно)
@@ -43,12 +43,14 @@ function stylePickerOptions(selectedId) {
 
 // ---------- форматирование слоя ----------
 function toHexColor(c, fallback) {
-  if (!c) return fallback;
-  if (c[0] === "#") return c.slice(0, 7);
+  if (typeof c !== "string" || !c) return fallback;
+  const hex = normHex(c);
+  if (hex) return hex;
   const m = c.match(/rgba?\(([^)]+)\)/);
   if (m) {
     const [r, g, b] = m[1].split(",").map(x => parseInt(x.trim()));
-    return "#" + [r, g, b].map(v => (v || 0).toString(16).padStart(2, "0")).join("");
+    return "#" + [r, g, b].map(v => Math.max(0, Math.min(255, Number.isFinite(v) ? v : 0))
+      .toString(16).padStart(2, "0")).join("");
   }
   return fallback;
 }
@@ -179,7 +181,7 @@ function openLayerStyle(layer, opts = {}) {
   let mode = opts.mode || (origRules && origRules.length ? "rules" : "single");
   const cur = layerStyle(layer);
   const hasFill = cur.fill != null && cur.fill !== "transparent";
-  const opacity = Math.round((cur.fillOpacity != null ? cur.fillOpacity : 1) * 100);
+  const opacity = boundedNumber(Math.round((cur.fillOpacity != null ? cur.fillOpacity : 1) * 100), 10, 100, 100);
   const dp = dashPresetOf(cur.dash);
   const hObj = cur.hatch && typeof cur.hatch === "object" ? cur.hatch : null;
   const hAngle = hObj ? (hObj.cross ? "cross" : String(hObj.angle ?? 45)) : "45";
@@ -189,7 +191,7 @@ function openLayerStyle(layer, opts = {}) {
   const targets = LAYERS_V2.filter(l => l !== layer && !l.annotation && !l.import_only);
   const targetOriginals = new Map(targets.map(target => [target, clone(target.fmt)]));
   const copiedTargets = new Set();
-  const opt = (sel, v, lbl) => `<option value="${v}"${sel === v ? " selected" : ""}>${lbl}</option>`;
+  const opt = (sel, v, lbl) => `<option value="${escHtml(v)}"${sel === v ? " selected" : ""}>${escHtml(lbl)}</option>`;
   // рабочая копия правил для режима «по значению поля»
   const fieldCols = attrColumns(layer).filter(c => !c.virtual);
   // подпись объектов: поле + шрифт (кегль/цвет/семейство). Холст подписывает
@@ -225,7 +227,7 @@ function openLayerStyle(layer, opts = {}) {
           <section class="style-section">
             <div class="style-section-head"><span><b>Обводка</b><small>Контур, толщина и тип линии</small></span></div>
             <div class="fmt-row"><label>Цвет<div id="fmt-stroke"></div></label>
-              <label>Толщина, px<input type="number" id="fmt-width" value="${cur.width ?? 1}" min="0.2" max="8" step="0.1" required></label></div>
+              <label>Толщина, px<input type="number" id="fmt-width" value="${boundedNumber(cur.width, 0.2, 8, 1)}" min="0.2" max="8" step="0.1" required></label></div>
             <div class="fmt-row"><label>Тип линии<select id="fmt-dashp">${
               opt(dp, "solid", "Сплошная") + opt(dp, "dash", "Штрих") +
               opt(dp, "dashdot", "Штрих-пунктир") + opt(dp, "dashdotdot", "Штрих — две точки") +
@@ -248,20 +250,20 @@ function openLayerStyle(layer, opts = {}) {
             <div class="fmt-body" id="fmt-marker-fields" style="display:${baseMarker ? "" : "none"}">
               <div class="fmt-row"><label>Форма<select id="fmt-marker-shape">${MARKER_SHAPES.map(([v, lbl]) => opt((baseMarker && baseMarker.shape) || "tick", v, lbl)).join("")}</select></label>
                 <label>Направление<select id="fmt-marker-dir">${opt((baseMarker && baseMarker.dir) || "in", "in", "Внутрь зоны") + opt((baseMarker && baseMarker.dir) || "in", "out", "Наружу")}</select></label></div>
-              <div class="fmt-row"><label>Шаг, px<input type="number" id="fmt-marker-period" value="${(baseMarker && baseMarker.period) || 40}" min="6" max="200" step="1" required></label>
-                <label>Размер, px<input type="number" id="fmt-marker-size" value="${(baseMarker && baseMarker.size) || 4}" min="1" max="40" step="0.5" required></label></div>
+              <div class="fmt-row"><label>Шаг, px<input type="number" id="fmt-marker-period" value="${boundedNumber(baseMarker && baseMarker.period, 6, 200, 40)}" min="6" max="200" step="1" required></label>
+                <label>Размер, px<input type="number" id="fmt-marker-size" value="${boundedNumber(baseMarker && baseMarker.size, 1, 40, 4)}" min="1" max="40" step="0.5" required></label></div>
             </div>
           </section>
           <section class="style-section style-section-compact"><label class="style-check"><input type="checkbox" id="fmt-label" ${baseLabel ? "checked" : ""}><span><b>Подпись линии</b><small>Использовать подпись из знака ЛГР</small></span></label></section>
           ${isPoly ? `<section class="style-section"><div class="style-section-head"><span><b>Подпись объектов</b><small>Поле и параметры текста</small></span></div>
             <label>Поле подписи<select id="fmt-labelf"><option value="">— без подписи —</option>${labelCols.map(c => opt(curLF, c.name, c.label || c.name)).join("")}</select></label>
             <div class="fmt-body" id="fmt-labelf-fields" style="display:${curLF ? "" : "none"}"><div class="fmt-row">
-              <label>Кегль, px<input type="number" id="fmt-lsize" value="${lfFont.size || 11}" min="6" max="72" step="0.5" required></label>
+              <label>Кегль, px<input type="number" id="fmt-lsize" value="${boundedNumber(lfFont.size, 6, 72, 11)}" min="6" max="72" step="0.5" required></label>
               <label>Шрифт<select id="fmt-lfamily">${opt(lfFont.family || "ui", "ui", "Системный") + opt(lfFont.family || "ui", "serif", "С засечками") + opt(lfFont.family || "ui", "mono", "Моноширинный")}</select></label>
             </div><label>Цвет<div id="fmt-lcolor"></div></label></div>
           </section>` : ""}
           ${targets.length ? `<section class="style-section"><div class="style-section-head"><span><b>Применить к другим слоям</b><small>Копирует текущие настройки оформления</small></span></div>
-            <div class="fmt-row fmt-copy-row"><label>Слой<select id="fmt-copy-to"><option value="__all__">— все слои —</option>${targets.map(l => `<option value="${l.id}">${escHtml(l.title)}</option>`).join("")}</select></label>
+            <div class="fmt-row fmt-copy-row"><label>Слой<select id="fmt-copy-to"><option value="__all__">— все слои —</option>${targets.map(l => `<option value="${escHtml(l.id)}">${escHtml(l.title)}</option>`).join("")}</select></label>
               <button id="fmt-copy" class="fmt-copy-btn">Скопировать</button></div>
           </section>` : ""}
         </div>
@@ -302,11 +304,12 @@ function openLayerStyle(layer, opts = {}) {
     styleFormError.hidden = true;
     styleFormError.textContent = "";
   };
-  const showStyleError = (input, message) => {
+  const showStyleError = (input, message, placement = null) => {
     clearStyleError();
     const label = input.closest("label");
     const row = label?.closest(".fmt-row");
-    if (label) label.insertAdjacentElement("afterend", styleFormError);
+    const anchor = placement || label;
+    if (anchor) anchor.insertAdjacentElement("afterend", styleFormError);
     if (row) row.classList.add("has-field-error");
     styleFormError.textContent = message;
     styleFormError.hidden = false;
@@ -372,8 +375,8 @@ function openLayerStyle(layer, opts = {}) {
     $("fmt-marker").checked = !!m;
     $("fmt-marker-fields").style.display = m ? "" : "none";
     $("fmt-marker-shape").value = (m && m.shape) || "tick";
-    $("fmt-marker-period").value = (m && m.period) || 40;
-    $("fmt-marker-size").value = (m && m.size) || 4;
+    $("fmt-marker-period").value = boundedNumber(m && m.period, 6, 200, 40);
+    $("fmt-marker-size").value = boundedNumber(m && m.size, 1, 40, 4);
     $("fmt-marker-dir").value = (m && m.dir) || "in";
   };
   $("fmt-dashp").addEventListener("change", () => {
@@ -448,7 +451,7 @@ function openLayerStyle(layer, opts = {}) {
       $("fmt-hasfill").checked = !!p.fill;
       if (p.fill) fillCF.set(toHexColor(p.fill, "#faf0bf"));
       strokeCF.set(toHexColor(p.stroke, "#888888"));
-      $("fmt-width").value = p.width ?? 1;
+      $("fmt-width").value = boundedNumber(p.width, 0.2, 8, 1);
       setDashFields(p.dash);
       const ph = p.hatch && typeof p.hatch === "object" ? p.hatch : null;
       $("fmt-hatch").checked = !!p.hatch;
@@ -512,16 +515,42 @@ function openLayerStyle(layer, opts = {}) {
     overlay.querySelectorAll(".cr-value").forEach(el => { work[+el.dataset.i].value = el.value; });
     overlay.querySelectorAll(".cr-style").forEach(el => { work[+el.dataset.i].style_id = el.value; });
   };
+  const validateRules = () => {
+    syncRules();
+    const index = work.findIndex(rule => !rule.field ||
+      !String(rule.value ?? "").trim() || !rule.style_id);
+    if (index < 0) { clearStyleError(); return true; }
+    const row = $("cr-body").querySelectorAll("tr")[index];
+    const rule = work[index];
+    const input = !rule.field ? row?.querySelector(".cr-field")
+      : !String(rule.value ?? "").trim() ? row?.querySelector(".cr-value")
+      : row?.querySelector(".cr-style");
+    const missing = !rule.field ? "поле" : !String(rule.value ?? "").trim()
+      ? "значение" : "знак";
+    if (!input) return false;
+    return showStyleError(input,
+      `Правило ${index + 1}: укажите ${missing}.`,
+      row.closest(".cr-table-wrap"));
+  };
   const liveRules = () => {   // живой предпросмотр правил на холсте
     const clean = work.filter(r => r.field && r.value !== "" && r.style_id);
     if (clean.length) layer.rules = clean; else delete layer.rules;
     draw();
   };
   const renderRules = () => {
+    clearStyleError();
     $("cr-body").innerHTML = rulesRowsHtml();
-    overlay.querySelectorAll(".cr-field").forEach(el => el.onchange = () => { work[+el.dataset.i].field = el.value; liveRules(); });
-    overlay.querySelectorAll(".cr-value").forEach(el => el.oninput = () => { work[+el.dataset.i].value = el.value; liveRules(); });
+    overlay.querySelectorAll(".cr-field").forEach(el => el.onchange = () => {
+      clearStyleError(); work[+el.dataset.i].field = el.value; liveRules();
+    });
+    overlay.querySelectorAll(".cr-op").forEach(el => el.onchange = () => {
+      clearStyleError(); work[+el.dataset.i].op = el.value; liveRules();
+    });
+    overlay.querySelectorAll(".cr-value").forEach(el => el.oninput = () => {
+      clearStyleError(); work[+el.dataset.i].value = el.value; liveRules();
+    });
     overlay.querySelectorAll(".cr-style").forEach(el => el.onchange = async () => {
+      clearStyleError();
       let val = el.value;
       if (val === "__create_project_style__") {
         const newId = await createProjectStyle();
@@ -592,6 +621,7 @@ function openLayerStyle(layer, opts = {}) {
   };
   $("ls-apply").addEventListener("click", () => {
     if (mode === "single" && !validateSingleStyle()) return;
+    if (mode === "rules" && !validateRules()) return;
     closeColorFields();
     layer.fmt = collect();
     if (mode === "rules") {
@@ -685,14 +715,14 @@ function openStyleLibrary() {
     }
     return "transparent";
   }
-  const opt = (sel, v, lbl) => `<option value="${v}"${sel === v ? " selected" : ""}>${lbl}</option>`;
+  const opt = (sel, v, lbl) => `<option value="${escHtml(v)}"${sel === v ? " selected" : ""}>${escHtml(lbl)}</option>`;
   function renderEditor(sid) {
     sel = sid;
     overlay.querySelectorAll(".lib-item").forEach(el =>
       el.classList.toggle("active", el.dataset.sid === sid));
     const st = edited[sid] || STYLES_V2[sid];
     const hasFill = st.fill != null && st.fill !== "transparent";
-    const op = Math.round((st.fillOpacity != null ? st.fillOpacity : 1) * 100);
+    const op = boundedNumber(Math.round((st.fillOpacity != null ? st.fillOpacity : 1) * 100), 10, 100, 100);
     const dp = dashPresetOf(st.dash);
     const hObj = st.hatch && typeof st.hatch === "object" ? st.hatch : null;
     const hAngle = hObj ? (hObj.cross ? "cross" : String(hObj.angle ?? 45)) : "45";
@@ -708,7 +738,7 @@ function openStyleLibrary() {
       <label>Прозрачность, %<input type="range" id="lib-op" min="10" max="100" step="5" value="${op}"></label>
       <div class="fmt-sub">Линия</div>
       <label>Цвет<div id="lib-stroke"></div></label>
-      <label>Толщина<input type="number" id="lib-width" value="${st.width ?? 1}" min="0.2" max="8" step="0.1"></label>
+      <label>Толщина<input type="number" id="lib-width" value="${boundedNumber(st.width, 0.2, 8, 1)}" min="0.2" max="8" step="0.1" required></label>
       <label>Пунктир<select id="lib-dashp">${
         opt(dp, "solid", "сплошная") + opt(dp, "dash", "штрих") + opt(dp, "dashdot", "штрих-пунктир") +
         opt(dp, "dashdotdot", "штрих-2 точки") + opt(dp, "custom", "свой…")}</select></label>
@@ -725,8 +755,8 @@ function openStyleLibrary() {
       <label class="chk"><input type="checkbox" id="lib-marker" ${mk ? "checked" : ""}> маркеры</label>
       <div id="lib-mfields" style="display:${mk ? "" : "none"}">
         <label>Форма<select id="lib-mshape">${MARKER_SHAPES.map(([v, l]) => opt((mk && mk.shape) || "tick", v, l)).join("")}</select></label>
-        <label>Шаг, px<input type="number" id="lib-mperiod" value="${(mk && mk.period) || 40}" min="6" max="200"></label>
-        <label>Размер, px<input type="number" id="lib-msize" value="${(mk && mk.size) || 4}" min="1" max="40" step="0.5"></label>
+        <label>Шаг, px<input type="number" id="lib-mperiod" value="${boundedNumber(mk && mk.period, 6, 200, 40)}" min="6" max="200" required></label>
+        <label>Размер, px<input type="number" id="lib-msize" value="${boundedNumber(mk && mk.size, 1, 40, 4)}" min="1" max="40" step="0.5" required></label>
         <label>Остриё<select id="lib-mdir">${opt((mk && mk.dir) || "in", "in", "внутрь") + opt((mk && mk.dir) || "in", "out", "наружу")}</select></label>
       </div>`;
     const fillCF = makeColorField($("lib-fill"), toHexColor(st.fill, "#faf0bf"), onEdit);

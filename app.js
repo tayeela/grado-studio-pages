@@ -500,9 +500,13 @@ function canvasStrokeOf(f, st) {
 async function createProjectStyle() {
   const id = await uiPrompt("ID нового стиля проекта (латиница, уникальный, напр. my_fence):", "", { placeholder: "my_custom" });
   if (!id) return null;
-  const cleanId = id.trim().replace(/\s+/g, "_");
-  if (!cleanId || state.projectStyles[cleanId] || STYLES_V2[cleanId]) {
-    toast("ID уже занят в библиотеке или проекте, или пустой", "warn");
+  const cleanId = id.trim();
+  if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(cleanId)) {
+    toast("ID должен начинаться с латинской буквы и содержать только латиницу, цифры, точку, дефис или подчёркивание", "warn");
+    return null;
+  }
+  if (state.projectStyles[cleanId] || STYLES_V2[cleanId]) {
+    toast("Такой ID уже занят в библиотеке или проекте", "warn");
     return null;
   }
   const title = await uiPrompt("Название (для выбора и легенды):", cleanId) || cleanId;
@@ -526,8 +530,8 @@ function openProjectStyles() {
   closePopups();
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  overlay.innerHTML = `<div class="modal fmt-modal">
-    <div class="modal-head">Стили проекта
+  overlay.innerHTML = `<div class="modal fmt-modal" role="dialog" aria-modal="true" aria-labelledby="project-styles-title">
+    <div class="modal-head"><span id="project-styles-title">Стили проекта</span>
       <button class="modal-x" aria-label="Закрыть стили проекта"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <div class="ps-note">Собственные знаки хранятся вместе с проектом и доступны при оформлении слоёв и объектов.</div>
@@ -554,7 +558,8 @@ function openProjectStyles() {
       row.className = "ps-row";
       const sw = document.createElement("span");
       sw.className = "ps-swatch";
-      sw.style.cssText = `background:${st.fill || "#f0e8d8"};border-color:${st.stroke || "#5c4630"}`;
+      sw.style.background = toHexColor(st.fill, "#f0e8d8");
+      sw.style.borderColor = toHexColor(st.stroke, "#5c4630");
       const nm = document.createElement("span");
       nm.textContent = `${st.title || id} (${id})`;
       nm.className = "ps-name";
@@ -582,16 +587,17 @@ function openProjectStyles() {
   async function editPS(id, st, onDone) {
     const ed = document.createElement("div");
     ed.className = "modal-overlay";
-    const f = (st.fill && st.fill[0] === "#") ? st.fill : "#f0e8d8";
-    const s = (st.stroke && st.stroke[0] === "#") ? st.stroke : "#5c4630";
-    ed.innerHTML = `<div class="modal ask-modal" style="width:280px">
-      <div class="modal-head">Редактировать «${id}»
+    const f = toHexColor(st.fill, "#f0e8d8");
+    const s = toHexColor(st.stroke, "#5c4630");
+    ed.innerHTML = `<div class="modal ask-modal" style="width:280px" role="dialog" aria-modal="true" aria-labelledby="project-style-edit-title">
+      <div class="modal-head"><span id="project-style-edit-title">Редактировать «${escHtml(id)}»</span>
         <button class="modal-x" aria-label="Закрыть редактирование стиля"><svg class="ic"><use href="#ic-close"/></svg></button></div>
       <div class="modal-body">
-        <label>Название<input id="ps-t" value="${st.title || id}"></label>
+        <label>Название<input id="ps-t" value="${escHtml(st.title || id)}" maxlength="120" required></label>
         <label>Заливка<input type="color" id="ps-f" value="${f}"></label>
         <label>Обводка<input type="color" id="ps-s" value="${s}"></label>
-        <label>Толщина<input type="number" id="ps-w" value="${st.width || 1.5}" step="0.1" min="0.1"></label>
+        <label>Толщина<input type="number" id="ps-w" value="${boundedNumber(st.width, 0.2, 8, 1.5)}" step="0.1" min="0.2" max="8" required></label>
+        <div class="form-error" id="ps-error" role="alert" hidden></div>
       </div>
       <div class="modal-actions">
         <button id="ps-ok">Сохранить</button>
@@ -601,12 +607,30 @@ function openProjectStyles() {
     </div>`;
     document.body.appendChild(ed);
     const $e = id => ed.querySelector("#" + id);
+    const clearError = () => {
+      $e("ps-error").hidden = true;
+      $e("ps-error").textContent = "";
+      [$e("ps-t"), $e("ps-w")].forEach(input => input.removeAttribute("aria-invalid"));
+    };
+    [$e("ps-t"), $e("ps-w")].forEach(input => input.addEventListener("input", clearError));
     $e("ps-ok").onclick = () => {
+      const invalid = !$e("ps-t").checkValidity() ? $e("ps-t")
+        : !$e("ps-w").checkValidity() ? $e("ps-w") : null;
+      if (invalid) {
+        clearError();
+        invalid.setAttribute("aria-invalid", "true");
+        $e("ps-error").textContent = invalid === $e("ps-t")
+          ? "Введите название стиля."
+          : "Укажите толщину линии от 0,2 до 8 px.";
+        $e("ps-error").hidden = false;
+        invalid.focus({ preventScroll: true });
+        return;
+      }
       snapshot();
       st.title = $e("ps-t").value.trim() || id;
       st.fill = $e("ps-f").value;
       st.stroke = $e("ps-s").value;
-      st.width = parseFloat($e("ps-w").value) || 1.5;
+      st.width = boundedNumber($e("ps-w").value, 0.2, 8, 1.5);
       ed.remove();
       onDone();
       afterChange();
@@ -632,7 +656,7 @@ function dashPresetOf(dash) {
     if (v && v.length === dash.length && v.every((n, i) => n === dash[i])) return k;
   return "custom";     // точный паттерн (напр. из QML) не совпал ни с одним пресетом
 }
-function dashToStr(dash) { return dash ? dash.join(",") : ""; }
+function dashToStr(dash) { return Array.isArray(dash) ? dash.join(",") : ""; }
 function boundedNumber(value, minimum, maximum, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed)
@@ -3046,15 +3070,15 @@ function renderTep(data) {
 const ATTR_FIELDS = {
   "oks.building": [
     { key: "floors", title: "Этажность", type: "number", min: 1, max: 75,
-      cast: v => Math.max(1, parseInt(v) || 9) },
+      cast: v => Math.min(75, Math.max(1, parseInt(v) || 9)) },
     { type: "computed",
       compute: f => `СПП: ${(ringArea(f.ring) * (f.props.floors || 1) / 1000).toFixed(1)} тыс. м²` },
   ],
   "pp.red_line": [
     { key: "radius", title: "Радиус сопряжения, м", type: "number", min: 0, max: 500, step: 5,
-      cast: v => Math.max(0, parseFloat(v) || 0) },
+      cast: v => Math.min(500, Math.max(0, parseFloat(v) || 0)) },
     { key: "pk_step", title: "Пикетаж, шаг м (0 — выкл)", type: "number", min: 0, max: 500, step: 10,
-      cast: v => Math.max(0, parseFloat(v) || 0) },
+      cast: v => Math.min(500, Math.max(0, parseFloat(v) || 0)) },
     { type: "offset" },
   ],
   "tp.func_zone": [
@@ -3067,17 +3091,47 @@ const ATTR_FIELDS = {
 
 function fieldHtml(field, f) {
   if (field.type === "offset") {
-    return `<label>Офсет, м<input type="number" id="f-offdist" value="${f.props._offdist || 15}" min="0.5" max="200" step="0.5"></label>
+    return `<label>Офсет, м<input type="number" id="f-offdist" value="${boundedNumber(f.props._offdist, 0.5, 200, 15)}" min="0.5" max="200" step="0.5" required></label>
       <div style="display:flex;gap:6px;margin-bottom:8px">
         <button id="f-offset-l" style="flex:1">⇐ влево</button>
         <button id="f-offset-r" style="flex:1">вправо ⇒</button>
       </div>`;
   }
   const val = f.props[field.key] ?? (field.key === "radius" ? 0 : "");
-  return `<label>${field.title}<input type="${field.type}" id="f-${field.key}" value="${val}"${
+  return `<label>${escHtml(field.title)}<input type="${field.type}" id="f-${field.key}" value="${escHtml(val)}"${
     field.min != null ? ` min="${field.min}"` : ""}${
     field.max != null ? ` max="${field.max}"` : ""}${
-    field.step != null ? ` step="${field.step}"` : ""}></label>`;
+    field.step != null ? ` step="${field.step}"` : ""}${
+    field.type === "number" ? " required" : ""}></label>`;
+}
+
+let propertyErrorSeq = 0;
+function clearPropertyFieldError(input) {
+  input.removeAttribute("aria-invalid");
+  input.removeAttribute("aria-describedby");
+  input.closest("#props-body")?.querySelectorAll(".property-field-error")
+    .forEach(error => error.remove());
+}
+function showPropertyFieldError(input, message) {
+  clearPropertyFieldError(input);
+  const error = document.createElement("div");
+  error.id = `property-field-error-${++propertyErrorSeq}`;
+  error.className = "form-error property-field-error";
+  error.setAttribute("role", "alert");
+  error.textContent = message;
+  (input.closest("label") || input).insertAdjacentElement("afterend", error);
+  input.setAttribute("aria-invalid", "true");
+  input.setAttribute("aria-describedby", error.id);
+  input.focus({ preventScroll: true });
+  return false;
+}
+function validatePropertyNumber(input, label) {
+  if (input.value.trim() && input.checkValidity()) {
+    clearPropertyFieldError(input);
+    return true;
+  }
+  const range = input.min && input.max ? ` от ${input.min} до ${input.max}` : "";
+  return showPropertyFieldError(input, `${label}: введите значение${range}.`);
 }
 
 // поле произвольного атрибута слоя (из атрибутивной таблицы) в форме объекта —
@@ -3097,7 +3151,9 @@ function userFieldHtml(cf, f, i) {
 const offsetRequests = new WeakSet();
 async function runOffset(f, sign, buttons = []) {
   if (offsetRequests.has(f)) return false;
-  const dist = Math.abs(parseFloat(document.getElementById("f-offdist").value) || 15);
+  const distanceInput = document.getElementById("f-offdist");
+  if (!validatePropertyNumber(distanceInput, "Офсет")) return false;
+  const dist = Math.abs(Number(distanceInput.value));
   f.props._offdist = dist;
   offsetRequests.add(f);
   buttons.forEach(button => { button.disabled = true; button.setAttribute("aria-busy", "true"); });
@@ -3288,7 +3344,7 @@ function renderProps() {
   if (f.line && !f.arc && !f.ring && fields.length === 0) {
     fields = [
       { key: "radius", title: "Радиус сопряжения, м", type: "number", min: 0, max: 500, step: 5,
-        cast: v => Math.max(0, parseFloat(v) || 0) }
+        cast: v => Math.min(500, Math.max(0, parseFloat(v) || 0)) }
     ];
   }
   let metric = "";
@@ -3378,7 +3434,12 @@ function renderProps() {
   });
   const bind = (id, key, cast) => {
     const inp = document.getElementById(id);
-    if (inp) inp.addEventListener("change", () => {
+    if (!inp) return;
+    inp.addEventListener("input", () => clearPropertyFieldError(inp));
+    inp.addEventListener("change", () => {
+      const field = fields.find(item => item.key === key);
+      if (inp.type === "number" &&
+          !validatePropertyNumber(inp, field?.title || "Числовое значение")) return;
       snapshot(); f.props[key] = cast ? cast(inp.value) : inp.value; afterChange();
     });
   };
@@ -3484,7 +3545,8 @@ function renderLayers() {
       ? `--c:${st.stroke || "#999"};background:transparent;border-color:${st.stroke || "#999"}`
       : `background:${swBg};border-color:${st.stroke || "#999"}`;
     const row = document.createElement("div");
-    row.className = "layer-row" + (layer.id === state.activeLayerId ? " active" : "") +
+    const isActive = layer.id === state.activeLayerId;
+    row.className = "layer-row" + (isActive ? " active" : "") +
                     (layer.locked ? " locked" : "");
     row.draggable = true;
     row.dataset.lid = layer.id;
@@ -3499,9 +3561,13 @@ function renderLayers() {
     const layerTitle = escHtml(layer.title);
     row.innerHTML = `<span class="grip" aria-hidden="true" title="перетащить — порядок отрисовки"><svg class="ic"><use href="#ic-grip"/></svg></span>
       <input type="checkbox" aria-label="Показывать слой «${layerTitle}»" title="видимость слоя «${layerTitle}»" ${layer.visible ? "checked" : ""}>
-      <span class="${swCls}" style="${swStyle}"></span>
-      <span class="nm" title="${layerTitle} — клик делает слой активным (сюда чертят инструменты)">${layerTitle}</span><span class="cnt">${count || ""}</span>
-      ${badges}
+      <button type="button" class="layer-select" aria-pressed="${isActive}"
+        aria-label="Выбрать слой «${layerTitle}» для рисования"
+        title="${layerTitle} — сделать активным слоем для рисования">
+        <span class="${swCls}" style="${swStyle}" aria-hidden="true"></span>
+        <span class="nm">${layerTitle}</span><span class="cnt">${count || ""}</span>
+        ${badges}
+      </button>
       <button class="lrow-lock" aria-label="${layer.locked ? "Разблокировать" : "Заблокировать"} слой «${layerTitle}»" title="${layer.locked ? "разблокировать" : "заблокировать"} слой «${layerTitle}»">
         <svg class="ic"><use href="#${layer.locked ? "ic-lock" : "ic-unlock"}"/></svg></button>
       <button class="lrow-menu" aria-label="Действия со слоем «${layerTitle}»" title="действия со слоем «${layerTitle}»"><svg class="ic"><use href="#ic-menu-dots"/></svg></button>`;
@@ -3522,9 +3588,27 @@ function renderLayers() {
       persist();
       draw();
     });
-    // клик по имени/образцу — активный слой (чекбокс отвечает только за видимость)
-    row.querySelector(".nm").addEventListener("click", () => setActiveLayer(layer.id));
-    row.querySelector(".sw").addEventListener("click", () => setActiveLayer(layer.id));
+    // Отдельная кнопка делает выбор слоя доступным и мышью, и клавиатурой.
+    // Чекбокс по-прежнему отвечает только за видимость.
+    const selectButton = row.querySelector(".layer-select");
+    const activateLayer = () => {
+      setActiveLayer(layer.id);
+      // setActiveLayer перерисовывает список. Возвращаем фокус на новую
+      // кнопку той же строки, иначе после Enter/клика он проваливается в body.
+      const freshRow = [...el.querySelectorAll(".layer-row")]
+        .find(item => item.dataset.lid === layer.id);
+      const freshButton = freshRow?.querySelector(".layer-select");
+      if (freshButton && freshButton !== selectButton)
+        freshButton.focus({ preventScroll: true });
+    };
+    selectButton.addEventListener("click", activateLayer);
+    selectButton.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      // Явная активация нужна и для браузеров/веб-вью, которые не порождают
+      // click после синтетического клавиатурного события.
+      event.preventDefault();
+      activateLayer();
+    });
     const menuBtn = row.querySelector(".lrow-menu");
     menuBtn.addEventListener("click", ev => {
       ev.stopPropagation();
@@ -3733,7 +3817,7 @@ function applyLayerStyleToObjects(layer) {
 // ---------- новый слой («+» в панели «Слои») ----------
 const GEOM_LABEL = { point: "точка", polyline: "полилиния", polygon: "полигон", arc: "дуга", circle: "окружность" };
 function allRoleOptions(selected = "") {
-  return BASE_KINDS.map(b => `<option value="${b.kind}"${b.kind === selected ? " selected" : ""}>${b.label}</option>`).join("") +
+  return BASE_KINDS.map(b => `<option value="${escHtml(b.kind)}"${b.kind === selected ? " selected" : ""}>${escHtml(b.label)}</option>`).join("") +
     `<option value=""${!selected ? " selected" : ""}>Обычный слой — без расчётной роли</option>`;
 }
 function startBoundaryFlow() {
