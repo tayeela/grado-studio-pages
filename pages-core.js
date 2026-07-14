@@ -290,5 +290,253 @@
       studioState: payload.studioState && typeof payload.studioState === "object" ? payload.studioState : {} };
   }
 
-  return { computeTep, preflightProject, webProject };
+  // Client-side source imports used by the GitHub Pages edition.  GeoJSON is
+  // WGS84 by specification; НСПД browser captures use Web Mercator (3857).
+  // Keeping the projection here lets the regular canvas/import pipeline stay
+  // identical to the desktop edition instead of maintaining a second UI.
+  const ORIGIN = [413000, 6178000];
+  const WGS_A = 6378137;
+  const WGS_F = 1 / 298.257223563;
+  const WGS_E2 = WGS_F * (2 - WGS_F);
+  const WGS_EP2 = WGS_E2 / (1 - WGS_E2);
+  const UTM_K0 = 0.9996;
+  const UTM_LON0 = 39 * Math.PI / 180;
+  const toRadians = value => value * Math.PI / 180;
+  const mercatorToWgs84 = point => {
+    const radius = 6378137;
+    return [point[0] / radius * 180 / Math.PI,
+      Math.atan(Math.sinh(point[1] / radius)) * 180 / Math.PI];
+  };
+  const wgs84ToLocal = point => {
+    if (!finitePoint(point)) throw new Error("Координаты должны быть конечными числами");
+    const lon = Number(point[0]), lat = Number(point[1]);
+    if (lon < -180 || lon > 180 || lat < -90 || lat > 90)
+      throw new Error("GeoJSON должен содержать координаты WGS84 (EPSG:4326)");
+    const phi = toRadians(lat), lam = toRadians(lon);
+    const sinPhi = Math.sin(phi), cosPhi = Math.cos(phi), tanPhi = Math.tan(phi);
+    const n = WGS_A / Math.sqrt(1 - WGS_E2 * sinPhi ** 2);
+    const t = tanPhi ** 2, c = WGS_EP2 * cosPhi ** 2;
+    const a = (lam - UTM_LON0) * cosPhi;
+    const m = WGS_A * (
+      (1 - WGS_E2 / 4 - 3 * WGS_E2 ** 2 / 64 - 5 * WGS_E2 ** 3 / 256) * phi
+      - (3 * WGS_E2 / 8 + 3 * WGS_E2 ** 2 / 32 + 45 * WGS_E2 ** 3 / 1024) * Math.sin(2 * phi)
+      + (15 * WGS_E2 ** 2 / 256 + 45 * WGS_E2 ** 3 / 1024) * Math.sin(4 * phi)
+      - 35 * WGS_E2 ** 3 / 3072 * Math.sin(6 * phi));
+    const x = UTM_K0 * n * (a + (1 - t + c) * a ** 3 / 6
+      + (5 - 18 * t + t ** 2 + 72 * c - 58 * WGS_EP2) * a ** 5 / 120) + 500000;
+    const y = UTM_K0 * (m + n * tanPhi * (a ** 2 / 2
+      + (5 - t + 9 * c + 4 * c ** 2) * a ** 4 / 24
+      + (61 - 58 * t + t ** 2 + 600 * c - 330 * WGS_EP2) * a ** 6 / 720));
+    return [x - ORIGIN[0], y - ORIGIN[1]];
+  };
+  const closeRing = ring => {
+    const local = ring.map(wgs84ToLocal);
+    if (local.length > 1 && local[0][0] === local[local.length - 1][0] &&
+        local[0][1] === local[local.length - 1][1]) local.pop();
+    return local.length >= 3 ? local : null;
+  };
+  const geometryParts = geometry => {
+    if (!geometry || typeof geometry !== "object") return [];
+    const coordinates = geometry.coordinates;
+    if (geometry.type === "Point") return [{ point: wgs84ToLocal(coordinates) }];
+    if (geometry.type === "MultiPoint")
+      return Array.isArray(coordinates) ? coordinates.map(point => ({ point: wgs84ToLocal(point) })) : [];
+    if (geometry.type === "LineString")
+      return Array.isArray(coordinates) && coordinates.length >= 2
+        ? [{ line: coordinates.map(wgs84ToLocal) }] : [];
+    if (geometry.type === "MultiLineString")
+      return Array.isArray(coordinates) ? coordinates.filter(line => Array.isArray(line) && line.length >= 2)
+        .map(line => ({ line: line.map(wgs84ToLocal) })) : [];
+    const polygons = geometry.type === "Polygon" ? [coordinates]
+      : geometry.type === "MultiPolygon" ? coordinates : [];
+    if (!Array.isArray(polygons)) return [];
+    return polygons.map(polygon => Array.isArray(polygon) && Array.isArray(polygon[0])
+      ? closeRing(polygon[0]) : null).filter(Boolean).map(ring => ({ ring }));
+  };
+  const stableHash = value => {
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  };
+  const snapshot = (source, sourceDoc, features, fingerprint) => ({
+    id: `${source}-web-${stableHash(fingerprint)}`,
+    source,
+    source_doc: sourceDoc || null,
+    fetched_at: new Date().toISOString(),
+    count: features.length,
+    sha8: stableHash(fingerprint),
+  });
+  const provenance = manifest => ({
+    source: manifest.source, snapshot: manifest.id, source_doc: manifest.source_doc,
+  });
+
+  function importNspd(payload = {}) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+        !Array.isArray(payload.features)) throw new Error("Файл НСПД должен быть GeoJSON FeatureCollection");
+    if (payload.grado_source && payload.grado_source !== "nspd")
+      throw new Error("Выбранный файл не является захватом НСПД");
+    const seen = new Set(), normalized = [];
+    let duplicates = 0, skipped = 0;
+    payload.features.forEach((feature, index) => {
+      const geometry = feature && feature.geometry;
+      if (!geometry || !["Polygon", "MultiPolygon"].includes(geometry.type)) { skipped += 1; return; }
+      const signature = stableHash(geometry);
+      if (seen.has(signature)) { duplicates += 1; return; }
+      seen.add(signature);
+      let props = feature.properties && typeof feature.properties === "object"
+        ? { ...feature.properties } : {};
+      let options = props.options;
+      if (typeof options === "string") {
+        try { options = JSON.parse(options); } catch (error) { options = null; }
+      }
+      if (options && typeof options === "object" && !Array.isArray(options))
+        Object.entries(options).forEach(([key, value]) => { props[`opt_${key}`] = value; });
+      delete props.options;
+      const key = String(feature.id || props.cad_num || props.opt_cad_num || `geom:${signature}`);
+      const wgsGeometry = {
+        type: geometry.type,
+        coordinates: (function transform(value, depth) {
+          if (depth === 0) return mercatorToWgs84(value);
+          return value.map(item => transform(item, depth - 1));
+        })(geometry.coordinates, geometry.type === "Polygon" ? 2 : 3),
+      };
+      let parts;
+      try { parts = geometryParts(wgsGeometry); }
+      catch (error) { skipped += 1; return; }
+      parts.forEach((part, partIndex) => normalized.push({
+        kind: "parcel", layer_id: "source.nspd.parcels", ring: part.ring,
+        props: Object.fromEntries(Object.entries({
+          cad_num: props.opt_cad_num || props.cad_num || key,
+          category: props.opt_land_record_category_type,
+          vri: props.opt_permitted_use_established_by_document,
+        }).filter(([, value]) => value !== null && value !== undefined && value !== "")),
+        srcKey: `source.nspd.parcels:${key}#${partIndex}`,
+      }));
+    });
+    const manifest = snapshot("nspd", payload.grado_doc || "НСПД, файл браузерного захвата",
+      normalized, payload);
+    const prov = provenance(manifest);
+    normalized.forEach(feature => { feature.prov = { ...prov }; });
+    const notes = [];
+    if (duplicates) notes.push(`дубликатов по геометрии отброшено: ${duplicates}`);
+    if (skipped) notes.push(`неполигональных или повреждённых объектов пропущено: ${skipped}`);
+    return { features: normalized, notes, source_doc: manifest.source_doc,
+      snapshot: manifest, diff: null };
+  }
+
+  const GISOGD_LAYER_RULES = [
+    [["функционал", "funkcional"], "zone", "source.gisogd.func_zones"],
+    [["красн", "krasn"], "redline", "source.gisogd.red_lines"],
+  ];
+  const GISOGD_STYLE_RULES = [
+    [["1а пояса", "зона_1а", "zona_1a", "sanokhr_1a"], "lgr.sanokhr.1a"],
+    [["1б пояса", "зона_1б", "zona_1b", "sanokhr_1b"], "lgr.sanokhr.1b"],
+    [["жестк", "zhestk"], "lgr.sanokhr.2hard"],
+    [["1 пояса санитар", "зона_1_пояса", "zona_1_poyasa"], "lgr.sanokhr.1"],
+    [["2 пояса санитар", "зона_2_пояса", "zona_2_poyasa"], "lgr.sanokhr.2"],
+    [["3 пояса санитар", "зона_3_пояса", "zona_3_poyasa"], "lgr.sanokhr.3"],
+    [["водоохран", "vodoohran"], "lgr.vodookhr"],
+    [["прибрежн", "pribrezh"], "lgr.pribrezh"],
+    [["сзз_расчет", "szz_raschet", "расчетн"], "lgr.szz.calc"],
+    [["сзз_ориент", "szz_orient", "ориентировоч"], "lgr.szz.orient"],
+    [["санитарно-защит", "sanitarno_zash", "сзз"], "lgr.szz.set"],
+    [["подтоплен", "podtoplen"], "lgr.podtop.mid"],
+    [["затоплен", "zatoplen"], "lgr.zatop"],
+    [["защитная зона окн", "zashitnaya_zona_okn"], "lgr.okn.zashchit"],
+    [["охранная зона окн", "ohrannaya_zona_okn"], "lgr.okn.okhr"],
+    [["регулирования застройки", "regulirovaniya"], "lgr.okn.reg"],
+    [["охраняемого природного ландшафта", "landshaft"], "lgr.okn.landshaft"],
+    [["территория окн", "ter_okn", "territoriya_okn"], "lgr.okn.terr"],
+    [["охранная зона оопт", "ohrannaya_zona_oopt"], "lgr.oopt.okhr"],
+    [["оопт", "oopt"], "lgr.oopt"],
+    [["лесопарков", "lesopark"], "lgr.lesopark"],
+    [["электроэнерг", "лэп", "elektroenerg"], "lgr.energo"],
+    [["трубопровод", "truboprovod"], "lgr.truboprovod"],
+    [["теплосет", "teplosetey"], "lgr.teplo"],
+    [["связи", "svyazi"], "lgr.svyaz"],
+    [["метрополит", "metro"], "lgr.metro"],
+    [["железных дорог", "пожд", "zhd_"], "lgr.zhd"],
+    [["приаэродром", "priaerodrom"], "lgr.priaero"],
+    [["береговая полоса", "beregovaya"], "lgr.beregovaya"],
+    [["военного объекта", "military"], "lgr.military"],
+    [["радиотехническ", "radio"], "lgr.radio"],
+    [["технич", "инженерных коммуникаций", "tehnicheskaya_zona"], "lgr.tech.zone"],
+  ];
+  const GISOGD_RESTRICT_HINTS = ["зоуит", "zouit", "охран", "ohran", "sanit", "санит"];
+  const gisogdRoute = member => {
+    const lower = member.toLowerCase();
+    for (const [keys, kind, layerId] of GISOGD_LAYER_RULES)
+      if (keys.some(key => lower.includes(key))) return [kind, layerId];
+    if (GISOGD_RESTRICT_HINTS.some(key => lower.includes(key)) ||
+        GISOGD_STYLE_RULES.some(([keys]) => keys.some(key => lower.includes(key))))
+      return ["restrict", "source.gisogd.restrict"];
+    return ["generic", "source.gisogd.other"];
+  };
+  const gisogdStyle = member => {
+    const lower = member.toLowerCase();
+    const rule = GISOGD_STYLE_RULES.find(([keys]) => keys.some(key => lower.includes(key)));
+    return rule ? rule[1] : null;
+  };
+  const safeStem = filename => String(filename || "layer").split(/[\\/]/).pop()
+    .replace(/\.(geojson|json)$/i, "").replace(/[/:*?"<>|]/g, "").trim() || "layer";
+
+  function importGeoJson(payload = {}, filename = "layer.geojson") {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      throw new Error("Файл не содержит объект GeoJSON");
+    const inputFeatures = payload.type === "FeatureCollection" ? payload.features
+      : payload.type === "Feature" ? [payload] : null;
+    if (!Array.isArray(inputFeatures)) throw new Error("Нужен GeoJSON FeatureCollection");
+    const member = safeStem(filename), [kind, layerId] = gisogdRoute(member);
+    const fields = {}, features = [], notes = [];
+    let skipped = 0, geometryError = null;
+    inputFeatures.forEach((feature, index) => {
+      const rawProps = feature && feature.properties && typeof feature.properties === "object"
+        ? feature.properties : {};
+      const props = Object.fromEntries(Object.entries(rawProps)
+        .filter(([, value]) => value !== null && value !== ""));
+      let parts;
+      try { parts = geometryParts(feature && feature.geometry); }
+      catch (error) { skipped += 1; geometryError = error; return; }
+      if (!parts.length) { skipped += 1; return; }
+      const sourceKey = `${member}:${feature.id ?? index}`;
+      const name = props.NAME || props.name;
+      const fieldList = Object.keys(props).map(key => ({ name: key, type: "text" }));
+      parts.forEach((part, partIndex) => {
+        let output;
+        if (kind === "redline" && part.line) {
+          output = { kind, layer_id: layerId, line: part.line,
+            props: { status: "существующая", ...props } };
+        } else if ((kind === "zone" || kind === "restrict") && part.ring) {
+          output = { kind, layer_id: layerId, ring: part.ring,
+            props: kind === "zone" ? { zone_title: name || "ГИС ОГД", ...props }
+              : { kind: name || "ЗОУИТ", basis: "ГИС ОГД", ...props } };
+          const styleId = gisogdStyle(member);
+          if (styleId) output.style_id = styleId;
+        } else {
+          output = { kind: "generic", layer_id: "source.gisogd.other", ...part, props: { ...props } };
+        }
+        output.srcKey = `${output.layer_id}:${sourceKey}#${partIndex}`;
+        features.push(output);
+        if (!fields[output.layer_id]) fields[output.layer_id] = [];
+        const taken = new Set(fields[output.layer_id].map(field => field.name));
+        fieldList.forEach(field => {
+          if (!taken.has(field.name)) { fields[output.layer_id].push(field); taken.add(field.name); }
+        });
+      });
+    });
+    if (!features.length && geometryError) throw geometryError;
+    if (kind === "generic") notes.push(`«${member}»: тип не распознан — добавлен в слой «прочие»`);
+    if (skipped) notes.push(`неподдерживаемых или повреждённых объектов пропущено: ${skipped}`);
+    const sourceDoc = `ГИС ОГД / GeoJSON, файл ${filename}`;
+    const manifest = snapshot("gisogd", sourceDoc, features, { filename, payload });
+    const prov = provenance(manifest);
+    features.forEach(feature => { feature.prov = { ...prov }; });
+    return { features, notes, fields, source_doc: sourceDoc, snapshot: manifest, diff: null };
+  }
+
+  return { computeTep, preflightProject, webProject, importNspd, importGeoJson };
 });

@@ -60,14 +60,17 @@ document.getElementById("st-core").onclick = () => {
 
 // импорт захвата НСПД (JSON браузерного моста GRADO)
 on("btn-nspd", "click", () => document.getElementById("nspd-file").click());
+let nspdImportBusy = false;
 on("nspd-file", "change", async e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = "";
+  if (nspdImportBusy) { toast("Импорт НСПД уже выполняется", "warn"); return; }
   if (file.size > MAX_JSON_IMPORT_BYTES) {
     toast("Файл НСПД больше 64 МБ — уменьшите область выгрузки", "error");
     return;
   }
+  nspdImportBusy = true;
   try {
     const payload = JSON.parse(await file.text());
     const r = await fetch("/api/import-nspd", { method: "POST",
@@ -87,6 +90,8 @@ on("nspd-file", "change", async e => {
       (invalid ? ` · ${invalid} поврежд. пропущено` : ""), invalid ? "warn" : undefined);
   } catch (err) {
     toast("Не удалось импортировать захват: " + String(err).slice(0, 200), "error");
+  } finally {
+    nspdImportBusy = false;
   }
 });
 
@@ -147,6 +152,10 @@ async function importGisogd(fetchArgs, askText, errText) {
   }
 }
 on("btn-gisogd", "click", async () => {
+  if (window.GRADO_STATIC) {
+    document.getElementById("gisogd-file").click();
+    return;
+  }
   const useFile = await uiConfirm("Загрузить ГИС ОГД:\n- Файл (ZIP с портала или отдельный GeoJSON, напр. экспорт из QGIS)\n- По прямой ссылке (сгенерированной на gisogd.mos.ru)", { ok: "Файл", cancel: "По ссылке" });
   if (useFile) {
     document.getElementById("gisogd-file").click();
@@ -163,23 +172,37 @@ on("btn-gisogd", "click", async () => {
       "Не удалось импортировать по ссылке");
   }
 });
+let gisogdImportBusy = false;
 on("gisogd-file", "change", async e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = "";
-  if (file.size > MAX_PROJECT_FILE_BYTES) {
-    toast("Выгрузка больше 256 МБ — уменьшите набор слоёв или область", "error");
+  if (gisogdImportBusy) { toast("Импорт ГИС ОГД уже выполняется", "warn"); return; }
+  if (window.GRADO_STATIC && !/\.(geojson|json)$/i.test(file.name)) {
+    toast("В браузере можно импортировать отдельный GeoJSON. ZIP доступен в настольной версии", "warn");
     return;
   }
-  await importGisogd(
-    ["/api/import-gisogd", { method: "POST",
-      headers: { "Content-Type": "application/octet-stream",
-        // имя файла — для маршрутизации одиночного GeoJSON в нужный слой
-        // (URL-энкод: заголовок обязан быть ASCII); ZIP имя игнорирует
-        "X-Grado-Filename": encodeURIComponent(file.name) },
-      body: await file.arrayBuffer() }],
-    "Импортировать выгрузку ГИС ОГД (ZIP или GeoJSON)?",
-    "Не удалось импортировать выгрузку ОГД");
+  const sizeLimit = window.GRADO_STATIC ? MAX_JSON_IMPORT_BYTES : MAX_PROJECT_FILE_BYTES;
+  if (file.size > sizeLimit) {
+    toast(window.GRADO_STATIC
+      ? "GeoJSON больше 64 МБ — уменьшите область или используйте настольную версию"
+      : "Выгрузка больше 256 МБ — уменьшите набор слоёв или область", "error");
+    return;
+  }
+  gisogdImportBusy = true;
+  try {
+    await importGisogd(
+      ["/api/import-gisogd", { method: "POST",
+        headers: { "Content-Type": window.GRADO_STATIC ? "application/geo+json" : "application/octet-stream",
+          // имя файла — для маршрутизации одиночного GeoJSON в нужный слой
+          // (URL-энкод: заголовок обязан быть ASCII); ZIP имя игнорирует
+          "X-Grado-Filename": encodeURIComponent(file.name) },
+        body: window.GRADO_STATIC ? await file.text() : await file.arrayBuffer() }],
+      window.GRADO_STATIC ? "Импортировать GeoJSON ГИС ОГД?" : "Импортировать выгрузку ГИС ОГД (ZIP или GeoJSON)?",
+      "Не удалось импортировать выгрузку ОГД");
+  } finally {
+    gisogdImportBusy = false;
+  }
 });
 
 // ---------- вахта за «Загрузками»: автоподхват выгрузки ГИС ОГД ----------

@@ -11,6 +11,7 @@
   const OVERRIDES_KEY = "grado_pages_style_overrides_v1";
   const DB_NAME = "grado-studio-pages";
   const DB_STORE = "project-state";
+  const MAX_BROWSER_IMPORT_CHARS = 64 * 1024 * 1024;
   let databasePromise = null;
   let autosaveWriteQueue = Promise.resolve();
 
@@ -289,6 +290,36 @@
       if (error) return json({ error }, 400);
       return json(pagesCore.preflightProject(payload));
     }
+    if (path === "/api/import-nspd") {
+      if (method !== "POST") return json({ error: "Метод не поддерживается" }, 405);
+      const text = await bodyText(input, options);
+      if (text.length > MAX_BROWSER_IMPORT_CHARS)
+        return json({ error: "Файл НСПД больше 64 МБ" }, 413);
+      let body;
+      try { body = text ? JSON.parse(text) : null; }
+      catch (error) { return json({ error: "Файл НСПД содержит некорректный JSON" }, 400); }
+      if (!isRecord(body) || !isRecord(body.payload))
+        return json({ error: "Не передан корректный JSON-захват НСПД" }, 400);
+      try { return json(pagesCore.importNspd(body.payload)); }
+      catch (error) { return json({ error: error.message || "Не удалось разобрать захват НСПД" }, 400); }
+    }
+    if (path === "/api/import-gisogd") {
+      if (method !== "POST") return json({ error: "Метод не поддерживается" }, 405);
+      let filename = requestHeader(input, options, "X-Grado-Filename") || "layer.geojson";
+      try { filename = decodeURIComponent(filename); } catch (error) { /* оставляем безопасное исходное имя */ }
+      if (/\.zip$/i.test(filename))
+        return json({ error: "ZIP-выгрузки требуют настольную версию; в браузере выберите отдельный GeoJSON" }, 415);
+      if (!/\.(geojson|json)$/i.test(filename))
+        return json({ error: "В браузерной версии поддерживаются файлы .geojson и .json" }, 415);
+      const text = await bodyText(input, options);
+      if (text.length > MAX_BROWSER_IMPORT_CHARS)
+        return json({ error: "GeoJSON больше 64 МБ" }, 413);
+      let payload;
+      try { payload = JSON.parse(text); }
+      catch (error) { return json({ error: "Файл не является корректным GeoJSON" }, 400); }
+      try { return json(pagesCore.importGeoJson(payload, filename)); }
+      catch (error) { return json({ error: error.message || "Не удалось разобрать GeoJSON" }, 400); }
+    }
     if (path === "/api/grado") {
       const payload = await bodyJson(input, options);
       const error = projectBodyError(payload);
@@ -316,7 +347,7 @@
   };
 
   const blocked = new Set(["btn-album", "btn-dxf", "btn-print", "btn-data",
-    "btn-nspd", "btn-gisogd", "btn-buffer-open"]);
+    "btn-buffer-open"]);
   document.addEventListener("click", event => {
     const target = event.target.closest("[data-click],button");
     const id = target && (target.dataset.click || target.id);
@@ -359,7 +390,11 @@
       note.textContent = text;
       menu.appendChild(note);
     };
-    addMenuNote("menu-data", "Импорт НСПД, ГИС ОГД и данных по области доступен в настольной версии.");
+    const gisogdInput = document.getElementById("gisogd-file");
+    if (gisogdInput) gisogdInput.accept = ".geojson,.json,application/geo+json,application/json";
+    const gisogdRow = document.querySelector('[data-click="btn-gisogd"]');
+    if (gisogdRow) gisogdRow.textContent = "ГИС ОГД — GeoJSON";
+    addMenuNote("menu-data", "В веб-версии доступны файлы НСПД и GeoJSON. ZIP, ссылки и загрузка по области — в настольной версии.");
     addMenuNote("menu-out", "DXF и печать в масштабе доступны в настольной версии.");
     const style = document.createElement("style");
     style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.web-disabled{opacity:.46;cursor:default}.web-disabled:hover,.web-disabled:focus{background:transparent;color:var(--text)}.web-menu-note{max-width:250px;margin:6px 4px 2px;padding:8px 9px;border-radius:8px;background:var(--field-bg);color:var(--text-2);font-size:11px;line-height:1.35}.pages-mode #st-bridge{display:none!important}`;

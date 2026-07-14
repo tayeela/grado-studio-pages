@@ -67,8 +67,8 @@
     ]},
     { sec: "Данные", items: [
       { t: "Данные по видимой области…", run: () => call("openDataFetch"), desktop: true },
-      { t: "Импорт ГИС ОГД (ZIP / GeoJSON / папка)", run: () => click("btn-gisogd"), desktop: true },
-      { t: "Импорт НСПД (файл расширения)", run: () => click("btn-nspd"), desktop: true },
+      { t: isWeb ? "Импорт ГИС ОГД (GeoJSON)" : "Импорт ГИС ОГД (ZIP / GeoJSON / папка)", run: () => click("btn-gisogd") },
+      { t: "Импорт НСПД (файл расширения)", run: () => click("btn-nspd") },
       { t: "Заполнить примером (демо)", run: () => click("btn-demo") },
       { t: "Подложка: спутник Sentinel-2 (Copernicus)", run: setBasemap("s2") },
       { t: "Подложка: спутник ESRI (высокое разрешение)", run: setBasemap("sat") },
