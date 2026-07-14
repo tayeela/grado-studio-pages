@@ -103,7 +103,7 @@ header{
 /* ==== ХОЛСТ ==== */
 /* правило 4: canvas абсолютно внутри #stage(flex:1 1 0) — canvas.width НЕ в
    flex-базе, иначе ResizeObserver+canvas зацикливается (Safari «белый экран») */
-#stage{flex:1 1 0;position:relative;min-width:0;min-height:0;overflow:hidden}
+#stage{flex:1 1 0;position:relative;min-width:0;min-height:0;overflow:hidden;container-type:inline-size}
 #scene{width:100%;height:100%;display:block;background:var(--canvas-bg)}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;background:var(--canvas-bg)}
 #scene .pick{cursor:pointer}
@@ -143,6 +143,12 @@ header{
   min-width:0;max-width:min(240px,32%);overflow:hidden;text-overflow:ellipsis}
 .statusbar .dot{width:10px;height:10px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
 .statusbar .push{flex:1;min-width:0}
+#st-toast{min-width:0;overflow:hidden;text-overflow:ellipsis}
+@container (max-width:680px){
+  #st-coords,#st-grid,#st-snap{display:none!important}
+  .statusbar .st-active{min-width:96px;max-width:42%}
+  #st-toast{max-width:38%}
+}
 .scalebar{display:inline-flex;align-items:center;gap:7px}
 .scalebar .bar{width:64px;height:6px;border:1px solid var(--text-2);border-top:none;position:relative}
 .scalebar .bar::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--text-2)}
