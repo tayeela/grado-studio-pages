@@ -2646,6 +2646,37 @@ window.captureHistoryState = serializeHistoryState;
 window.commitHistoryFrom = commitHistoryFrom;
 let autosaveTimer = null;
 let saveStateQueue = Promise.resolve();
+let pendingAutosavePayload = null;
+const PENDING_PROJECT_NAME_KEY = "grado_pages_pending_project_name_v1";
+function readPendingProjectName() {
+  if (!window.GRADO_STATIC) return null;
+  try {
+    const value = JSON.parse(localStorage.getItem(PENDING_PROJECT_NAME_KEY) || "null");
+    return value && typeof value.name === "string"
+      ? { name: value.name.slice(0, 240), savedAt: Number(value.savedAt) || 0 } : null;
+  } catch (error) { return null; }
+}
+function rememberPendingProjectName(name) {
+  if (!window.GRADO_STATIC) return;
+  try {
+    localStorage.setItem(PENDING_PROJECT_NAME_KEY, JSON.stringify({
+      name: String(name).slice(0, 240), savedAt: Date.now(),
+    }));
+  } catch (error) { /* маленький аварийный ключ не обязателен в private mode */ }
+}
+function clearPendingProjectName(savedName = null) {
+  if (!window.GRADO_STATIC) return;
+  const pending = readPendingProjectName();
+  if (savedName === null || (pending && pending.name === savedName)) {
+    try { localStorage.removeItem(PENDING_PROJECT_NAME_KEY); } catch (error) {}
+  }
+}
+function applyPendingProjectName() {
+  const pending = readPendingProjectName();
+  if (!pending) return false;
+  document.getElementById("project-name").value = pending.name;
+  return true;
+}
 // полный снимок состояния студии (общий проектный + личный вид). Один
 // источник и для localStorage/autosave, и для веб-синхронизации (collab.js
 // берёт из него только «общие» ключи проекта).
@@ -2735,6 +2766,7 @@ async function saveStateRequest(payload, options = {}) {
       throw new Error(issue.error || `HTTP ${response.status}`);
     }
     const result = await response.json();
+    clearPendingProjectName(payload && payload.name);
     const savedAt = result && result.saved_at ? new Date(result.saved_at) : new Date();
     const time = Number.isNaN(savedAt.getTime()) ? "" :
       ` ${savedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
@@ -2756,7 +2788,7 @@ function saveStateNow(payload, options = {}) {
   saveStateQueue = pending.catch(() => {});
   return pending;
 }
-function persist() {
+function persist(delay = 1500) {
   const payload = collectState();
   // В статической браузерной версии единственный источник автосохранения —
   // pages-adapter. Раньше тот же JSON одновременно занимал два localStorage-
@@ -2780,11 +2812,27 @@ function persist() {
   // браузера, чего localStorage не гарантирует. Дебаунс — не пишем на диск
   // на каждое перемещение мыши при afterChange().
   clearTimeout(autosaveTimer);
+  pendingAutosavePayload = payload;
   setSaveStatus("Есть изменения", "busy");
   autosaveTimer = setTimeout(() => {
-    saveStateNow(payload).catch(() => {});
-  }, 1500);
+    const latest = pendingAutosavePayload;
+    pendingAutosavePayload = null;
+    if (latest) saveStateNow(latest).catch(() => {});
+  }, delay);
 }
+function flushPendingAutosave() {
+  if (!pendingAutosavePayload || (window.Collab && window.Collab.active)) return;
+  clearTimeout(autosaveTimer);
+  const latest = pendingAutosavePayload;
+  pendingAutosavePayload = null;
+  // Запускаем запись до ухода страницы. Desktop уже синхронно обновил
+  // localStorage; Pages дополнительно начинает IndexedDB-транзакцию.
+  saveStateNow(latest).catch(() => {});
+}
+window.addEventListener("pagehide", flushPendingAutosave);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushPendingAutosave();
+});
 // пикетаж: подтягиваем расчёт ядра, кэш по ключу геометрии. Запросы могут
 // завершиться не по порядку, поэтому ответ применяется только к тому же
 // живому объекту и только пока его геометрия/настройки не изменились.
@@ -4512,6 +4560,44 @@ function uiConfirm(msg, { title = "", ok = "OK", cancel = "Отмена", danger
     overlay.addEventListener("click", ev => { if (ev.target === overlay) done(false); });
     overlay.addEventListener("keydown", ev => { if (ev.key === "Escape") done(false); });
     overlay.querySelector(danger ? ".ask-cancel" : ".ask-ok").focus();
+  });
+}
+// Явный выбор одного из нескольких действий: Promise<value|null>.
+// В отличие от uiConfirm, «Отмена» и Escape всегда означают отсутствие
+// выбора, а не неявный переход ко второму действию.
+function uiChoice(msg, choices, { title = "", cancel = "Отмена" } = {}) {
+  return new Promise(resolve => {
+    const safeChoices = Array.isArray(choices)
+      ? choices.filter(choice => choice && choice.value != null && choice.label) : [];
+    if (!safeChoices.length) { resolve(null); return; }
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal ask-modal">
+      ${title ? `<div class="ask-title">${escHtml(title)}</div>` : ""}
+      <div class="ask-msg">${escHtml(msg)}</div>
+      <div class="modal-actions"><button class="ask-cancel">${escHtml(cancel)}</button>
+        <span class="spacer"></span>${safeChoices.map((choice, index) =>
+          `<button class="ask-choice${choice.primary ? " primary" : ""}" data-choice="${index}">${escHtml(choice.label)}</button>`
+        ).join("")}
+      </div></div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", event => event.stopPropagation());
+    let settled = false;
+    const done = value => {
+      if (settled) return;
+      settled = true;
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelectorAll(".ask-choice").forEach(button => {
+      button.addEventListener("click", () => done(
+        safeChoices[Number(button.dataset.choice)]?.value ?? null));
+    });
+    overlay.querySelector(".ask-cancel").addEventListener("click", () => done(null));
+    overlay.addEventListener("click", event => { if (event.target === overlay) done(null); });
+    overlay.addEventListener("keydown", event => { if (event.key === "Escape") done(null); });
+    (overlay.querySelector(".ask-choice.primary") ||
+      overlay.querySelector(".ask-choice") || overlay.querySelector(".ask-cancel")).focus();
   });
 }
 // ввод строки: Promise<string|null> (null — отмена).
@@ -6337,13 +6423,19 @@ window.afterExternalApply = function () {
   }
   // localStorage пуст (новый браузер/профиль, приватный режим, чистка данных
   // сайта) — пробуем резервную копию на диске сервера
+  applyPendingProjectName();
   fetch("/api/autosave").then(r => r.ok ? r.json() : null).then(d => {
     const saved = d && d.state && typeof d.state === "object" ? d.state : d;
-    if (!saved || !Array.isArray(saved.features) || !applyRestoredState(d)) return;
-    draw(); renderProps(); renderLayers(); renderSources(); refreshTep(); fitView();
-    toast(lastRestoreSkipped
-      ? `Восстановлено из автосохранения; ${ruCount(lastRestoreSkipped, "повреждённый объект пропущен", "повреждённых объекта пропущено", "повреждённых объектов пропущено")}`
-      : "Восстановлено из файлового автосохранения", lastRestoreSkipped ? "warn" : "ok");
+    if (saved && Array.isArray(saved.features) && applyRestoredState(d)) {
+      draw(); renderProps(); renderLayers(); renderSources(); refreshTep(); fitView();
+      toast(lastRestoreSkipped
+        ? `Восстановлено из автосохранения; ${ruCount(lastRestoreSkipped, "повреждённый объект пропущен", "повреждённых объекта пропущено", "повреждённых объектов пропущено")}`
+        : "Восстановлено из файлового автосохранения", lastRestoreSkipped ? "warn" : "ok");
+    }
+    // Небольшой синхронный ключ переживает закрытие вкладки раньше debounce.
+    // После применения полного снимка он имеет приоритет и сразу сливается в
+    // обычный IndexedDB-автосейв.
+    if (applyPendingProjectName()) persist(0);
   }).catch(() => {});
 })();
 
@@ -6354,7 +6446,14 @@ fetch("/api/initial-grado").then(r => r.ok ? r.json() : null).then(data => {
     loadProjectData(data);
   }
 }).catch(() => {});
-on("project-name", "change", persist);
+// Название — часть проекта, поэтому сохраняем его так же надёжно, как
+// геометрию. `change` срабатывает только после потери фокуса: пользователь,
+// который переименовал проект и сразу обновил/закрыл вкладку, терял ввод.
+// persist уже имеет debounce, поэтому `input` не создаёт лишних записей.
+on("project-name", "input", event => {
+  rememberPendingProjectName(event.target.value);
+  persist(250);
+});
 window.studio = { state, addFeature, refreshTep, fitView, snapPoint, gridStep,
                   layerOf, styleOf, layerStyle, upgradeFeature, LAYERS_V2, STYLES_V2,
                   setTool, setActiveLayer, quickLayerByKind, activeLayer,

@@ -156,10 +156,16 @@ on("btn-gisogd", "click", async () => {
     document.getElementById("gisogd-file").click();
     return;
   }
-  const useFile = await uiConfirm("Загрузить ГИС ОГД:\n- Файл (ZIP с портала или отдельный GeoJSON, напр. экспорт из QGIS)\n- По прямой ссылке (сгенерированной на gisogd.mos.ru)", { ok: "Файл", cancel: "По ссылке" });
-  if (useFile) {
+  const source = await uiChoice(
+    "Выберите источник данных. Файл может быть ZIP-выгрузкой с портала или отдельным GeoJSON.",
+    [
+      { value: "url", label: "Вставить ссылку" },
+      { value: "file", label: "Выбрать файл", primary: true },
+    ],
+    { title: "Импорт ГИС ОГД" });
+  if (source === "file") {
     document.getElementById("gisogd-file").click();
-  } else {
+  } else if (source === "url") {
     const url = await uiPrompt(
       "Прямая ссылка на ZIP-выгрузку ГИС ОГД\n(на gisogd.mos.ru выберите слои, сгенерируйте выгрузку и скопируйте ссылку скачивания):",
       "", { ok: "Загрузить", placeholder: "https://gisogd.mos.ru/…" });

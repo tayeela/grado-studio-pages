@@ -112,10 +112,16 @@
     dialog.tabIndex = -1;
 
     const heading = dialog.querySelector('.modal-head');
-    if (heading) {
-      if (!heading.id) heading.id = `dialog-title-${++dialogSeq}`;
-      dialog.setAttribute('aria-labelledby', heading.id);
-    } else if (!dialog.hasAttribute('aria-label')) {
+    if (heading && !dialog.hasAttribute('aria-label') &&
+        !dialog.hasAttribute('aria-labelledby')) {
+      // Заголовок часто содержит кнопку закрытия. Если сослаться на весь
+      // .modal-head, accessible name становится «Название Закрыть». Берём
+      // только неинтерактивный текст заголовка.
+      const copy = heading.cloneNode(true);
+      copy.querySelectorAll('button, input, select, textarea, a').forEach(node => node.remove());
+      const label = copy.textContent.trim();
+      dialog.setAttribute('aria-label', label || 'Диалоговое окно');
+    } else if (!heading && !dialog.hasAttribute('aria-label')) {
       const title = dialog.querySelector('.ask-title');
       if (title) {
         if (!title.id) title.id = `dialog-title-${++dialogSeq}`;
