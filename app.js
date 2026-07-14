@@ -2785,23 +2785,54 @@ function persist() {
     saveStateNow(payload).catch(() => {});
   }, 1500);
 }
-// пикетаж: подтягиваем расчёт ядра, кэш по ключу геометрии
+// пикетаж: подтягиваем расчёт ядра, кэш по ключу геометрии. Запросы могут
+// завершиться не по порядку, поэтому ответ применяется только к тому же
+// живому объекту и только пока его геометрия/настройки не изменились.
+const stationRequests = new Map();
+function stationRequestKey(f) {
+  return JSON.stringify(f.line) + "|" + (f.props.radius || 0) + "|" + f.props.pk_step;
+}
+function cancelStaleStationRequests() {
+  const liveById = new Map(state.features.map(feature => [feature.id, feature]));
+  for (const [id, request] of stationRequests) {
+    const live = liveById.get(id);
+    if (live !== request.feature || !(live.props.pk_step > 0)) {
+      request.controller.abort();
+      stationRequests.delete(id);
+    }
+  }
+}
 async function refreshStations(f) {
-  const key = JSON.stringify(f.line) + "|" + (f.props.radius || 0) + "|" + f.props.pk_step;
+  const key = stationRequestKey(f);
   if (f.props._stations_key === key) return;
+  const previous = stationRequests.get(f.id);
+  previous?.controller.abort();
+  const controller = new AbortController();
+  const request = { feature: f, key, controller };
+  stationRequests.set(f.id, request);
   try {
     const r = await fetch("/api/redline-stations", { method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ line: f.line, radius: f.props.radius || 0,
-                             step: f.props.pk_step }) });
+                             step: f.props.pk_step }), signal: controller.signal });
     if (!r.ok) return;
     const data = await r.json();
+    if (stationRequests.get(f.id) !== request) return;
+    if (state.features.find(feature => feature.id === f.id) !== f) return;
+    if (stationRequestKey(f) !== key || !Array.isArray(data.stations)) return;
     f.props._stations = data.stations;
     f.props._stations_key = key;
     draw();
-  } catch (e) { /* ядро недоступно — пикетаж просто не обновится */ }
+  } catch (e) {
+    if (e?.name !== "AbortError") {
+      /* ядро недоступно — пикетаж просто не обновится */
+    }
+  } finally {
+    if (stationRequests.get(f.id) === request) stationRequests.delete(f.id);
+  }
 }
 function maybeRefreshStations() {
+  cancelStaleStationRequests();
   for (const f of state.features)
     if (f.kind === "redline" && (f.props.pk_step || 0) > 0) refreshStations(f);
 }
@@ -3005,9 +3036,13 @@ function userFieldHtml(cf, f, i) {
   return `<label>${escHtml(cf.name)}<input type="${itype}"${step} id="${id}" value="${escHtml(v ?? "")}"></label>`;
 }
 
-async function runOffset(f, sign) {
+const offsetRequests = new WeakSet();
+async function runOffset(f, sign, buttons = []) {
+  if (offsetRequests.has(f)) return false;
   const dist = Math.abs(parseFloat(document.getElementById("f-offdist").value) || 15);
   f.props._offdist = dist;
+  offsetRequests.add(f);
+  buttons.forEach(button => { button.disabled = true; button.setAttribute("aria-busy", "true"); });
   try {
     const r = await fetch("/api/redline-offset", { method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3027,22 +3062,43 @@ async function runOffset(f, sign) {
     state.features.push(copy);
     selectOne(copy.id);
     afterChange();
+    return true;
   } catch (err) {
     toast("Офсет не построился: " + String(err).slice(0, 160) +
           " (обычно радиус/офсет не помещается в геометрию)", "error");
+    return false;
+  } finally {
+    offsetRequests.delete(f);
+    buttons.forEach(button => {
+      if (!button.isConnected) return;
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    });
   }
 }
 
+let bufferRequestPending = false;
 async function generateBuffers(selectedIds, dist, sides = "both") {
+  if (bufferRequestPending) return false;
   if (!selectedIds || !selectedIds.length) {
     const s = selectionIds();
-    if (!s.length) { toast("Выберите объекты для буфера", "warn"); return; }
+    if (!s.length) { toast("Выберите объекты для буфера", "warn"); return false; }
     selectedIds = s;
   }
-  dist = Math.abs(parseFloat(dist) || 15);
+  dist = Number(dist);
+  if (!Number.isFinite(dist) || dist < 1 || dist > 2000) {
+    toast("Укажите расстояние от 1 до 2000 м", "warn");
+    return false;
+  }
+  sides = ["both", "outer", "inner"].includes(sides) ? sides : "both";
   const selFeats = state.features.filter(f => selectedIds.includes(f.id));
-  if (!selFeats.length) return;
+  if (!selFeats.length) return false;
 
+  bufferRequestPending = true;
+  document.querySelectorAll("#btn-buffer, #btn-buffer-open, #buffer-create").forEach(button => {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+  });
   try {
     const r = await fetch("/api/buffer", {
       method: "POST",
@@ -3058,7 +3114,7 @@ async function generateBuffers(selectedIds, dist, sides = "both") {
     const data = await r.json();
     if (!data.features || !data.features.length) {
       toast("Буфер пуст (возможно слишком большой радиус)", "warn");
-      return;
+      return false;
     }
     snapshot();
     const L = activeLayer();
@@ -3068,8 +3124,16 @@ async function generateBuffers(selectedIds, dist, sides = "both") {
     }
     afterChange();
     toast(`Создано буферов: ${data.features.length}`);
+    return true;
   } catch (err) {
     toast("Не удалось сгенерировать буфер: " + String(err).slice(0, 150), "error");
+    return false;
+  } finally {
+    bufferRequestPending = false;
+    document.querySelectorAll("#btn-buffer, #btn-buffer-open, #buffer-create").forEach(button => {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    });
   }
 }
 
@@ -3265,8 +3329,8 @@ function renderProps() {
     if (field.type === "offset") {
       const offL = document.getElementById("f-offset-l");
       const offR = document.getElementById("f-offset-r");
-      if (offL) offL.onclick = () => runOffset(f, 1);
-      if (offR) offR.onclick = () => runOffset(f, -1);
+      if (offL) offL.onclick = () => runOffset(f, 1, [offL, offR]);
+      if (offR) offR.onclick = () => runOffset(f, -1, [offL, offR]);
       continue;
     }
     bind(`f-${field.key}`, field.key, field.cast);
@@ -4395,13 +4459,18 @@ function openBufferDialog() {
   overlay.querySelectorAll("[data-dist]").forEach(button => button.onclick = () => {
     overlay.querySelector("#buffer-distance").value = button.dataset.dist;
   });
-  overlay.querySelector("#buffer-create").onclick = () => {
-    document.getElementById("buf-dist").value = overlay.querySelector("#buffer-distance").value;
+  overlay.querySelector("#buffer-create").onclick = async () => {
+    const createButton = overlay.querySelector("#buffer-create");
+    const distance = overlay.querySelector("#buffer-distance").value;
+    document.getElementById("buf-dist").value = distance;
     const side = overlay.querySelector('input[name="buffer-dialog-side"]:checked')?.value || "both";
     const hiddenSide = document.querySelector(`input[name="buf-side"][value="${side}"]`);
     if (hiddenSide) hiddenSide.checked = true;
-    close();
-    document.getElementById("btn-buffer").click();
+    const originalText = createButton.textContent;
+    createButton.textContent = "Создание…";
+    const created = await generateBuffers(null, distance, side);
+    if (created) close();
+    else if (createButton.isConnected) createButton.textContent = originalText;
   };
   overlay.querySelector("#buffer-cancel").onclick = close;
   overlay.querySelector(".modal-x").onclick = close;
