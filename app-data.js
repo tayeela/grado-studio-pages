@@ -40,11 +40,12 @@ const DATA_SOURCE_GROUPS = [
 function viewExtentBbox() {
   // текущий видимый прямоугольник холста → [west, south, east, north] WGS84
   const w = cv.clientWidth, h = cv.clientHeight;
-  const p0 = s2w(0, h), p1 = s2w(w, 0);
-  const [lon0, lat0] = localToLonLat(p0[0], p0[1]);
-  const [lon1, lat1] = localToLonLat(p1[0], p1[1]);
-  return [Math.min(lon0, lon1), Math.min(lat0, lat1),
-          Math.max(lon0, lon1), Math.max(lat0, lat1)];
+  const corners = [[0, 0], [w, 0], [w, h], [0, h]]
+    .map(([sx, sy]) => localToLonLat(...s2w(sx, sy)));
+  const lons = corners.map(point => point[0]);
+  const lats = corners.map(point => point[1]);
+  return [Math.min(...lons), Math.min(...lats),
+          Math.max(...lons), Math.max(...lats)];
 }
 function bboxKm2([west, south, east, north]) {
   const latMid = (south + north) / 2 * Math.PI / 180;

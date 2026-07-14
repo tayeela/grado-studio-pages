@@ -996,15 +996,15 @@ function gridStep() {
 }
 
 // ---------- подложка (тайлы XYZ) ----------
-// Локальные метры холста → долгота/широта: приближение локальной
-// касательной плоскости вокруг ORIGIN (см. crs.ORIGIN_LON/LAT в ядре).
-// На масштабе территории (км, не сотни км) погрешность на два порядка
-// меньше пиксела тайла — для фоновой подложки этого достаточно; точная
-// проекция (обратный UTM) считается на сервере и используется только
-// для получения самой точки ORIGIN.
+// Геометрия проекта хранится в точных метрах EPSG:32637−ORIGIN. Подложка,
+// экстент и импорты обязаны использовать ту же проекцию: линейное
+// «метров на градус» не учитывает сближение меридианов и сдвигает тайлы
+// по востоку/западу при удалении от точки ORIGIN.
+const exactCrs = window.GRADO_CRS;
+if (!exactCrs) throw new Error("Не загружен модуль точных преобразований координат");
 const basemap = {
   on: false, source: "osm", opacity: 0.85, originLon: null, originLat: null,
-  attribution: "", attributions: {}, mPerDegLon: null, mPerDegLat: 111320,
+  attribution: "", attributions: {},
   cache: new Map(),   // "src/z/x/y" -> {img, loaded, failed}
 };
 
@@ -1016,7 +1016,6 @@ async function initBasemap() {
     basemap.originLat = d.origin_lat;
     basemap.attributions = d.attributions || { osm: d.attribution };
     basemap.attribution = basemap.attributions[basemap.source] || d.attribution;
-    basemap.mPerDegLon = 111320 * Math.cos(d.origin_lat * Math.PI / 180);
   } catch (e) { /* сервер без /api/basemap-info — подложка недоступна */ }
 }
 
@@ -1030,12 +1029,10 @@ function setBasemapSource(src) {
 }
 
 function localToLonLat(x, y) {
-  return [basemap.originLon + x / basemap.mPerDegLon,
-          basemap.originLat + y / basemap.mPerDegLat];
+  return exactCrs.localToWgs84([x, y]);
 }
 function lonLatToLocal(lon, lat) {
-  return [(lon - basemap.originLon) * basemap.mPerDegLon,
-          (lat - basemap.originLat) * basemap.mPerDegLat];
+  return exactCrs.wgs84ToLocal([lon, lat]);
 }
 function lonToTileX(lon, z) { return (lon + 180) / 360 * 2 ** z; }
 function latToTileY(lat, z) {
@@ -1065,18 +1062,21 @@ function tileImage(z, x, y) {
 
 function drawBasemap(w, h) {
   if (!basemap.on || basemap.originLon == null) return;
-  const [wx0, wy1] = s2w(0, 0), [wx1, wy0] = s2w(w, h);
-  const [lon0, lat0] = localToLonLat(wx0, wy0);
-  const [lon1, lat1] = localToLonLat(wx1, wy1);
+  const geoCorners = [[0, 0], [w, 0], [w, h], [0, h]]
+    .map(([sx, sy]) => localToLonLat(...s2w(sx, sy)));
+  const lons = geoCorners.map(point => point[0]);
+  const lats = geoCorners.map(point => point[1]);
+  const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
+  const latMin = Math.min(...lats), latMax = Math.max(...lats);
   // подбор зума: метры на тайл-пиксель ≈ метры на экранный пиксель
   const mppTile0 = 156543.03392804097 * Math.cos(basemap.originLat * Math.PI / 180);
   let z = Math.round(Math.log2(mppTile0 * state.view.k));
   z = Math.max(1, Math.min(19, z));
 
-  const txMin = Math.floor(lonToTileX(Math.min(lon0, lon1), z));
-  const txMax = Math.floor(lonToTileX(Math.max(lon0, lon1), z));
-  const tyMin = Math.floor(latToTileY(Math.max(lat0, lat1), z));
-  const tyMax = Math.floor(latToTileY(Math.min(lat0, lat1), z));
+  const txMin = Math.floor(lonToTileX(lonMin, z));
+  const txMax = Math.floor(lonToTileX(lonMax, z));
+  const tyMin = Math.floor(latToTileY(latMax, z));
+  const tyMax = Math.floor(latToTileY(latMin, z));
   const maxTiles = 2 ** z;
   const budget = 300;  // защита от случайного запроса тысяч тайлов при рывке зума
   let drawn = 0;
@@ -1090,10 +1090,18 @@ function drawBasemap(w, h) {
       const e = tileImage(z, cx, ty);
       if (!e.loaded) continue;
       const nw = lonLatToLocal(tileXToLon(tx, z), tileYToLat(ty, z));
-      const se = lonLatToLocal(tileXToLon(tx + 1, z), tileYToLat(ty + 1, z));
-      const [sx0, sy0] = w2s(...nw), [sx1, sy1] = w2s(...se);
-      // расширяем на 0.5px — прячет тонкие щели между соседними тайлами
-      ctx.drawImage(e.img, sx0 - 0.5, sy0 - 0.5, sx1 - sx0 + 1, sy1 - sy0 + 1);
+      const ne = lonLatToLocal(tileXToLon(tx + 1, z), tileYToLat(ty, z));
+      const sw = lonLatToLocal(tileXToLon(tx, z), tileYToLat(ty + 1, z));
+      const p00 = w2s(...nw), p10 = w2s(...ne), p01 = w2s(...sw);
+      const iw = e.img.naturalWidth || 256, ih = e.img.naturalHeight || 256;
+      // UTM grid north is rotated against geographic north. Three projected
+      // corners define the tile affine transform and preserve that convergence.
+      ctx.save();
+      ctx.transform((p10[0] - p00[0]) / iw, (p10[1] - p00[1]) / iw,
+        (p01[0] - p00[0]) / ih, (p01[1] - p00[1]) / ih, p00[0], p00[1]);
+      // half-source-pixel bleed hides antialiasing seams between neighbours.
+      ctx.drawImage(e.img, -0.5, -0.5, iw + 1, ih + 1);
+      ctx.restore();
     }
   }
   ctx.restore();

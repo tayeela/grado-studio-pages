@@ -2,11 +2,16 @@
    Kept separate from the fetch adapter so the same fixtures can verify the
    browser and desktop engines without a DOM. */
 (function (root, factory) {
-  const api = factory();
+  const crs = typeof module === "object" && module.exports
+    ? require("./crs.js") : root.GRADO_CRS;
+  const api = factory(crs);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.GRADO_PAGES_CORE = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (crs) {
   "use strict";
+
+  if (!crs) throw new Error("Не загружен модуль точных преобразований координат");
+  const { ORIGIN_WGS84, mercatorToWgs84, wgs84ToLocal, wgs84ToMercator } = crs;
 
   const PROFILE = {
     id: "moscow_urban_planning_2026_07",
@@ -297,45 +302,6 @@
   // WGS84 by specification; НСПД browser captures use Web Mercator (3857).
   // Keeping the projection here lets the regular canvas/import pipeline stay
   // identical to the desktop edition instead of maintaining a second UI.
-  const ORIGIN = [413000, 6178000];
-  // Exact EPSG:4326 position of the project's EPSG:32637 origin above.
-  // Keep basemap/extent requests on this datum: using Moscow's nominal city
-  // centre here shifts every imported source roughly 1.8 km north.
-  const ORIGIN_WGS84 = [37.61429248873298, 55.73988778495184];
-  const WGS_A = 6378137;
-  const WGS_F = 1 / 298.257223563;
-  const WGS_E2 = WGS_F * (2 - WGS_F);
-  const WGS_EP2 = WGS_E2 / (1 - WGS_E2);
-  const UTM_K0 = 0.9996;
-  const UTM_LON0 = 39 * Math.PI / 180;
-  const toRadians = value => value * Math.PI / 180;
-  const mercatorToWgs84 = point => {
-    const radius = 6378137;
-    return [point[0] / radius * 180 / Math.PI,
-      Math.atan(Math.sinh(point[1] / radius)) * 180 / Math.PI];
-  };
-  const wgs84ToLocal = point => {
-    if (!finitePoint(point)) throw new Error("Координаты должны быть конечными числами");
-    const lon = Number(point[0]), lat = Number(point[1]);
-    if (lon < -180 || lon > 180 || lat < -90 || lat > 90)
-      throw new Error("GeoJSON должен содержать координаты WGS84 (EPSG:4326)");
-    const phi = toRadians(lat), lam = toRadians(lon);
-    const sinPhi = Math.sin(phi), cosPhi = Math.cos(phi), tanPhi = Math.tan(phi);
-    const n = WGS_A / Math.sqrt(1 - WGS_E2 * sinPhi ** 2);
-    const t = tanPhi ** 2, c = WGS_EP2 * cosPhi ** 2;
-    const a = (lam - UTM_LON0) * cosPhi;
-    const m = WGS_A * (
-      (1 - WGS_E2 / 4 - 3 * WGS_E2 ** 2 / 64 - 5 * WGS_E2 ** 3 / 256) * phi
-      - (3 * WGS_E2 / 8 + 3 * WGS_E2 ** 2 / 32 + 45 * WGS_E2 ** 3 / 1024) * Math.sin(2 * phi)
-      + (15 * WGS_E2 ** 2 / 256 + 45 * WGS_E2 ** 3 / 1024) * Math.sin(4 * phi)
-      - 35 * WGS_E2 ** 3 / 3072 * Math.sin(6 * phi));
-    const x = UTM_K0 * n * (a + (1 - t + c) * a ** 3 / 6
-      + (5 - 18 * t + t ** 2 + 72 * c - 58 * WGS_EP2) * a ** 5 / 120) + 500000;
-    const y = UTM_K0 * (m + n * tanPhi * (a ** 2 / 2
-      + (5 - t + 9 * c + 4 * c ** 2) * a ** 4 / 24
-      + (61 - 58 * t + t ** 2 + 600 * c - 330 * WGS_EP2) * a ** 6 / 720));
-    return [x - ORIGIN[0], y - ORIGIN[1]];
-  };
   const closeRing = ring => {
     const local = ring.map(wgs84ToLocal);
     if (local.length > 1 && local[0][0] === local[local.length - 1][0] &&
@@ -692,10 +658,6 @@
       snapshots: [manifest] };
   }
 
-  const wgs84ToMercator = point => {
-    const radius = 6378137, lon = Number(point[0]), lat = Math.max(-85.05112878, Math.min(85.05112878, Number(point[1])));
-    return [radius * toRadians(lon), radius * Math.log(Math.tan(Math.PI / 4 + toRadians(lat) / 2))];
-  };
   function buildNspdExtentRequest(bbox, source) {
     if (!finiteBbox(bbox)) throw new Error("Некорректная видимая область");
     const spec = EXTENT_SPECS[source];
@@ -756,6 +718,6 @@
   }
 
   return { computeTep, preflightProject, webProject, importNspd, importGeoJson,
-    originWgs84: ORIGIN_WGS84.slice(),
+    originWgs84: [...ORIGIN_WGS84],
     buildOsmExtentRequest, importOsmExtent, buildNspdExtentRequest, importNspdExtent };
 });
