@@ -483,6 +483,20 @@ function styleOf(f) {
   return f.fmt ? { ...base, ...f.fmt } : base;   // f.fmt — оформление отдельного объекта
 }
 
+// Эталонный тёмный штрих границы (#1c1c1a) корректен для печати и светлого
+// холста, но почти исчезает на тёмной теме. На экране семантический базовый
+// стиль берёт контрастный токен темы; явную правку цвета пользователем не
+// трогаем — она должна оставаться точной.
+function canvasStrokeOf(f, st) {
+  const L = layerOf(f);
+  const objectOverride = f.fmt && Object.prototype.hasOwnProperty.call(f.fmt, "stroke");
+  const layerOverride = L && L.fmt && Object.prototype.hasOwnProperty.call(L.fmt, "stroke");
+  const styleId = f.style_id || (L && L.style_id);
+  if (!objectOverride && !layerOverride && styleId === "boundary.line")
+    return cvColor("boundary", st.stroke || "#1c1c1a");
+  return st.stroke || cvColor("boundary", "#000");
+}
+
 async function createProjectStyle() {
   const id = await uiPrompt("ID нового стиля проекта (латиница, уникальный, напр. my_fence):", "", { placeholder: "my_custom" });
   if (!id) return null;
@@ -2013,7 +2027,7 @@ function draw() {
     for (const f of _feats) {
       const st = styleOf(f);
       ctx.setLineDash(st.dash || []);
-      ctx.lineWidth = st.width; ctx.strokeStyle = st.stroke || cvColor("boundary", "#000");
+      ctx.lineWidth = st.width; ctx.strokeStyle = canvasStrokeOf(f, st);
       if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
         const [ax, ay] = w2s(...f.line[0]);
