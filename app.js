@@ -2444,30 +2444,56 @@ function fitPoints(pts, pad = 0.82) {
   }
   fitBox(minx, miny, maxx, maxy, pad);
 }
-// вписывание ВСЕГО проекта — УСТОЙЧИВОЕ к выбросам: по перцентилям центроидов
-// объектов. Region-wide ЗОУИТ и межрегиональные сооружения (до 122 км) растягивали
-// габариты → локаль выглядела точкой. Данные НЕ удаляются, просто не диктуют
-// масштаб; их видно при отдалении. Точное вписывание слоя/объекта — fitPoints.
-function fitView() {
-  const cxs = [], cys = [];
-  for (const f of state.features) {
-    let cx, cy;
-    if (f.circle) { cx = f.circle.cx; cy = f.circle.cy; }
-    else if (f.arc) { cx = f.arc.cx; cy = f.arc.cy; }
-    else {
-      const pts = f.ring || f.line || (f.point ? [f.point] : null);
-      if (!pts || !pts.length) continue;
-      let sx = 0, sy = 0; for (const p of pts) { sx += p[0]; sy += p[1]; }
-      cx = sx / pts.length; cy = sy / pts.length;
-    }
-    cxs.push(cx); cys.push(cy);
+function featureViewBox(f) {
+  const pts = featurePts(f);
+  if (!pts.length) return null;
+  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+  for (const p of pts) {
+    if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+    if (p[0] < minx) minx = p[0]; if (p[0] > maxx) maxx = p[0];
+    if (p[1] < miny) miny = p[1]; if (p[1] > maxy) maxy = p[1];
   }
-  if (!cxs.length) return;
-  cxs.sort((a, b) => a - b); cys.sort((a, b) => a - b);
-  const q = (a, t) => a[Math.min(a.length - 1, Math.max(0, Math.round(t * (a.length - 1))))];
-  // центральные 90% центроидов (5..95 перцентиль) — отсекает крайние выбросы,
-  // вписывает плотное ядро проекта
-  fitBox(q(cxs, 0.05), q(cys, 0.05), q(cxs, 0.95), q(cys, 0.95));
+  if (!Number.isFinite(minx)) return null;
+  return { minx, maxx, miny, maxy,
+    cx: (minx + maxx) / 2, cy: (miny + maxy) / 2 };
+}
+function unionViewBoxes(boxes) {
+  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+  for (const b of boxes) {
+    if (b.minx < minx) minx = b.minx; if (b.maxx > maxx) maxx = b.maxx;
+    if (b.miny < miny) miny = b.miny; if (b.maxy > maxy) maxy = b.maxy;
+  }
+  return { minx, maxx, miny, maxy };
+}
+// «Вписать всё» учитывает ПОЛНЫЕ габариты видимых объектов. Для небольшого
+// проекта это точный bbox: один большой контур больше не раздувается до 40×
+// по единственной точке-центроиду и не исчезает за краями экрана. На больших
+// сценах сохраняем защиту от далёких выбросов: выбираем центральные 90%
+// объектов по центрам, но вписываем уже их реальные габариты, а не центры.
+// Данные не удаляются; скрытые слои закономерно не влияют на текущий обзор.
+function fitView() {
+  const boxes = [];
+  for (const f of state.features) {
+    const layer = layerOf(f);
+    if (layer && !layer.visible) continue;
+    const box = featureViewBox(f);
+    if (box) boxes.push(box);
+  }
+  if (!boxes.length) { toast("Нет видимых объектов для вписывания"); return; }
+  let fitted = boxes;
+  if (boxes.length > 4) {
+    const cxs = boxes.map(b => b.cx).sort((a, b) => a - b);
+    const cys = boxes.map(b => b.cy).sort((a, b) => a - b);
+    const q = (a, t) => a[Math.min(a.length - 1,
+      Math.max(0, Math.round(t * (a.length - 1))))];
+    const minCx = q(cxs, 0.05), maxCx = q(cxs, 0.95);
+    const minCy = q(cys, 0.05), maxCy = q(cys, 0.95);
+    const central = boxes.filter(b => b.cx >= minCx && b.cx <= maxCx &&
+      b.cy >= minCy && b.cy <= maxCy);
+    if (central.length) fitted = central;
+  }
+  const b = unionViewBoxes(fitted);
+  fitBox(b.minx, b.miny, b.maxx, b.maxy);
 }
 function zoomToLayer(id) {
   const pts = [];
