@@ -317,7 +317,8 @@ function drawSnapMarker() {
   // в «Выборе» маркер нужен при переносе/правке (state.edit), иначе скрыт
   if (!s || !s.kind || (state.tool === "select" && !state.edit)) return;
   const [sx, sy] = w2s(...s.p);
-  ctx.lineWidth = 1.5;
+  ctx.save();
+  ctx.lineWidth = 2.5;
   ctx.strokeStyle = cvColor("shared", "#12a150");
   if (s.kind === "вершина") ctx.strokeRect(sx - 5, sy - 5, 10, 10);
   else if (s.kind === "середина") {
@@ -345,4 +346,5 @@ function drawSnapMarker() {
     ctx.moveTo(sx - 4, sy); ctx.lineTo(sx + 4, sy);
     ctx.moveTo(sx, sy - 4); ctx.lineTo(sx, sy + 4); ctx.stroke();
   }
+  ctx.restore();
 }

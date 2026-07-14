@@ -31,7 +31,7 @@ const DATA_SOURCE_GROUPS = [
       { key: "nspd.constructions", label: "Сооружения", def: false },
       { key: "nspd.zouit", label: "ЗОУИТ (все виды)", def: false },
     ]},
-  { title: "Рельеф", hint: "горизонтали из открытого DEM (SRTM)",
+  { title: "Рельеф", hint: "горизонтали из открытого DEM (SRTM)", web: false,
     maxKm2: 80, items: [
       { key: "terrain.contours", label: "Горизонтали (сечение авто)", def: false },
     ]},
@@ -64,26 +64,32 @@ async function openDataFetch() {
   overlay.className = "modal-overlay";
   const areaTxt = km2 < 1 ? km2.toFixed(2) : km2.toFixed(1);
   const cardsHtml = DATA_SOURCE_GROUPS.map((g, gi) => {
+    const unavailable = !!window.GRADO_STATIC && g.web === false;
     const over = km2 > g.maxKm2;
+    const disabled = unavailable || over;
     const rows = g.items.map(it => {
-      const checked = (saved[it.key] ?? it.def) && !over;
-      return `<label class="data-src${over ? " disabled" : ""}">
-        <input type="checkbox" data-src="${it.key}" data-gi="${gi}"${checked ? " checked" : ""}${over ? " disabled" : ""}>
+      const checked = (saved[it.key] ?? it.def) && !disabled;
+      return `<label class="data-src${disabled ? " disabled" : ""}">
+        <input type="checkbox" data-src="${it.key}" data-gi="${gi}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}>
         <span>${escHtml(it.label)}</span></label>`;
     }).join("");
     return `<div class="data-card" data-gi="${gi}">
       <div class="data-card-head">
         <div class="data-card-title">${escHtml(g.title)}
           <span class="data-card-sub">${escHtml(g.hint)} · до ${g.maxKm2} км²</span></div>
-        <button class="data-all" data-gi="${gi}"${over ? " disabled" : ""}>все</button>
+        <button class="data-all" data-gi="${gi}"${disabled ? " disabled" : ""}>все</button>
       </div>
-      ${over ? `<div class="data-over">Область ${areaTxt} км² больше лимита ${g.maxKm2} км²
+      ${unavailable ? `<div class="data-over">В веб-версии рельеф пока недоступен</div>` : over ? `<div class="data-over">Область ${areaTxt} км² больше лимита ${g.maxKm2} км²
         <button class="data-zoom" data-target="${g.maxKm2}">Приблизить</button></div>` : ""}
       <div class="data-rows">${rows}</div>
     </div>`;
   }).join("");
-  overlay.innerHTML = `<div class="modal fmt-modal data-modal">
-    <div class="modal-head">Данные по области
+  const ogdAction = window.GRADO_STATIC ? "Импортировать GeoJSON" : "Открыть портал";
+  const ogdHint = window.GRADO_STATIC
+    ? "выберите ранее скачанный слой с портала"
+    : "скачайте выгрузку — студия подхватит её из «Загрузок» сама";
+  overlay.innerHTML = `<div class="modal fmt-modal data-modal" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
+    <div class="modal-head"><span id="data-modal-title">Данные по области</span>
       <button class="modal-x" aria-label="Закрыть данные по области"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="data-area-bar"><span>Видимая область</span><b>${areaTxt} км²</b></div>
@@ -94,8 +100,8 @@ async function openDataFetch() {
             <span class="data-card-sub">официальные слои · портал mos.ru</span></div>
         </div>
         <div class="data-ogd-row">
-          <button class="data-ogd-portal">Открыть портал</button>
-          <span class="data-watch-status muted">скачайте выгрузку — студия подхватит её из «Загрузок» сама</span>
+          <button class="data-ogd-portal">${ogdAction}</button>
+          <span class="data-watch-status muted">${ogdHint}</span>
         </div>
       </div>
       <div class="data-note muted">Объекты лягут в отдельные слои-источники (появятся в «Слоях»)
@@ -147,6 +153,11 @@ async function openDataFetch() {
   // ГИС ОГД: открыть портал + армировать вахту за «Загрузками» (работает
   // и после закрытия окна — пока пользователь выбирает слои на портале)
   overlay.querySelector(".data-ogd-portal").addEventListener("click", () => {
+    if (window.GRADO_STATIC) {
+      close();
+      document.getElementById("btn-gisogd")?.click();
+      return;
+    }
     window.open("https://gisogd.mos.ru/", "_blank");
     startDownloadsWatch();
     overlay.querySelector(".data-watch-status").textContent =
@@ -209,10 +220,11 @@ async function openDataFetch() {
       if (!addedAll && dupAll) { toast(`Данные: всё уже загружено (${dupAll} объектов — без дубликатов)`); return; }
       const dupNote = dupAll ? ` · ${dupAll} уже были` : "";
       const invalidNote = invalidAll ? ` · ${invalidAll} поврежд. пропущено` : "";
-      toast(`Данные: +${plObjects(addedAll)} (${parts.join(" · ")})${dupNote}${invalidNote}`,
-        invalidAll ? "warn" : undefined);
-      if (data.notes && data.notes.length)
-        console.info("Данные по области:", data.notes.join("\n"));
+      const sourceNotes = (data.notes || []).filter(Boolean);
+      const note = sourceNotes.length ? ` · ${sourceNotes.join(" · ")}` : "";
+      toast(`Данные: +${plObjects(addedAll)} (${parts.join(" · ")})${dupNote}${invalidNote}${note}`,
+        invalidAll || sourceNotes.length ? "warn" : undefined);
+      if (sourceNotes.length) console.info("Данные по области:", sourceNotes.join("\n"));
     } catch (err) {
       status.textContent = "";
       loadBtn.classList.remove("loading");

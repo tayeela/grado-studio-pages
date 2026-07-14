@@ -144,8 +144,10 @@ header{
 .statusbar .dot{width:10px;height:10px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
 .statusbar .push{flex:1;min-width:0}
 #st-toast{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#st-snap{padding:3px 7px;border-radius:999px;background:var(--field-bg);color:var(--text-2);font-size:10px}
+#st-snap.snap-active{background:color-mix(in srgb,var(--success) 16%,var(--field-bg));color:var(--success);font-weight:600}
 @container (max-width:680px){
-  #st-coords,#st-grid,#st-snap{display:none!important}
+  #st-coords,#st-grid{display:none!important}
   .statusbar .st-active{min-width:96px;max-width:42%}
   #st-toast{max-width:38%}
 }
@@ -373,7 +375,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   body:not(.panel-hidden) .start-guide-actions .btn{width:100%}
   .phbtn.panel-close{display:grid}
   .statusbar{gap:var(--sp-3);padding-inline:var(--sp-3)}
-  #st-coords,#st-grid,#st-snap,.cv-scale{display:none!important}
+  #st-coords,#st-grid,.cv-scale{display:none!important}
   #st-layer{max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 @media (max-width:700px){

@@ -2607,6 +2607,8 @@ function restoreHistoryEntry(serialized) {
     variants: state.variants,
     accessRadii: state.accessRadii,
     albumConfig: state.albumConfig,
+    osnap: state.osnap,
+    gridSnap: state.gridSnap,
     basemapSource: basemap.source,
     exportStyle: exportStyleMode(),
   };
@@ -5496,7 +5498,7 @@ cv.addEventListener("mousemove", e => {
   const s = cursorPoint(wx, wy);
   state.snapHit = s;
   state.mouse = s.p;
-  document.getElementById("st-snap").textContent = s.kind ? `привязка: ${s.kind}` : "";
+  updateSnapStatus(s);
   if (state.xf && state.xf.phase === "act") {
     xfUpdatePreview(); draw(); return;
   }
@@ -5796,10 +5798,22 @@ document.querySelectorAll("#toolbar button[data-tool]").forEach(
 document.getElementById("btn-join").addEventListener("click", () => joinSelected());
 
 function setOsnap(v) {
-  state.osnap = v;
-  document.getElementById("btn-snap").classList.toggle("active", v);
+  state.osnap = !!v;
+  const button = document.getElementById("btn-snap");
+  button.classList.toggle("active", state.osnap);
+  button.setAttribute("aria-pressed", String(state.osnap));
   const chk = document.getElementById("obj-snap");
-  if (chk) chk.checked = v;
+  if (chk) chk.checked = state.osnap;
+  updateSnapStatus();
+  draw();
+}
+function updateSnapStatus(hit = null) {
+  const status = document.getElementById("st-snap");
+  if (!status) return;
+  status.textContent = !state.osnap ? "объекты: выкл"
+    : hit && hit.kind && hit.kind !== "сетка" ? `привязка: ${hit.kind}`
+    : "объекты: вкл";
+  status.classList.toggle("snap-active", !!(hit && hit.kind && hit.kind !== "сетка"));
 }
 function setGridSnap(v) {
   state.gridSnap = v;
@@ -6365,6 +6379,8 @@ function normalizeRestoredState(payload) {
     variants,
     albumConfig,
     accessRadii,
+    osnap: restored.osnap !== false,
+    gridSnap: restored.gridSnap !== false,
     name: typeof restored.name === "string" ? restored.name.slice(0, 240) : "Проект",
     density: numberInRange(restored.density, 0, 1000, 25),
     ratio: numberInRange(restored.ratio, 0, 100, 80),
@@ -6505,6 +6521,18 @@ function applyRestoredState(d) {
   if (isRecord(d.albumConfig)) {
     state.albumConfig = d.albumConfig;
   }
+  state.osnap = d.osnap !== false;
+  state.gridSnap = d.gridSnap !== false;
+  const snapButton = document.getElementById("btn-snap");
+  if (snapButton) {
+    snapButton.classList.toggle("active", state.osnap);
+    snapButton.setAttribute("aria-pressed", String(state.osnap));
+  }
+  const objectSnap = document.getElementById("obj-snap");
+  if (objectSnap) objectSnap.checked = state.osnap;
+  const gridSnap = document.getElementById("grid-snap");
+  if (gridSnap) gridSnap.checked = state.gridSnap;
+  updateSnapStatus();
   document.getElementById("project-name").value = d.name;
   document.getElementById("p-density").value = d.density;
   document.getElementById("p-ratio").value = d.ratio;
@@ -6619,6 +6647,7 @@ on("btn-variants", "click", openVariants);
 on("btn-theme", "click", () => { if (window.toggleTheme) window.toggleTheme(); });
 window.onThemeChange = () => { draw(); renderLayers(); };
 setTool("select");
+updateSnapStatus();
 syncHistoryControls();
 renderLayers();
 renderProps();

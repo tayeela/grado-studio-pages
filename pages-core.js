@@ -541,5 +541,216 @@
     return { features, notes, fields, source_doc: sourceDoc, snapshot: manifest, diff: null };
   }
 
-  return { computeTep, preflightProject, webProject, importNspd, importGeoJson };
+  // Static Pages edition: direct extent imports. Public OSM Overpass and
+  // NSPD endpoints allow browser CORS requests, so the web app can offer the
+  // same visible-area workflow without an unsafe third-party proxy.
+  const EXTENT_SPECS = {
+    "osm.roads": { title: "Дороги и улицы", layer_id: "source.osm.roads", kind: "generic", set: "roads" },
+    "osm.buildings": { title: "Здания (OSM)", layer_id: "source.osm.buildings", kind: "building", set: "buildings" },
+    "osm.landuse": { title: "Землепользование", layer_id: "source.osm.landuse", kind: "generic", set: "landuse" },
+    "osm.water": { title: "Вода", layer_id: "source.osm.water", kind: "generic", set: "water" },
+    "osm.boundaries": { title: "Административные границы", layer_id: "source.osm.boundaries", kind: "generic", set: "boundaries" },
+    "nspd.parcels": { title: "Участки ЕГРН", layer_id: "source.nspd.parcels", kind: "parcel", categories: [36368] },
+    "nspd.buildings": { title: "Здания (ЕГРН)", layer_id: "source.nspd.buildings", kind: "building", categories: [36369] },
+    "nspd.constructions": { title: "Сооружения (ЕГРН)", layer_id: "source.nspd.constructions", kind: "generic", categories: [36383] },
+    "nspd.zouit": { title: "ЗОУИТ", layer_id: "source.nspd.zouit", kind: "restrict", categories: [469038, 469039, 469040, 469041, 469042] },
+  };
+  const OSM_SELECTORS = {
+    roads: ['way["highway"]'],
+    buildings: ['way["building"]'],
+    landuse: ['way["landuse"]', 'way["leisure"~"^(park|garden|pitch|playground)$"]',
+      'way["natural"~"^(wood|scrub|grassland|heath)$"]', 'relation["landuse"]',
+      'relation["leisure"~"^(park|garden|pitch|playground)$"]',
+      'relation["natural"~"^(wood|scrub|grassland|heath)$"]'],
+    water: ['way["natural"="water"]', 'way["water"]',
+      'way["waterway"~"^(riverbank|dock|canal)$"]', 'relation["natural"="water"]',
+      'relation["water"]', 'relation["waterway"="riverbank"]'],
+    boundaries: ['relation["boundary"="administrative"]["admin_level"~"^(6|8)$"]'],
+  };
+  const OSM_RING_SETS = new Set(["buildings", "landuse", "water", "boundaries"]);
+  const finiteBbox = bbox => Array.isArray(bbox) && bbox.length === 4 &&
+    bbox.every(value => Number.isFinite(Number(value))) && Number(bbox[0]) < Number(bbox[2]) &&
+    Number(bbox[1]) < Number(bbox[3]) && Number(bbox[0]) >= -180 && Number(bbox[2]) <= 180 &&
+    Number(bbox[1]) >= -90 && Number(bbox[3]) <= 90;
+  const whichOsmSet = tags => {
+    if (tags.boundary === "administrative" && tags.admin_level) return "boundaries";
+    if (tags.building) return "buildings";
+    if (tags.highway) return "roads";
+    if (tags.natural === "water" || tags.water || tags.waterway) return "water";
+    if (tags.landuse || tags.leisure || tags.natural) return "landuse";
+    return null;
+  };
+  const assembleOsmRings = segments => {
+    const pending = segments.filter(segment => Array.isArray(segment) && segment.length >= 2)
+      .map(segment => segment.map(point => [...point]));
+    const rings = [];
+    while (pending.length) {
+      let ring = pending.shift(), changed = true;
+      while (ring.length && String(ring[0]) !== String(ring[ring.length - 1]) && changed) {
+        changed = false;
+        for (let i = 0; i < pending.length; i++) {
+          const segment = pending[i], first = String(segment[0]), last = String(segment[segment.length - 1]);
+          const ringFirst = String(ring[0]), ringLast = String(ring[ring.length - 1]);
+          if (first === ringLast) ring = ring.concat(segment.slice(1));
+          else if (last === ringLast) ring = ring.concat(segment.slice(0, -1).reverse());
+          else if (last === ringFirst) ring = segment.slice(0, -1).concat(ring);
+          else if (first === ringFirst) ring = segment.slice().reverse().slice(0, -1).concat(ring);
+          else continue;
+          pending.splice(i, 1); changed = true; break;
+        }
+      }
+      if (ring.length >= 4 && String(ring[0]) === String(ring[ring.length - 1])) rings.push(ring);
+    }
+    return rings;
+  };
+  const newExtentGroup = source => {
+    const spec = EXTENT_SPECS[source];
+    return { source, title: spec.title, layer_id: spec.layer_id, kind: spec.kind,
+      features: [], fields: [], count: 0 };
+  };
+  const addFields = (group, props) => {
+    const existing = new Set(group.fields.map(field => field.name));
+    Object.entries(props).forEach(([name, value]) => {
+      if (existing.has(name)) return;
+      group.fields.push({ name, type: typeof value === "number" ? "real" : "text" });
+      existing.add(name);
+    });
+  };
+  const finishExtentGroup = (group, sourceDoc, fingerprint) => {
+    group.count = group.features.length;
+    const manifest = snapshot(group.source.split(".")[0], sourceDoc, group.features, fingerprint);
+    const prov = provenance(manifest);
+    group.features.forEach(feature => { feature.prov = { ...prov }; });
+    return { groups: [group], notes: [], snapshots: [manifest] };
+  };
+
+  function buildOsmExtentRequest(bbox, sources = []) {
+    if (!finiteBbox(bbox)) throw new Error("Некорректная видимая область");
+    const sets = [...new Set(sources.map(source => EXTENT_SPECS[source]?.set).filter(Boolean))];
+    if (!sets.length) throw new Error("Не выбраны источники OSM");
+    const [west, south, east, north] = bbox.map(Number);
+    const bb = `(${south},${west},${north},${east})`;
+    const clauses = sets.flatMap(set => OSM_SELECTORS[set].map(selector => selector + bb));
+    return `[out:json][timeout:25];(${clauses.join(";")};);out geom;`;
+  }
+
+  function importOsmExtent(payload = {}, sources = [], bbox = []) {
+    if (!payload || !Array.isArray(payload.elements)) throw new Error("Overpass вернул некорректный ответ");
+    const selected = new Set(sources.filter(source => EXTENT_SPECS[source]?.set));
+    const groups = Object.fromEntries([...selected].map(source => [source, newExtentGroup(source)]));
+    let skipped = 0;
+    for (const element of payload.elements) {
+      if (!element || !["way", "relation"].includes(element.type)) continue;
+      const tags = element.tags && typeof element.tags === "object" ? element.tags : {};
+      const set = whichOsmSet(tags);
+      const source = [...selected].find(key => EXTENT_SPECS[key].set === set);
+      if (!source) continue;
+      const group = groups[source], spec = EXTENT_SPECS[source];
+      const props = Object.fromEntries(Object.entries(tags).filter(([key, value]) =>
+        ["name", "highway", "building", "building:levels", "landuse", "leisure", "natural",
+          "water", "waterway", "surface", "lanes", "admin_level"].includes(key) && value != null));
+      let geometries = [];
+      if (element.type === "way" && Array.isArray(element.geometry)) {
+        const points = element.geometry.map(point => [point.lon, point.lat]);
+        if (OSM_RING_SETS.has(set)) {
+          if (points.length >= 4 && String(points[0]) === String(points[points.length - 1]))
+            geometries = [{ type: "Polygon", coordinates: [points] }];
+          else skipped += 1;
+        } else if (points.length >= 2) geometries = [{ type: "LineString", coordinates: points }];
+      } else if (element.type === "relation" && OSM_RING_SETS.has(set)) {
+        const segments = (element.members || []).filter(member => member.type === "way" &&
+          ["outer", "", undefined, null].includes(member.role) && Array.isArray(member.geometry))
+          .map(member => member.geometry.map(point => [point.lon, point.lat]));
+        const rings = assembleOsmRings(segments);
+        if (rings.length) geometries = [{ type: "MultiPolygon", coordinates: rings.map(ring => [ring]) }];
+        else skipped += 1;
+      }
+      geometries.flatMap(geometryParts).forEach((part, index) => {
+        const feature = { kind: spec.kind, layer_id: spec.layer_id, ...part, props: { ...props },
+          srcKey: `${spec.layer_id}:${element.type}/${element.id}#${index}` };
+        if (source === "osm.buildings") {
+          feature.props.purpose = tags.building === "yes" ? "здание" : tags.building;
+          const floors = Number.parseInt(tags["building:levels"], 10);
+          if (Number.isFinite(floors)) feature.props.floors = floors;
+        }
+        group.features.push(feature); addFields(group, feature.props);
+      });
+    }
+    const allFeatures = Object.values(groups).flatMap(group => group.features);
+    const manifest = snapshot("osm", "OpenStreetMap (Overpass API), выгрузка по экстенту",
+      allFeatures, { bbox, sources, keys: allFeatures.map(feature => feature.srcKey) });
+    const prov = provenance(manifest);
+    Object.values(groups).forEach(group => {
+      group.count = group.features.length;
+      group.features.forEach(feature => { feature.prov = { ...prov }; });
+    });
+    return { groups: Object.values(groups), notes: skipped ? [`пропущено вырожденных геометрий: ${skipped}`] : [],
+      snapshots: [manifest] };
+  }
+
+  const wgs84ToMercator = point => {
+    const radius = 6378137, lon = Number(point[0]), lat = Math.max(-85.05112878, Math.min(85.05112878, Number(point[1])));
+    return [radius * toRadians(lon), radius * Math.log(Math.tan(Math.PI / 4 + toRadians(lat) / 2))];
+  };
+  function buildNspdExtentRequest(bbox, source) {
+    if (!finiteBbox(bbox)) throw new Error("Некорректная видимая область");
+    const spec = EXTENT_SPECS[source];
+    if (!spec || !spec.categories) throw new Error("Неизвестный источник НСПД");
+    const [west, south, east, north] = bbox.map(Number);
+    const ring = [[west, south], [east, south], [east, north], [west, north], [west, south]].map(wgs84ToMercator);
+    return { geom: { type: "FeatureCollection", features: [{ type: "Feature", properties: {},
+      geometry: { crs: { type: "name", properties: { name: "EPSG:3857" } },
+        type: "Polygon", coordinates: [ring] } }] },
+      categories: spec.categories.map(id => ({ id })) };
+  }
+
+  function importNspdExtent(payload = {}, source, bbox = []) {
+    const spec = EXTENT_SPECS[source];
+    if (!spec || !spec.categories || !Array.isArray(payload.features))
+      throw new Error("НСПД вернула некорректный ответ");
+    const group = newExtentGroup(source);
+    let skipped = 0;
+    payload.features.forEach((item, itemIndex) => {
+      const geometry = item && item.geometry;
+      if (!geometry || !["Polygon", "MultiPolygon"].includes(geometry.type)) { skipped += 1; return; }
+      const raw = item.properties && typeof item.properties === "object" ? { ...item.properties } : {};
+      let options = raw.options;
+      if (typeof options === "string") { try { options = JSON.parse(options); } catch (error) { options = null; } }
+      if (options && typeof options === "object" && !Array.isArray(options))
+        Object.entries(options).forEach(([key, value]) => { raw[`opt_${key}`] = value; });
+      delete raw.options;
+      const props = source === "nspd.parcels" ? {
+        cad_num: raw.opt_cad_num || raw.cad_num || raw.label,
+        category: raw.opt_land_record_category_type,
+        vri: raw.opt_permitted_use_established_by_document,
+        address: raw.opt_readable_address,
+      } : source === "nspd.buildings" ? {
+        purpose: raw.opt_building_name || raw.opt_purpose || "здание",
+        floors: Number.parseInt(raw.opt_floors, 10) || undefined,
+        cad_num: raw.opt_cad_num,
+        address: raw.opt_readable_address,
+      } : source === "nspd.constructions" ? {
+        name: raw.opt_building_name || raw.label || "сооружение", cad_num: raw.opt_cad_num,
+      } : { kind: String(raw.categoryName || "ЗОУИТ").replace(/[_ ]+$/, ""),
+        number: raw.label, basis: "НСПД" };
+      Object.keys(props).forEach(key => { if (props[key] == null || props[key] === "") delete props[key]; });
+      const depth = geometry.type === "Polygon" ? 2 : 3;
+      const wgsGeometry = { type: geometry.type, coordinates: (function transform(value, level) {
+        return level === 0 ? mercatorToWgs84(value) : value.map(item => transform(item, level - 1));
+      })(geometry.coordinates, depth) };
+      let parts = [];
+      try { parts = geometryParts(wgsGeometry); } catch (error) { skipped += 1; return; }
+      const key = item.id ?? raw.opt_cad_num ?? raw.label ?? itemIndex;
+      parts.forEach((part, partIndex) => group.features.push({ kind: spec.kind, layer_id: spec.layer_id,
+        ...part, props: { ...props }, srcKey: `${spec.layer_id}:${key}#${partIndex}` }));
+      addFields(group, props);
+    });
+    const result = finishExtentGroup(group, "НСПД (nspd.gov.ru), выгрузка по экстенту",
+      { bbox, source, keys: group.features.map(feature => feature.srcKey) });
+    if (skipped) result.notes.push(`повреждённых объектов НСПД пропущено: ${skipped}`);
+    return result;
+  }
+
+  return { computeTep, preflightProject, webProject, importNspd, importGeoJson,
+    buildOsmExtentRequest, importOsmExtent, buildNspdExtentRequest, importNspdExtent };
 });

@@ -89,12 +89,16 @@ function cmykToHex(c, m, y, k) {
 function makeColorField(host, initial, onChange) {
   let value = normHex(initial) || "#888888", pop = null, onDoc = null, onViewport = null;
   host.classList.add("cfield");
-  host.innerHTML = `<button type="button" class="cfield-btn">
-    <span class="cfield-sw"></span><span class="cfield-hex"></span>
+  host.innerHTML = `<button type="button" class="cfield-btn" aria-label="Открыть палитру цвета">
+    <span class="cfield-sw"></span><span class="cfield-action">Палитра</span><span class="cfield-hex"></span>
     <svg class="ic cfield-caret"><use href="#ic-chevron"/></svg></button>`;
   const btn = host.querySelector(".cfield-btn");
   const sw = host.querySelector(".cfield-sw"), hexLbl = host.querySelector(".cfield-hex");
-  const paint = () => { sw.style.background = value; hexLbl.textContent = value; };
+  const paint = () => {
+    sw.style.background = value;
+    hexLbl.textContent = value;
+    btn.setAttribute("aria-label", `Открыть палитру цвета ${value}`);
+  };
   const setValue = (hex, fire = true) => {
     const h = normHex(hex); if (!h) return;
     value = h; paint(); if (pop) syncPop(); if (fire) onChange(h);

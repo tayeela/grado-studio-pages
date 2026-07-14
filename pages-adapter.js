@@ -165,6 +165,69 @@
     return pagesCore.webProject(payload);
   }
 
+  const OVERPASS_URLS = [
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
+  const NSPD_EXTENT_URL = "https://nspd.gov.ru/api/geoportal/v1/intersects?typeIntersect=fullObject";
+  const bboxKm2 = bbox => {
+    const [west, south, east, north] = bbox.map(Number);
+    return Math.abs(north - south) * 111.32 * Math.abs(east - west) * 111.32 *
+      Math.cos((south + north) / 2 * Math.PI / 180);
+  };
+  const mergeExtent = (target, part) => {
+    target.groups.push(...(part.groups || []));
+    target.notes.push(...(part.notes || []));
+    target.snapshots.push(...(part.snapshots || []));
+  };
+  const fetchOverpass = async query => {
+    let lastError = null;
+    for (const url of OVERPASS_URLS) {
+      try {
+        const response = await nativeFetch(url, { method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ data: query }).toString() });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      } catch (error) { lastError = error; }
+    }
+    throw new Error(`Overpass недоступен: ${lastError?.message || lastError || "нет ответа"}`);
+  };
+  async function browserFetchExtent(payload) {
+    const bbox = payload && payload.bbox;
+    const sources = [...new Set(Array.isArray(payload && payload.sources) ? payload.sources : [])];
+    if (!Array.isArray(bbox) || bbox.length !== 4 || !bbox.every(value => Number.isFinite(Number(value))))
+      throw new Error("Некорректная видимая область");
+    const area = bboxKm2(bbox);
+    const result = { groups: [], notes: [], snapshots: [] };
+    const osmSources = sources.filter(source => source.startsWith("osm."));
+    const nspdSources = sources.filter(source => source.startsWith("nspd."));
+    if (osmSources.length) {
+      if (area > 60) throw new Error(`Область ${area.toFixed(1)} км² больше предела 60 км² для OSM — приблизьте вид`);
+      try {
+        const query = pagesCore.buildOsmExtentRequest(bbox, osmSources);
+        mergeExtent(result, pagesCore.importOsmExtent(await fetchOverpass(query), osmSources, bbox));
+      } catch (error) { result.notes.push(`OSM: ${error.message || error}`); }
+    }
+    if (nspdSources.length) {
+      if (area > 12) throw new Error(`Область ${area.toFixed(1)} км² больше предела 12 км² для НСПД — приблизьте вид`);
+      for (const source of nspdSources) {
+        try {
+          const response = await nativeFetch(NSPD_EXTENT_URL, { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(pagesCore.buildNspdExtentRequest(bbox, source)) });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          mergeExtent(result, pagesCore.importNspdExtent(await response.json(), source, bbox));
+        } catch (error) { result.notes.push(`${source}: ${error.message || error}`); }
+      }
+    }
+    if (sources.includes("terrain.contours"))
+      result.notes.push("Рельеф по области пока требует настольную версию");
+    if (!osmSources.length && !nspdSources.length && !sources.includes("terrain.contours"))
+      result.notes.push("Не выбраны поддерживаемые источники");
+    return result;
+  }
+
   window.gradoTileUrl = (z, x, y, source) => source === "osm"
     ? `https://tile.openstreetmap.org/${z}/${x}/${y}.png`
     : `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
@@ -290,6 +353,13 @@
       if (error) return json({ error }, 400);
       return json(pagesCore.preflightProject(payload));
     }
+    if (path === "/api/fetch-extent") {
+      if (method !== "POST") return json({ error: "Метод не поддерживается" }, 405);
+      const payload = await bodyJson(input, options);
+      if (!isRecord(payload)) return json({ error: "Некорректный запрос области" }, 400);
+      try { return json(await browserFetchExtent(payload)); }
+      catch (error) { return json({ error: error.message || "Не удалось загрузить область" }, 400); }
+    }
     if (path === "/api/import-nspd") {
       if (method !== "POST") return json({ error: "Метод не поддерживается" }, 405);
       const text = await bodyText(input, options);
@@ -346,7 +416,7 @@
     return json({ error: "Эта функция требует настольную версию ГРАДО Студии" }, 501);
   };
 
-  const blocked = new Set(["btn-album", "btn-dxf", "btn-print", "btn-data",
+  const blocked = new Set(["btn-album", "btn-dxf", "btn-print",
     "btn-buffer-open"]);
   document.addEventListener("click", event => {
     const target = event.target.closest("[data-click],button");
@@ -394,7 +464,7 @@
     if (gisogdInput) gisogdInput.accept = ".geojson,.json,application/geo+json,application/json";
     const gisogdRow = document.querySelector('[data-click="btn-gisogd"]');
     if (gisogdRow) gisogdRow.textContent = "ГИС ОГД — GeoJSON";
-    addMenuNote("menu-data", "В веб-версии доступны файлы НСПД и GeoJSON. ZIP, ссылки и загрузка по области — в настольной версии.");
+    addMenuNote("menu-data", "В веб-версии доступны OSM и НСПД по видимой области, а также файлы НСПД и GeoJSON. ZIP и прямые ссылки требуют настольную версию.");
     addMenuNote("menu-out", "DXF и печать в масштабе доступны в настольной версии.");
     const style = document.createElement("style");
     style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.web-disabled{opacity:.46;cursor:default}.web-disabled:hover,.web-disabled:focus{background:transparent;color:var(--text)}.web-menu-note{max-width:250px;margin:6px 4px 2px;padding:8px 9px;border-radius:8px;background:var(--field-bg);color:var(--text-2);font-size:11px;line-height:1.35}.pages-mode #st-bridge{display:none!important}`;
