@@ -225,7 +225,7 @@ function openLayerStyle(layer, opts = {}) {
           <section class="style-section">
             <div class="style-section-head"><span><b>Обводка</b><small>Контур, толщина и тип линии</small></span></div>
             <div class="fmt-row"><label>Цвет<div id="fmt-stroke"></div></label>
-              <label>Толщина, px<input type="number" id="fmt-width" value="${cur.width ?? 1}" min="0.2" max="8" step="0.1"></label></div>
+              <label>Толщина, px<input type="number" id="fmt-width" value="${cur.width ?? 1}" min="0.2" max="8" step="0.1" required></label></div>
             <div class="fmt-row"><label>Тип линии<select id="fmt-dashp">${
               opt(dp, "solid", "Сплошная") + opt(dp, "dash", "Штрих") +
               opt(dp, "dashdot", "Штрих-пунктир") + opt(dp, "dashdotdot", "Штрих — две точки") +
@@ -248,15 +248,15 @@ function openLayerStyle(layer, opts = {}) {
             <div class="fmt-body" id="fmt-marker-fields" style="display:${baseMarker ? "" : "none"}">
               <div class="fmt-row"><label>Форма<select id="fmt-marker-shape">${MARKER_SHAPES.map(([v, lbl]) => opt((baseMarker && baseMarker.shape) || "tick", v, lbl)).join("")}</select></label>
                 <label>Направление<select id="fmt-marker-dir">${opt((baseMarker && baseMarker.dir) || "in", "in", "Внутрь зоны") + opt((baseMarker && baseMarker.dir) || "in", "out", "Наружу")}</select></label></div>
-              <div class="fmt-row"><label>Шаг, px<input type="number" id="fmt-marker-period" value="${(baseMarker && baseMarker.period) || 40}" min="6" max="200" step="1"></label>
-                <label>Размер, px<input type="number" id="fmt-marker-size" value="${(baseMarker && baseMarker.size) || 4}" min="1" max="40" step="0.5"></label></div>
+              <div class="fmt-row"><label>Шаг, px<input type="number" id="fmt-marker-period" value="${(baseMarker && baseMarker.period) || 40}" min="6" max="200" step="1" required></label>
+                <label>Размер, px<input type="number" id="fmt-marker-size" value="${(baseMarker && baseMarker.size) || 4}" min="1" max="40" step="0.5" required></label></div>
             </div>
           </section>
           <section class="style-section style-section-compact"><label class="style-check"><input type="checkbox" id="fmt-label" ${baseLabel ? "checked" : ""}><span><b>Подпись линии</b><small>Использовать подпись из знака ЛГР</small></span></label></section>
           ${isPoly ? `<section class="style-section"><div class="style-section-head"><span><b>Подпись объектов</b><small>Поле и параметры текста</small></span></div>
             <label>Поле подписи<select id="fmt-labelf"><option value="">— без подписи —</option>${labelCols.map(c => opt(curLF, c.name, c.label || c.name)).join("")}</select></label>
             <div class="fmt-body" id="fmt-labelf-fields" style="display:${curLF ? "" : "none"}"><div class="fmt-row">
-              <label>Кегль, px<input type="number" id="fmt-lsize" value="${lfFont.size || 11}" min="6" max="72" step="0.5"></label>
+              <label>Кегль, px<input type="number" id="fmt-lsize" value="${lfFont.size || 11}" min="6" max="72" step="0.5" required></label>
               <label>Шрифт<select id="fmt-lfamily">${opt(lfFont.family || "ui", "ui", "Системный") + opt(lfFont.family || "ui", "serif", "С засечками") + opt(lfFont.family || "ui", "mono", "Моноширинный")}</select></label>
             </div><label>Цвет<div id="fmt-lcolor"></div></label></div>
           </section>` : ""}
@@ -281,6 +281,7 @@ function openLayerStyle(layer, opts = {}) {
         <tbody id="cr-body"></tbody></table></div>
       <button id="cr-add" class="fmt-copy-btn" aria-describedby="cr-help"${fieldCols.length ? "" : " disabled"}>+ правило</button>
     </div>
+    <div class="form-error style-form-error" id="style-form-error" role="alert" hidden></div>
     </div>
     <div class="modal-actions">
       <button id="ls-reset">Сбросить</button>
@@ -291,6 +292,48 @@ function openLayerStyle(layer, opts = {}) {
   document.body.appendChild(overlay);
   overlay.addEventListener("click", ev => ev.stopPropagation());
   const $ = id => overlay.querySelector("#" + id);
+  const styleFormError = $("style-form-error");
+  const clearStyleError = () => {
+    overlay.querySelectorAll(".has-field-error").forEach(row => row.classList.remove("has-field-error"));
+    overlay.querySelectorAll('[aria-invalid="true"]').forEach(input => {
+      input.removeAttribute("aria-invalid");
+      input.removeAttribute("aria-describedby");
+    });
+    styleFormError.hidden = true;
+    styleFormError.textContent = "";
+  };
+  const showStyleError = (input, message) => {
+    clearStyleError();
+    const label = input.closest("label");
+    const row = label?.closest(".fmt-row");
+    if (label) label.insertAdjacentElement("afterend", styleFormError);
+    if (row) row.classList.add("has-field-error");
+    styleFormError.textContent = message;
+    styleFormError.hidden = false;
+    input.setAttribute("aria-invalid", "true");
+    input.setAttribute("aria-describedby", styleFormError.id);
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ block: "nearest" });
+    return false;
+  };
+  const validateSingleStyle = () => {
+    const invalid = [...overlay.querySelectorAll('#ls-single input[type="number"]')]
+      .filter(input => input.getClientRects().length)
+      .find(input => !input.value.trim() || !input.checkValidity());
+    if (invalid) {
+      const label = invalid.labels?.[0]?.textContent?.trim() || "Числовое значение";
+      const range = invalid.min && invalid.max ? ` от ${invalid.min} до ${invalid.max}` : "";
+      return showStyleError(invalid, `${label}: введите значение${range}.`);
+    }
+    if ($("fmt-dashp").value === "custom" && !parseDashStr($("fmt-dash-custom").value))
+      return showStyleError($("fmt-dash-custom"), "Шаблон линии: укажите положительные числа через запятую.");
+    clearStyleError();
+    return true;
+  };
+  overlay.querySelectorAll('#ls-single input, #ls-single select').forEach(input => {
+    input.addEventListener("input", clearStyleError);
+    input.addEventListener("change", clearStyleError);
+  });
 
   // ----- режим «Единый стиль» -----
   const onColor = () => { $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview(); };
@@ -349,7 +392,7 @@ function openLayerStyle(layer, opts = {}) {
   const collect = () => {
     const fmt = {
       stroke: strokeCF.get(),
-      width: Math.max(0.2, parseFloat($("fmt-width").value) || 1),
+      width: boundedNumber($("fmt-width").value, 0.2, 8, 1),
       fill: $("fmt-hasfill").checked ? fillCF.get() : null,
       fillOpacity: (parseInt($("fmt-opacity").value) || 100) / 100,
       dash: currentDash(),
@@ -363,8 +406,8 @@ function openLayerStyle(layer, opts = {}) {
     if ($("fmt-marker").checked) {
       fmt.line_marker = {
         shape: $("fmt-marker-shape").value || "tick",
-        period: Math.max(4, parseFloat($("fmt-marker-period").value) || 40),
-        size: Math.max(0.5, parseFloat($("fmt-marker-size").value) || 4),
+        period: boundedNumber($("fmt-marker-period").value, 6, 200, 40),
+        size: boundedNumber($("fmt-marker-size").value, 1, 40, 4),
         dir: $("fmt-marker-dir").value === "out" ? "out" : "in",
       };
     } else fmt.line_marker = null;
@@ -374,7 +417,7 @@ function openLayerStyle(layer, opts = {}) {
       const lff = $("fmt-labelf").value;
       fmt.label_field = lff || null;   // null явно глушит подпись знака (напр. этажность)
       fmt.label_font = lff ? {
-        size: Math.min(72, Math.max(6, parseFloat($("fmt-lsize").value) || 11)),
+        size: boundedNumber($("fmt-lsize").value, 6, 72, 11),
         color: lcolorCF.get(),
         family: $("fmt-lfamily").value || "ui",
       } : null;
@@ -438,6 +481,7 @@ function openLayerStyle(layer, opts = {}) {
       });
   });
   if ($("fmt-copy")) $("fmt-copy").addEventListener("click", () => {
+    if (!validateSingleStyle()) return;
     const fmt = collect(); layer.fmt = fmt;
     const to = $("fmt-copy-to").value;
     const dest = to === "__all__" ? targets : targets.filter(l => l.id === to);
@@ -547,6 +591,7 @@ function openLayerStyle(layer, opts = {}) {
     closePopups(); renderLayers(); draw();
   };
   $("ls-apply").addEventListener("click", () => {
+    if (mode === "single" && !validateSingleStyle()) return;
     closeColorFields();
     layer.fmt = collect();
     if (mode === "rules") {
@@ -711,7 +756,7 @@ function openStyleLibrary() {
     const dash = $("lib-dashp").value === "custom" ? parseDashStr($("lib-dashc").value)
                  : (DASH_PRESETS[$("lib-dashp").value] ?? null);
     const st = {
-      stroke: ed._strokeCF.get(), width: Math.max(0.2, parseFloat($("lib-width").value) || 1),
+      stroke: ed._strokeCF.get(), width: boundedNumber($("lib-width").value, 0.2, 8, 1),
       fill: $("lib-hasfill").checked ? ed._fillCF.get() : null,
       fillOpacity: (parseInt($("lib-op").value) || 100) / 100, dash,
     };
@@ -721,8 +766,9 @@ function openStyleLibrary() {
                    spacing_px: HATCH_DENS[$("lib-hdens").value] || 9, color: ed._strokeCF.get() };
     }
     if ($("lib-marker").checked) st.line_marker = {
-      shape: $("lib-mshape").value, period: Math.max(4, parseFloat($("lib-mperiod").value) || 40),
-      size: Math.max(0.5, parseFloat($("lib-msize").value) || 4),
+      shape: $("lib-mshape").value,
+      period: boundedNumber($("lib-mperiod").value, 6, 200, 40),
+      size: boundedNumber($("lib-msize").value, 1, 40, 4),
       dir: $("lib-mdir").value === "out" ? "out" : "in" };
     if (STYLES_V2[sel].line_label) st.line_label = STYLES_V2[sel].line_label;
     if (STYLES_V2[sel].label_field) st.label_field = STYLES_V2[sel].label_field;

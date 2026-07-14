@@ -348,6 +348,11 @@ label.data-src input[type=checkbox]{width:18px;height:18px;accent-color:var(--ac
 .field-shell em{position:absolute;right:30px;top:50%;transform:translateY(-50%);font-style:normal;
   font-size:10px;color:var(--muted);pointer-events:none}
 .modal-action-note{font-size:10px;color:var(--muted)}
+.form-error{padding:9px 11px;border:1px solid color-mix(in srgb,var(--danger) 42%,transparent);
+  border-radius:var(--r-sm);background:color-mix(in srgb,var(--danger) 10%,var(--panel));
+  color:var(--danger);font-size:var(--fs-11);font-weight:550;line-height:1.4}
+.modal-overlay [aria-invalid="true"]{border-color:var(--danger)!important;
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--danger) 16%,transparent)!important}
 @media (max-width:620px){.form-grid{grid-template-columns:1fr}.modal-action-note{display:none}}
 
 /* ---- Буфер вокруг выбранных объектов ---- */
@@ -617,6 +622,9 @@ label.data-src input[type=checkbox]{width:18px;height:18px;accent-color:var(--ac
 .style-preview-panel p{margin:0;font-size:10px;line-height:1.45;color:var(--muted)}
 .fmt-row{display:flex;gap:10px;align-items:flex-end}
 .fmt-row>label{flex:1;min-width:0}
+.fmt-row.has-field-error{flex-wrap:wrap}
+.fmt-row>.style-form-error{flex:1 0 100%;margin-top:-2px}
+.fmt-body>.style-form-error{margin-top:8px}
 .fmt-row input[type=range]{height:32px}
 .fmt-sub.fmt-tgl{display:flex;align-items:center;gap:8px}
 .fmt-sub.fmt-tgl span{flex:1}

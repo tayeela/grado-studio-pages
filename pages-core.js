@@ -145,13 +145,16 @@
     const terrArea = rounded(rawTerrArea, 4);
     const restrictArea = rounded(rawRestrictArea, 4);
     const calcArea = terrArea - restrictArea;
-    const density = bounded(params.density, 0, 1000, 25);
+    // Диапазоны совпадают с moscow_krt.json и настольным studio_core.
+    // Иначе вручную отредактированный веб-проект мог получить расчёт,
+    // который невозможно задать через интерфейс.
+    const density = bounded(params.density, 1, 60, 25);
     const ratioZh = bounded(params.ratio_zh, 0, 100, 80);
-    const percentVpp = bounded(params.percent_vpp, 0, 100, 6);
+    const percentVpp = bounded(params.percent_vpp, 0, 30, 6);
     const educationZone = number(params.education_zone, 1) === 2 ? 2 : 1;
     const territoryMode = number(params.territory_mode, 1) === 2 ? 2 : 1;
-    const kRail = bounded(params.k_rail, 0, 10, 1);
-    const kBa = bounded(params.k_ba, 0, 10, 0.5);
+    const kRail = bounded(params.k_rail, 0.5, 1, 1);
+    const kBa = bounded(params.k_ba, 0.1, 1, 0.5);
     const spp = density * calcArea;
     const np = spp * 0.9;
     const sppZh = spp * ratioZh / 100;

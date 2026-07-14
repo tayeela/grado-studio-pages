@@ -17,6 +17,20 @@
   });
 
   const visible = el => !!el && !el.hidden && el.getClientRects().length > 0;
+  const popupTriggerFor = element => {
+    const popup = element?.closest?.('.menu, .ctx-menu');
+    if (!popup?.id) return null;
+    return [...document.querySelectorAll('[aria-controls]')].find(
+      control => control.getAttribute('aria-controls') === popup.id) || null;
+  };
+  const focusReturnTarget = element => {
+    const popupTrigger = popupTriggerFor(element);
+    if (visible(popupTrigger)) return popupTrigger;
+    if (element !== document.body && visible(element)) return element;
+    const lastPopupTrigger = popupTriggerFor(lastTrigger);
+    if (visible(lastPopupTrigger)) return lastPopupTrigger;
+    return visible(lastTrigger) && lastTrigger !== document.body ? lastTrigger : null;
+  };
   const focusables = root => [...root.querySelectorAll(
     'button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
   )].filter(visible);
@@ -106,7 +120,8 @@
     if (!dialog) return;
     overlay.dataset.a11yReady = 'true';
     const active = document.activeElement;
-    previousFocus.set(overlay, overlay.contains(active) && lastTrigger?.isConnected ? lastTrigger : active);
+    const source = overlay.contains(active) ? lastTrigger : active;
+    previousFocus.set(overlay, focusReturnTarget(source));
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.tabIndex = -1;
@@ -168,8 +183,8 @@
     if (!(node instanceof Element)) return;
     const overlays = node.matches('.modal-overlay') ? [node] : [...node.querySelectorAll('.modal-overlay')];
     for (const overlay of overlays) {
-      const previous = previousFocus.get(overlay);
-      if (previous && previous.isConnected) queueMicrotask(() => previous.focus());
+      const previous = focusReturnTarget(previousFocus.get(overlay));
+      if (previous) queueMicrotask(() => previous.focus());
     }
   }
 

@@ -633,9 +633,19 @@ function dashPresetOf(dash) {
   return "custom";     // точный паттерн (напр. из QML) не совпал ни с одним пресетом
 }
 function dashToStr(dash) { return dash ? dash.join(",") : ""; }
-// «8, 3, 2, 3» → [8,3,2,3]; мусор/пусто — null (сплошная)
+function boundedNumber(value, minimum, maximum, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed)
+    ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+// «8, 3, 2, 3» → [8,3,2,3]; мусор/пусто — null (сплошная).
+// Ограничиваем и длину, и отдельные интервалы: значение приходит из проекта
+// или ручного ввода и не должно превращать canvas setLineDash в дорогую
+// операцию с тысячами элементов.
 function parseDashStr(s) {
-  const nums = String(s || "").split(/[,\s]+/).map(Number).filter(n => Number.isFinite(n) && n > 0);
+  const nums = String(s || "").split(/[,\s]+/).map(Number)
+    .filter(n => Number.isFinite(n) && n > 0)
+    .slice(0, 32).map(n => Math.min(1000, Math.max(0.1, n)));
   return nums.length ? nums : null;
 }
 // формы засечек-маркеров линии — см. drawMarkerGlyph (ниже) за геометрией
@@ -4430,8 +4440,8 @@ function openTepPresetEditor() {
       <section class="form-section" aria-labelledby="tep-build-title">
         <div class="form-section-head"><span class="form-step">01</span><span><b id="tep-build-title">Застройка</b><small>Целевые параметры расчётной территории</small></span></div>
         <div class="form-grid">
-          <label><span>Плотность застройки</span><span class="field-shell"><input id="ed-d" type="number" value="${d}" min="1" max="60" step="0.5"><em>тыс. м²/га</em></span></label>
-          <label><span>Доля жилья</span><span class="field-shell"><input id="ed-r" type="number" value="${r}" min="0" max="100" step="1"><em>%</em></span></label>
+          <label><span>Плотность застройки</span><span class="field-shell"><input id="ed-d" type="number" value="${d}" min="1" max="60" step="0.5" required><em>тыс. м²/га</em></span></label>
+          <label><span>Доля жилья</span><span class="field-shell"><input id="ed-r" type="number" value="${r}" min="0" max="100" step="1" required><em>%</em></span></label>
         </div>
       </section>
       <section class="form-section" aria-labelledby="tep-norm-title">
@@ -4444,10 +4454,11 @@ function openTepPresetEditor() {
       <section class="form-section" aria-labelledby="tep-mobility-title">
         <div class="form-section-head"><span class="form-step">03</span><span><b id="tep-mobility-title">Транспортная доступность</b><small>Коэффициенты предварительного расчёта 945-ПП</small></span></div>
         <div class="form-grid">
-          <label><span>Железнодорожная доступность</span><input id="ed-kr" type="number" value="${kr}" min="0.5" max="1" step="0.05"></label>
-          <label><span>Деловая активность</span><input id="ed-kb" type="number" value="${kb}" min="0.1" max="1" step="0.05"></label>
+          <label><span>Железнодорожная доступность</span><input id="ed-kr" type="number" value="${kr}" min="0.5" max="1" step="0.05" required></label>
+          <label><span>Деловая активность</span><input id="ed-kb" type="number" value="${kb}" min="0.1" max="1" step="0.05" required></label>
         </div>
       </section>
+      <div class="form-error" id="tep-form-error" role="alert" hidden></div>
     </div>
     <div class="modal-actions">
       <span class="modal-action-note">Параметры сохраняются в проекте</span><span class="spacer"></span>
@@ -4456,7 +4467,27 @@ function openTepPresetEditor() {
     </div>
   </div>`;
   document.body.appendChild(overlay);
+  const numericInputs = [...overlay.querySelectorAll('input[type="number"]')];
+  const formError = overlay.querySelector("#tep-form-error");
+  const clearNumberError = input => {
+    input.removeAttribute("aria-invalid");
+    input.removeAttribute("aria-describedby");
+    if (formError) { formError.hidden = true; formError.textContent = ""; }
+  };
+  numericInputs.forEach(input => input.addEventListener("input", () => clearNumberError(input)));
   overlay.querySelector("#ed-apply").onclick = () => {
+    const invalid = numericInputs.find(input => !input.value.trim() || !input.checkValidity());
+    if (invalid) {
+      const label = invalid.labels?.[0]?.querySelector("span")?.textContent?.trim()
+        || invalid.getAttribute("aria-label") || "Числовое значение";
+      const range = invalid.min && invalid.max ? ` от ${invalid.min} до ${invalid.max}` : "";
+      formError.textContent = `${label}: введите значение${range}.`;
+      formError.hidden = false;
+      invalid.setAttribute("aria-invalid", "true");
+      invalid.setAttribute("aria-describedby", formError.id);
+      invalid.focus({ preventScroll: true });
+      return;
+    }
     snapshot();
     document.getElementById("p-density").value = overlay.querySelector("#ed-d").value;
     document.getElementById("p-ratio").value = overlay.querySelector("#ed-r").value;
@@ -4672,7 +4703,7 @@ async function openAutosaveRecovery() {
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal recovery-modal" role="dialog" aria-modal="true" aria-label="Восстановление автосохранения">
     <div class="modal-head">Восстановление автосохранения
-      <button class="modal-x" aria-label="Закрыть"><svg class="ic"><use href="#ic-close"/></svg></button>
+      <button class="modal-x" aria-label="Закрыть окно восстановления"><svg class="ic"><use href="#ic-close"/></svg></button>
     </div>
     <div class="modal-body recovery-body"><div class="recovery-empty">Загрузка копий…</div></div>
     <div class="modal-actions"><span class="muted">Перед восстановлением текущее состояние будет сохранено.</span><span class="spacer"></span><button class="recovery-close">Закрыть</button></div>
@@ -4683,7 +4714,9 @@ async function openAutosaveRecovery() {
   overlay.querySelector(".recovery-close").onclick = close;
   overlay.onclick = event => { if (event.target === overlay) close(); };
   overlay.onkeydown = event => { if (event.key === "Escape") close(); };
-  overlay.querySelector(".modal-x").focus();
+  // Безопасное действие внизу окна заметнее и удобнее с клавиатуры, чем
+  // маленький крестик в заголовке. Общий a11y-слой затем удерживает Tab внутри.
+  overlay.querySelector(".recovery-close").focus();
   const body = overlay.querySelector(".recovery-body");
   try {
     const response = await fetch("/api/autosave/backups");
