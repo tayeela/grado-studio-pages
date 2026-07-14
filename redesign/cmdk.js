@@ -103,7 +103,7 @@
     ]},
   ];
 
-  const cmdk = $("cmdk"), q = $("cmdk-q"), list = $("cmdk-list");
+  const cmdk = $("cmdk"), q = $("cmdk-q"), list = $("cmdk-list"), trigger = $("open-cmdk");
   if (!cmdk || !q || !list) return;
   let flat = [], sel = 0, previousFocus = null;
 
@@ -140,10 +140,22 @@
   }
   function scrollSel() { const r = list.querySelector(`.cmdk-row[data-i="${sel}"]`); if (r) r.scrollIntoView({ block: "nearest" }); }
   function run(i) { const c = flat[i]; close(); if (c) setTimeout(() => c.run(), 0); }
-  function open() { previousFocus = document.activeElement; cmdk.hidden = false; q.value = ""; render(""); q.focus(); }
-  function close() { cmdk.hidden = true; q.removeAttribute("aria-activedescendant"); if (previousFocus && previousFocus.isConnected) previousFocus.focus(); }
+  function open() {
+    previousFocus = document.activeElement;
+    cmdk.hidden = false;
+    trigger?.setAttribute("aria-expanded", "true");
+    q.value = "";
+    render("");
+    q.focus();
+  }
+  function close() {
+    cmdk.hidden = true;
+    trigger?.setAttribute("aria-expanded", "false");
+    q.removeAttribute("aria-activedescendant");
+    if (previousFocus && previousFocus.isConnected) previousFocus.focus();
+  }
 
-  $("open-cmdk") && $("open-cmdk").addEventListener("click", open);
+  trigger?.addEventListener("click", open);
   q.addEventListener("input", () => render(q.value));
   q.addEventListener("keydown", e => {
     if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(flat.length - 1, sel + 1); hi(); scrollSel(); }

@@ -9,6 +9,9 @@
   const AUTOSAVE_BACKUP_KEY = "grado_pages_autosave_checkpoint_v1";
   const LEGACY_AUTOSAVE_KEY = "grado_studio_v1";
   const OVERRIDES_KEY = "grado_pages_style_overrides_v1";
+  const DB_NAME = "grado-studio-pages";
+  const DB_STORE = "project-state";
+  let databasePromise = null;
 
   const json = (value, status = 200) => new Response(JSON.stringify(value), {
     status,
@@ -44,6 +47,68 @@
   const readStoredJson = key => {
     const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : null;
+  };
+  const openDatabase = () => {
+    if (typeof indexedDB === "undefined") return Promise.resolve(null);
+    if (databasePromise) return databasePromise;
+    databasePromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(DB_STORE))
+          request.result.createObjectStore(DB_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error("IndexedDB unavailable"));
+      request.onblocked = () => reject(new Error("IndexedDB upgrade blocked"));
+    });
+    return databasePromise;
+  };
+  const databaseRequest = async (mode, action) => {
+    const database = await openDatabase();
+    if (!database) throw new Error("IndexedDB unavailable");
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(DB_STORE, mode);
+      const request = action(transaction.objectStore(DB_STORE));
+      let result;
+      request.onsuccess = () => { result = request.result; };
+      request.onerror = () => reject(request.error || new Error("IndexedDB request failed"));
+      transaction.oncomplete = () => resolve(result);
+      transaction.onabort = () => reject(transaction.error || new Error("IndexedDB transaction aborted"));
+    });
+  };
+  const databaseGet = key => databaseRequest("readonly", store => store.get(key));
+  const databaseSet = (key, value) =>
+    databaseRequest("readwrite", store => store.put(value, key));
+  const storedProjectGet = async key => {
+    if (typeof indexedDB !== "undefined") {
+      try {
+        const value = await databaseGet(key);
+        if (value !== undefined) return value;
+        const legacy = readStoredJson(key);
+        if (legacy !== null) {
+          await databaseSet(key, legacy);
+          localStorage.removeItem?.(key);
+        }
+        return legacy;
+      } catch (error) {
+        // Safari private mode and locked-down corporate browsers may expose
+        // IndexedDB but reject its first transaction. Keep the old fallback.
+      }
+    }
+    return readStoredJson(key);
+  };
+  const storedProjectSet = async (key, value) => {
+    if (typeof indexedDB !== "undefined") {
+      try {
+        await databaseSet(key, value);
+        localStorage.removeItem?.(key);
+        return;
+      } catch (error) {
+        // Fall through to localStorage only when the durable database cannot
+        // be opened. This preserves compatibility with private mode.
+      }
+    }
+    localStorage.setItem(key, JSON.stringify(value));
   };
   const backupMeta = payload => {
     const state = isRecord(payload && payload.state) ? payload.state : payload;
@@ -113,7 +178,7 @@
     if (path === "/api/initial-grado") return json(null);
     if (path === "/api/autosave/backups") {
       try {
-        const backup = readStoredJson(AUTOSAVE_BACKUP_KEY);
+        const backup = await storedProjectGet(AUTOSAVE_BACKUP_KEY);
         const meta = backupMeta(backup);
         return json({ backups: meta ? [meta] : [] });
       } catch (error) {
@@ -122,7 +187,7 @@
     }
     if (path === "/api/autosave/backups/1") {
       try {
-        const backup = readStoredJson(AUTOSAVE_BACKUP_KEY);
+        const backup = await storedProjectGet(AUTOSAVE_BACKUP_KEY);
         return backupMeta(backup) ? json(backup) : json({ error: "Копия не найдена" }, 404);
       } catch (error) {
         return json({ error: "Копия повреждена" }, 500);
@@ -138,10 +203,11 @@
         const envelope = { state, saved_at: savedAt };
         try {
           // Контрольная копия создаётся только перед заменой проекта. Обычный
-          // автосейв хранит одну версию и не расходует квоту браузера вдвое.
+          // автосейв хранит одну версию. IndexedDB не ограничивает рабочий
+          // проект крошечной синхронной квотой localStorage.
           if (requestHeader(input, options, "X-Grado-Checkpoint") === "1")
-            localStorage.setItem(AUTOSAVE_BACKUP_KEY, JSON.stringify(envelope));
-          localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(envelope));
+            await storedProjectSet(AUTOSAVE_BACKUP_KEY, envelope);
+          await storedProjectSet(AUTOSAVE_KEY, envelope);
           if (typeof localStorage.removeItem === "function")
             localStorage.removeItem(LEGACY_AUTOSAVE_KEY);
         } catch (error) {
@@ -150,11 +216,19 @@
         return json({ ok: true, saved_at: savedAt });
       }
       try {
-        const current = readStoredJson(AUTOSAVE_KEY);
+        const current = await storedProjectGet(AUTOSAVE_KEY);
         if (current) return json(current);
         // Однократная миграция проектов, созданных до единого хранилища.
         const legacy = readStoredJson(LEGACY_AUTOSAVE_KEY);
-        return legacy ? json({ state: legacy, saved_at: null }) : json(null);
+        if (legacy) {
+          const envelope = { state: legacy, saved_at: null };
+          try {
+            await storedProjectSet(AUTOSAVE_KEY, envelope);
+            localStorage.removeItem?.(LEGACY_AUTOSAVE_KEY);
+          } catch (error) { /* старый снимок всё равно можно открыть */ }
+          return json(envelope);
+        }
+        return json(null);
       } catch (error) { return json(null); }
     }
     if (path === "/api/style-overrides") {

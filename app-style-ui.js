@@ -208,10 +208,10 @@ function openLayerStyle(layer, opts = {}) {
       <button class="modal-x" aria-label="Закрыть оформление слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact style-editor-body">
     <div class="seg" id="ls-mode" role="tablist" aria-label="Режим оформления">
-      <button type="button" role="tab" aria-selected="${mode === "single"}" class="seg-btn${mode === "single" ? " active" : ""}" data-mode="single">Единый стиль</button>
-      <button type="button" role="tab" aria-selected="${mode === "rules"}" class="seg-btn${mode === "rules" ? " active" : ""}" data-mode="rules">По значению поля</button>
+      <button type="button" id="style-mode-single" role="tab" aria-controls="ls-single" aria-selected="${mode === "single"}" tabindex="${mode === "single" ? "0" : "-1"}" class="seg-btn${mode === "single" ? " active" : ""}" data-mode="single">Единый стиль</button>
+      <button type="button" id="style-mode-rules" role="tab" aria-controls="ls-rules" aria-selected="${mode === "rules"}" tabindex="${mode === "rules" ? "0" : "-1"}" class="seg-btn${mode === "rules" ? " active" : ""}" data-mode="rules">По значению поля</button>
     </div>
-    <div id="ls-single" style="display:${mode === "single" ? "" : "none"}">
+    <div id="ls-single" role="tabpanel" aria-labelledby="style-mode-single"${mode === "single" ? "" : " hidden"}>
       <label class="style-preset-label"><span>Базовый знак</span><select id="fmt-preset">${stylePickerOptions(layer.fmt && layer.fmt.style_ref)}</select></label>
       <div class="style-editor-grid">
         <div class="style-controls">
@@ -273,7 +273,7 @@ function openLayerStyle(layer, opts = {}) {
         </aside>
       </div>
     </div>
-    <div id="ls-rules" style="display:${mode === "rules" ? "" : "none"}">
+    <div id="ls-rules" role="tabpanel" aria-labelledby="style-mode-rules"${mode === "rules" ? "" : " hidden"}>
       <div class="fc-help" id="cr-help">${fieldCols.length
         ? "Знак объекта выбирается по значению его атрибута. Первое совпавшее правило побеждает; объекты без совпадения рисуются единым стилем слоя (вкладка слева)."
         : "В этом слое пока нет полей. Сначала добавьте поле через таблицу атрибутов слоя — после этого здесь можно будет создать правило."}</div>
@@ -506,17 +506,34 @@ function openLayerStyle(layer, opts = {}) {
   // ----- переключение режима -----
   const setMode = m => {
     mode = m;
-    $("ls-single").style.display = m === "single" ? "" : "none";
-    $("ls-rules").style.display = m === "rules" ? "" : "none";
-    overlay.querySelectorAll(".seg-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === m));
-    overlay.querySelectorAll(".seg-btn").forEach(b => b.setAttribute("aria-selected", String(b.dataset.mode === m)));
+    $("ls-single").hidden = m !== "single";
+    $("ls-rules").hidden = m !== "rules";
+    overlay.querySelectorAll(".seg-btn").forEach(b => {
+      const selected = b.dataset.mode === m;
+      b.classList.toggle("active", selected);
+      b.setAttribute("aria-selected", String(selected));
+      b.tabIndex = selected ? 0 : -1;
+    });
     // живой предпросмотр текущего режима
     if (m === "single") { delete layer.rules; layer.fmt = collect(); }
     else liveRules();
     draw();
   };
-  overlay.querySelectorAll(".seg-btn").forEach(b =>
-    b.addEventListener("click", () => setMode(b.dataset.mode)));
+  const modeTabs = [...overlay.querySelectorAll(".seg-btn")];
+  modeTabs.forEach((button, index) => {
+    button.addEventListener("click", () => setMode(button.dataset.mode));
+    button.addEventListener("keydown", event => {
+      let next = null;
+      if (event.key === "ArrowRight") next = (index + 1) % modeTabs.length;
+      else if (event.key === "ArrowLeft") next = (index + modeTabs.length - 1) % modeTabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = modeTabs.length - 1;
+      if (next === null) return;
+      event.preventDefault();
+      modeTabs[next].click();
+      modeTabs[next].focus();
+    });
+  });
 
   // ----- применить / отмена / сброс -----
   const restore = () => {
