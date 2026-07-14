@@ -17,6 +17,7 @@
     active: false, user: null, admin: false,
     pid: null, rev: 0, base: null,      // base = снимок последнего согласованного shared-состояния
     online: [], syncing: false, dirty: false, pollTimer: null, applying: false,
+    polling: false, projectEpoch: 0, recovery: null,
   };
   window.Collab = Collab;
 
@@ -151,20 +152,31 @@
   Collab._mergeShared = mergeShared;   // тестовый хук (см. проверку слияния)
 
   // ---- сеть ---------------------------------------------------------------
+  const NETWORK_TIMEOUT_MS = 15000;
   async function api(method, url, body) {
     const opt = { method, headers: {} };
     if (body !== undefined) {
       opt.headers["Content-Type"] = "application/json";
       opt.body = JSON.stringify(body);
     }
+    const controller = typeof AbortController === "function"
+      ? new AbortController() : null;
+    const timeout = controller
+      ? setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS) : null;
+    if (controller) opt.signal = controller.signal;
     try {
       const r = await fetch(url, opt);
       let data = null;
       try { data = await r.json(); } catch (e) {}
       return { ok: r.ok, status: r.status, data };
     } catch (error) {
+      const message = error && error.name === "AbortError"
+        ? "Сервер не ответил вовремя. Проверьте соединение и повторите."
+        : "Нет связи с сервером. Проверьте интернет и повторите.";
       return { ok: false, status: 0,
-        data: { error: "Нет связи с сервером. Проверьте интернет и повторите." } };
+        data: { error: message } };
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }
 
@@ -178,20 +190,27 @@
     pushTimer = setTimeout(pushNow, 900);   // дебаунс — не шлём на каждый штрих
   };
 
-  async function pushNow() {
-    if (!Collab.active || !Collab.pid || Collab.syncing) {
-      if (Collab.syncing) { clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 500); }
-      return;
-    }
+  let activePush = null;
+  function pushNow() {
+    // Все вызывающие (включая кнопку «к проектам») ждут один и тот же запрос.
+    // Иначе переход мог завершиться, пока предыдущая отправка ещё была в сети.
+    if (activePush) return activePush;
+    if (!Collab.active || !Collab.pid) return Promise.resolve();
+    const epoch = Collab.projectEpoch;
+    const pid = Collab.pid;
+    const isCurrentProject = () => Collab.active
+      && Collab.projectEpoch === epoch && Collab.pid === pid;
     Collab.syncing = true; setSyncBadge("sync");
-    try {
+    const task = (async () => {
       let attempts = 0;
-      while (Collab.dirty && attempts < 5) {
+      while (Collab.dirty && attempts < 5 && isCurrentProject()) {
         attempts++;
         Collab.dirty = false;
         const mine = sharedSnapshot();
-        const res = await api("POST", `/api/projects/${Collab.pid}/state`,
+        const res = await api("POST", `/api/projects/${pid}/state`,
           { base_rev: Collab.rev, state: mine });
+        // Ответ старого проекта никогда не должен менять уже открытый новый.
+        if (!isCurrentProject()) return;
         if (res.ok) {
           Collab.rev = res.data.rev;
           Collab.base = mine;
@@ -199,51 +218,87 @@
           continue;                         // если за это время снова накопилось — повтор
         }
         if (res.status === 409) {           // кто-то опередил — сливаем и повторяем
-          const { merged, conflicts } = mergeShared(Collab.base, mine, res.data.state);
+          const serverState = res.data.state || {};
+          const { merged, conflicts } = mergeShared(Collab.base, mine, serverState);
           Collab.rev = res.data.rev;
+          // Следующий 3-way обязан сравнивать с только что полученной версией
+          // сервера. Иначе повторный 409 способен отменить чужой откат.
+          Collab.base = serverState;
           applyShared(merged, /*fromMerge*/ true);
           Collab.dirty = true;              // отправить слитый результат
           if (conflicts && window.toast)
             window.toast(`Объединено с правками коллег (${conflicts} пересечений — оставлены ваши)`, "warn");
           continue;
         }
-        if (res.status === 401) { onSessionLost(); return; }
+        if (res.status === 401) {
+          Collab.dirty = true;
+          onSessionLost();
+          return;
+        }
         Collab.dirty = true;                // сервер не принял — правку не теряем
         setSyncBadge("offline");
         break;                              // повтор ниже, без горячего цикла
       }
       if (!Collab.dirty) setSyncBadge("ok");
-    } finally {
+    })();
+    activePush = task.finally(() => {
       Collab.syncing = false;
-      if (Collab.dirty && Collab.active && Collab.pid) {
+      activePush = null;
+      if (Collab.dirty && isCurrentProject()) {
         clearTimeout(pushTimer);
         pushTimer = setTimeout(pushNow, 2500);
       }
-    }
+    });
+    return activePush;
   }
+  Collab._pushNow = pushNow;               // тестовый хук сетевых гонок
 
   // ---- поллинг чужих правок ----------------------------------------------
+  let activePoll = null;
   async function poll() {
     if (!Collab.active || !Collab.pid || Collab.syncing || Collab.dirty) return;
-    const res = await api("GET", `/api/projects/${Collab.pid}/state?since=${Collab.rev}`);
-    if (!res.ok) {
-      if (res.status === 401) onSessionLost();
-      else setSyncBadge("offline");
-      return;
-    }
-    setSyncBadge("ok");
-    Collab.online = res.data.online || [];
-    updatePresence();
-    if (res.data.state && res.data.rev !== Collab.rev) {
-      // серверная версия новее и у меня нет несохранённого — применяем
-      const theirs = res.data.state;
-      const mine = sharedSnapshot();
-      const { merged } = mergeShared(Collab.base, mine, theirs);
-      Collab.rev = res.data.rev;
-      Collab.base = theirs;
-      applyShared(merged, true);
+    const epoch = Collab.projectEpoch;
+    const pid = Collab.pid;
+    const since = Collab.rev;
+    // Один GET на проект за раз. Зависший запрос уже закрытого проекта при
+    // этом не мешает новому проекту начать синхронизацию немедленно.
+    if (activePoll && activePoll.epoch === epoch && activePoll.pid === pid) return;
+    const token = { epoch, pid };
+    activePoll = token;
+    const isCurrentProject = () => Collab.active
+      && Collab.projectEpoch === epoch && Collab.pid === pid;
+    Collab.polling = true;
+    try {
+      const res = await api("GET", `/api/projects/${pid}/state?since=${since}`);
+      if (!isCurrentProject()) return;
+      if (!res.ok) {
+        if (res.status === 401) onSessionLost();
+        else setSyncBadge("offline");
+        return;
+      }
+      const serverRev = Number(res.data && res.data.rev);
+      // Медленный старый GET не имеет права откатить более свежую ревизию.
+      if (!Number.isFinite(serverRev) || serverRev < Collab.rev) return;
+      setSyncBadge("ok");
+      Collab.online = res.data.online || [];
+      updatePresence();
+      if (res.data.state && serverRev !== Collab.rev) {
+        // серверная версия новее и у меня нет несохранённого — применяем
+        const theirs = res.data.state;
+        const mine = sharedSnapshot();
+        const { merged } = mergeShared(Collab.base, mine, theirs);
+        Collab.rev = serverRev;
+        Collab.base = theirs;
+        applyShared(merged, true);
+      }
+    } finally {
+      if (activePoll === token) {
+        activePoll = null;
+        Collab.polling = false;
+      }
     }
   }
+  Collab._poll = poll;                     // тестовый хук сетевых гонок
 
   // применяем shared-состояние к студии, сохранив личный вид/выделение/undo
   function applyShared(shared, fromMerge) {
@@ -260,7 +315,16 @@
   }
 
   function onSessionLost() {
+    if (Collab.dirty && Collab.pid) {
+      Collab.recovery = {
+        pid: Collab.pid, rev: Collab.rev, base: Collab.base,
+        state: sharedSnapshot(),
+      };
+    }
+    Collab.projectEpoch++;
     Collab.active = false;
+    Collab.pid = null;
+    clearTimeout(pushTimer);
     clearInterval(Collab.pollTimer);
     if (window.toast) window.toast("Сессия истекла — войдите заново", "error");
     showAuth();
@@ -418,18 +482,29 @@
   }
 
   async function openProject(pid) {
+    const epoch = ++Collab.projectEpoch;
     const res = await api("GET", `/api/projects/${pid}/state`);
+    // При быстром двойном выборе побеждает последний выбранный проект.
+    if (epoch !== Collab.projectEpoch) return;
     if (!res.ok) {
       if (window.toast) window.toast(res.data && res.data.error || "Не удалось открыть проект", "error");
       return;
     }
     if (projOverlay) { projOverlay.remove(); projOverlay = null; }
     clearTimeout(pushTimer);
-    Collab.dirty = false;
     Collab.pid = pid; Collab.rev = res.data.rev;
-    const shared = { features: [], name: res.data.name || "Новый проект",
+    const serverShared = { features: [], name: res.data.name || "Новый проект",
       ...(res.data.state || {}) };
-    Collab.base = shared;
+    let shared = serverShared;
+    let recovered = false;
+    if (Collab.recovery && Collab.recovery.pid === pid) {
+      shared = mergeShared(
+        Collab.recovery.base, Collab.recovery.state, serverShared).merged;
+      Collab.recovery = null;
+      recovered = !sameValue(shared, serverShared);
+    }
+    Collab.base = serverShared;
+    Collab.dirty = recovered;
     Collab.online = res.data.online || [];
     // Полный сброс обязателен: иначе пустой проект наследует слои и объекты
     // предыдущего проекта, а отсутствующие shared-ключи не могут их удалить.
@@ -440,6 +515,11 @@
     showCollabBar(res.data.name || "проект");
     if (Collab.pollTimer) clearInterval(Collab.pollTimer);
     Collab.pollTimer = setInterval(poll, 2500);
+    if (recovered) {
+      if (window.toast) window.toast(
+        "Несохранённые изменения восстановлены и отправляются на сервер", "ok");
+      pushNow();
+    }
   }
 
   function showCollabBar(name) {
@@ -454,7 +534,7 @@
       back.addEventListener("click", async () => {
         back.disabled = true;
         clearTimeout(pushTimer);
-        if (Collab.dirty) await pushNow();
+        if (Collab.dirty || Collab.syncing) await pushNow();
         back.disabled = false;
         if (Collab.dirty) {
           if (window.toast) window.toast(
@@ -462,6 +542,7 @@
           return;
         }
         // вернуться к списку: остановить синк текущего проекта
+        Collab.projectEpoch++;
         if (Collab.pollTimer) clearInterval(Collab.pollTimer);
         Collab.pid = null; Collab.rev = 0; Collab.base = null;
         bar.style.display = "none";
