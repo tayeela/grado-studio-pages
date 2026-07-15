@@ -347,6 +347,26 @@
     source: manifest.source, snapshot: manifest.id, source_doc: manifest.source_doc,
   });
 
+  // НСПД (и файл-захват, и выгрузка по экстенту) кладёт атрибуты во вложенное
+  // поле options — иногда строкой JSON. Разворачиваем в opt_* и убираем исходное.
+  const flattenNspdOptions = record => {
+    let options = record.options;
+    if (typeof options === "string") {
+      try { options = JSON.parse(options); } catch (error) { options = null; }
+    }
+    if (options && typeof options === "object" && !Array.isArray(options))
+      Object.entries(options).forEach(([key, value]) => { record[`opt_${key}`] = value; });
+    delete record.options;
+    return record;
+  };
+  // Геометрия НСПД приходит в Web Mercator (3857); переводим в WGS84 покоординатно.
+  const mercatorGeometryToWgs84 = geometry => ({
+    type: geometry.type,
+    coordinates: (function transform(value, depth) {
+      return depth === 0 ? mercatorToWgs84(value) : value.map(item => transform(item, depth - 1));
+    })(geometry.coordinates, geometry.type === "Polygon" ? 2 : 3),
+  });
+
   function importNspd(payload = {}) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
         !Array.isArray(payload.features)) throw new Error("Файл НСПД должен быть GeoJSON FeatureCollection");
@@ -360,23 +380,10 @@
       const signature = stableHash(geometry);
       if (seen.has(signature)) { duplicates += 1; return; }
       seen.add(signature);
-      let props = feature.properties && typeof feature.properties === "object"
-        ? { ...feature.properties } : {};
-      let options = props.options;
-      if (typeof options === "string") {
-        try { options = JSON.parse(options); } catch (error) { options = null; }
-      }
-      if (options && typeof options === "object" && !Array.isArray(options))
-        Object.entries(options).forEach(([key, value]) => { props[`opt_${key}`] = value; });
-      delete props.options;
+      const props = flattenNspdOptions(feature.properties && typeof feature.properties === "object"
+        ? { ...feature.properties } : {});
       const key = String(feature.id || props.cad_num || props.opt_cad_num || `geom:${signature}`);
-      const wgsGeometry = {
-        type: geometry.type,
-        coordinates: (function transform(value, depth) {
-          if (depth === 0) return mercatorToWgs84(value);
-          return value.map(item => transform(item, depth - 1));
-        })(geometry.coordinates, geometry.type === "Polygon" ? 2 : 3),
-      };
+      const wgsGeometry = mercatorGeometryToWgs84(geometry);
       let parts;
       try { parts = geometryParts(wgsGeometry); }
       catch (error) { skipped += 1; return; }
@@ -679,12 +686,7 @@
     payload.features.forEach((item, itemIndex) => {
       const geometry = item && item.geometry;
       if (!geometry || !["Polygon", "MultiPolygon"].includes(geometry.type)) { skipped += 1; return; }
-      const raw = item.properties && typeof item.properties === "object" ? { ...item.properties } : {};
-      let options = raw.options;
-      if (typeof options === "string") { try { options = JSON.parse(options); } catch (error) { options = null; } }
-      if (options && typeof options === "object" && !Array.isArray(options))
-        Object.entries(options).forEach(([key, value]) => { raw[`opt_${key}`] = value; });
-      delete raw.options;
+      const raw = flattenNspdOptions(item.properties && typeof item.properties === "object" ? { ...item.properties } : {});
       const props = source === "nspd.parcels" ? {
         cad_num: raw.opt_cad_num || raw.cad_num || raw.label,
         category: raw.opt_land_record_category_type,
@@ -700,10 +702,7 @@
       } : { kind: String(raw.categoryName || "ЗОУИТ").replace(/[_ ]+$/, ""),
         number: raw.label, basis: "НСПД" };
       Object.keys(props).forEach(key => { if (props[key] == null || props[key] === "") delete props[key]; });
-      const depth = geometry.type === "Polygon" ? 2 : 3;
-      const wgsGeometry = { type: geometry.type, coordinates: (function transform(value, level) {
-        return level === 0 ? mercatorToWgs84(value) : value.map(item => transform(item, level - 1));
-      })(geometry.coordinates, depth) };
+      const wgsGeometry = mercatorGeometryToWgs84(geometry);
       let parts = [];
       try { parts = geometryParts(wgsGeometry); } catch (error) { skipped += 1; return; }
       const key = item.id ?? raw.opt_cad_num ?? raw.label ?? itemIndex;

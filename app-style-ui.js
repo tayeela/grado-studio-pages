@@ -85,9 +85,45 @@ function cmykToHex(c, m, y, k) {
     .toString(16).padStart(2, "0");
   return "#" + ch(c) + ch(m) + ch(y);
 }
+// HSV для встроенного спектра (H 0..360, S/V 0..1)
+function hexToHsv(hex) {
+  const h = normHex(hex) || "#000000";
+  const r = parseInt(h.slice(1, 3), 16) / 255, g = parseInt(h.slice(3, 5), 16) / 255,
+        b = parseInt(h.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let hue = 0;
+  if (d) {
+    if (mx === r) hue = ((g - b) / d) % 6;
+    else if (mx === g) hue = (b - r) / d + 2;
+    else hue = (r - g) / d + 4;
+    hue = (hue * 60 + 360) % 360;
+  }
+  return [hue, mx ? d / mx : 0, mx];
+}
+function hsvToHex(h, s, v) {
+  const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const ch = t => Math.round((t + m) * 255).toString(16).padStart(2, "0");
+  return "#" + ch(r) + ch(g) + ch(b);
+}
+// ползунок непрозрачности: число «%» + дорожка-прозрачность текущего цвета заливки
+function syncOpacityRange(input, out, colorHex) {
+  if (!input) return;
+  if (out) out.textContent = `${input.value}%`;
+  input.style.setProperty("--op-c", normHex(colorHex) || "#888888");
+}
+
 // host — контейнер; onChange(hex) при смене. Возвращает {get,set,close}.
 function makeColorField(host, initial, onChange) {
-  let value = normHex(initial) || "#888888", pop = null, onDoc = null, onViewport = null;
+  let value = normHex(initial) || "#888888", pop = null, onDoc = null, onViewport = null, onScroll = null;
+  const hsv = { h: 0, s: 0, v: 0 };
+  const syncHsvFromValue = () => {
+    const [h, s, v] = hexToHsv(value);
+    hsv.s = s; hsv.v = v;
+    if (s > 1e-4 && v > 1e-4) hsv.h = h;   // сохраняем тон у серых/чёрного
+  };
+  syncHsvFromValue();
   host.classList.add("cfield");
   host.innerHTML = `<button type="button" class="cfield-btn" aria-label="Открыть палитру цвета">
     <span class="cfield-sw"></span><span class="cfield-action">Палитра</span><span class="cfield-hex"></span>
@@ -99,9 +135,10 @@ function makeColorField(host, initial, onChange) {
     hexLbl.textContent = value;
     btn.setAttribute("aria-label", `Открыть палитру цвета ${value}`);
   };
-  const setValue = (hex, fire = true) => {
+  // keepHsv=true — правка пришла из самого спектра; не пересчитываем H/S/V из hex
+  const setValue = (hex, fire = true, keepHsv = false) => {
     const h = normHex(hex); if (!h) return;
-    value = h; paint(); if (pop) syncPop(); if (fire) onChange(h);
+    value = h; if (!keepHsv) syncHsvFromValue(); paint(); if (pop) syncPop(); if (fire) onChange(h);
   };
   function syncPop() {
     if (!pop) return;
@@ -111,19 +148,28 @@ function makeColorField(host, initial, onChange) {
       pop.querySelector(`[data-k="${key}"]`).value = v;
     pop.querySelectorAll(".cf-swatch").forEach(s =>
       s.classList.toggle("sel", s.dataset.hex === value));
+    pop.querySelector(".cf-sv").style.background =
+      `linear-gradient(to top,#000,rgba(0,0,0,0)),linear-gradient(to right,#fff,hsl(${hsv.h.toFixed(0)},100%,50%))`;
+    pop.querySelector(".cf-sv-th").style.left = `${(hsv.s * 100).toFixed(1)}%`;
+    pop.querySelector(".cf-sv-th").style.top = `${((1 - hsv.v) * 100).toFixed(1)}%`;
+    pop.querySelector(".cf-hue-th").style.left = `${(hsv.h / 360 * 100).toFixed(1)}%`;
   }
   function close() {
     if (!pop) return;
     pop.remove(); pop = null; btn.classList.remove("open");
     document.removeEventListener("mousedown", onDoc, true);
     window.removeEventListener("resize", onViewport);
-    window.removeEventListener("scroll", onViewport, true);
+    window.removeEventListener("scroll", onScroll, true);
   }
   function open() {
     if (pop) { close(); return; }
     pop = document.createElement("div");
     pop.className = "cfield-pop";
-    pop.innerHTML = `<div class="cf-grid">${COLOR_PALETTE.map(([n, h]) =>
+    pop.innerHTML = `<div class="cf-spectrum">
+        <div class="cf-sv" role="slider" aria-label="Насыщенность и яркость"><div class="cf-sv-th"></div></div>
+        <div class="cf-hue" role="slider" aria-label="Тон"><div class="cf-hue-th"></div></div>
+      </div>
+      <div class="cf-grid">${COLOR_PALETTE.map(([n, h]) =>
       `<button type="button" class="cf-swatch" data-hex="${h}" title="${n}" style="background:${h}"></button>`).join("")}</div>
       <label class="cf-row cf-hex-row"><span>HEX</span><input class="cf-hexin" type="text" maxlength="7" spellcheck="false"></label>
       <div class="cf-cmyk"><span>CMYK</span>
@@ -134,10 +180,32 @@ function makeColorField(host, initial, onChange) {
     pop.classList.add("cfield-pop-portal");
     document.body.appendChild(pop);
     btn.classList.add("open");
+    // клик по образцу НЕ закрывает поповер — даём посмотреть цвет на объекте,
+    // сравнить образцы и подстроить; закрытие по клику вне поля (см. onDoc ниже)
     pop.querySelectorAll(".cf-swatch").forEach(s =>
-      s.addEventListener("click", () => { setValue(s.dataset.hex); close(); }));
+      s.addEventListener("click", () => setValue(s.dataset.hex)));
     pop.querySelector(".cf-hexin").addEventListener("input", e => {
       const h = normHex(e.target.value); if (h) setValue(h);
+    });
+    // спектр: 1:1-перетаскивание указателем (S/V — квадрат, тон — полоса)
+    const track = (el, handler) => {
+      const move = e => {
+        const r = el.getBoundingClientRect();
+        handler(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+                Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)));
+      };
+      el.addEventListener("pointerdown", e => {
+        e.preventDefault(); el.setPointerCapture(e.pointerId); move(e);
+        const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+      });
+    };
+    track(pop.querySelector(".cf-sv"), (x, y) => {
+      hsv.s = x; hsv.v = 1 - y; setValue(hsvToHex(hsv.h, hsv.s, hsv.v), true, true);
+    });
+    track(pop.querySelector(".cf-hue"), x => {
+      hsv.h = x * 360; setValue(hsvToHex(hsv.h, hsv.s, hsv.v), true, true);
     });
     pop.querySelectorAll(".cf-cmyk input").forEach(inp =>
       inp.addEventListener("input", () => {
@@ -160,10 +228,13 @@ function makeColorField(host, initial, onChange) {
     // Регистрируем сразу: открывающий mousedown кнопки уже прошёл (open() —
     // из обработчика click), поэтому само-закрытия не будет.
     onDoc = e => { if (!host.contains(e.target) && !(pop && pop.contains(e.target))) close(); };
+    // прокрутка не закрывает выбор цвета, а держит поповер у кнопки; закрывает
+    // только смена размера окна (там раскладка меняется сильнее)
     onViewport = () => close();
+    onScroll = () => positionPop();
     document.addEventListener("mousedown", onDoc, true);
     window.addEventListener("resize", onViewport);
-    window.addEventListener("scroll", onViewport, true);
+    window.addEventListener("scroll", onScroll, true);
   }
   btn.addEventListener("click", e => { e.preventDefault(); open(); });
   paint();
@@ -225,7 +296,7 @@ function openLayerStyle(layer, opts = {}) {
             <div class="style-section-head"><span><b>Заливка</b><small>Цвет и прозрачность полигона</small></span><label class="switch-control" title="Включить заливку"><input type="checkbox" id="fmt-hasfill" aria-label="Включить заливку" ${hasFill ? "checked" : ""}><span></span></label></div>
             <div class="fmt-body" id="fmt-fill-body" style="display:${hasFill ? "" : "none"}"><div class="fmt-row">
               <label>Цвет<div id="fmt-fill"></div></label>
-              <label>Непрозрачность<input type="range" id="fmt-opacity" min="10" max="100" step="5" value="${opacity}"></label>
+              <label>Непрозрачность<span class="range-field"><input type="range" id="fmt-opacity" class="range-op" min="10" max="100" step="5" value="${opacity}"><output class="range-out" id="fmt-opacity-out">${opacity}%</output></span></label>
             </div></div>
           </section>
           <section class="style-section">
@@ -343,8 +414,12 @@ function openLayerStyle(layer, opts = {}) {
   });
 
   // ----- режим «Единый стиль» -----
-  const onColor = () => { $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview(); };
+  let syncOpUI = () => {};
+  const onColor = () => { $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview(); syncOpUI(); };
   const fillCF = makeColorField($("fmt-fill"), toHexColor(cur.fill, "#faf0bf"), onColor);
+  syncOpUI = () => syncOpacityRange($("fmt-opacity"), $("fmt-opacity-out"), fillCF.get());
+  $("fmt-opacity").addEventListener("input", syncOpUI);
+  syncOpUI();
   const strokeCF = makeColorField($("fmt-stroke"), toHexColor(cur.stroke, "#888888"), onColor);
   const lcolorCF = $("fmt-lcolor")
     ? makeColorField($("fmt-lcolor"), toHexColor(lfFont.color, "#5c5a54"), onColor) : null;
@@ -739,7 +814,7 @@ function openStyleLibrary() {
       <div class="fmt-sub">Заливка</div>
       <label class="chk"><input type="checkbox" id="lib-hasfill" ${hasFill ? "checked" : ""}> заливка цветом</label>
       <label>Цвет<div id="lib-fill"></div></label>
-      <label>Прозрачность, %<input type="range" id="lib-op" min="10" max="100" step="5" value="${op}"></label>
+      <label>Прозрачность, %<span class="range-field"><input type="range" id="lib-op" class="range-op" min="10" max="100" step="5" value="${op}"><output class="range-out" id="lib-op-out">${op}%</output></span></label>
       <div class="fmt-sub">Линия</div>
       <label>Цвет<div id="lib-stroke"></div></label>
       <label>Толщина<input type="number" id="lib-width" value="${boundedNumber(st.width, 0.2, 8, 1)}" min="0.2" max="8" step="0.1" required></label>
@@ -766,6 +841,9 @@ function openStyleLibrary() {
     const fillCF = makeColorField($("lib-fill"), toHexColor(st.fill, "#faf0bf"), onEdit);
     const strokeCF = makeColorField($("lib-stroke"), toHexColor(st.stroke, "#888888"), onEdit);
     ed._fillCF = fillCF; ed._strokeCF = strokeCF;
+    ed._syncOp = () => syncOpacityRange($("lib-op"), $("lib-op-out"), fillCF.get());
+    $("lib-op").addEventListener("input", ed._syncOp);
+    ed._syncOp();
     $("lib-dashp").addEventListener("change", () => {
       $("lib-dashcw").style.display = $("lib-dashp").value === "custom" ? "" : "none"; onEdit();
     });
@@ -821,6 +899,7 @@ function openStyleLibrary() {
     if (dot) dot.classList.add("on");
     const sw = overlay.querySelector(`.lib-item[data-sid="${CSS.escape(sel)}"] .lib-sw`);
     if (sw) { sw.style.background = swatchOf(sel); sw.style.borderColor = STYLES_V2[sel].stroke || "#999"; }
+    const ed = $("lib-edit"); if (ed && ed._syncOp) ed._syncOp();
     updatePreview(); draw();
   }
   overlay.querySelectorAll(".lib-item").forEach(el =>

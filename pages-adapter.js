@@ -157,14 +157,6 @@
     return null;
   };
 
-  function browserTep(payload) {
-    return pagesCore.computeTep(payload);
-  }
-
-  function webProject(payload) {
-    return pagesCore.webProject(payload);
-  }
-
   const OVERPASS_URLS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
@@ -345,7 +337,7 @@
     if (path === "/api/tep") {
       const payload = await bodyJson(input, options);
       const error = projectBodyError(payload);
-      return error ? json({ error }, 400) : json(browserTep(payload));
+      return error ? json({ error }, 400) : json(pagesCore.computeTep(payload));
     }
     if (path === "/api/preflight") {
       const payload = await bodyJson(input, options);
@@ -397,7 +389,7 @@
       const report = pagesCore.preflightProject({ ...payload, target: "grado" });
       if (!report.can_export)
         return json({ error: "project preflight failed", report }, 400);
-      const project = webProject(payload);
+      const project = pagesCore.webProject(payload);
       return new Response(JSON.stringify(project, null, 2), {
         headers: { "Content-Type": "application/json; charset=utf-8" },
       });

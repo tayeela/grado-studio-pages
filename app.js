@@ -2063,6 +2063,9 @@ function draw() {
     if (!L || !L.visible || _cull(f)) continue;
     let arr = _byLayer.get(L); if (!arr) _byLayer.set(L, arr = []); arr.push(f);
   }
+  // занятые экранные bbox уже отрисованных подписей этого слоя за проход —
+  // greedy-фильтр наложения (простой вариант, не полноценный label placement)
+  const _placedLabels = new Map();
   for (const layer of LAYERS_V2) {
     if (!layer.visible) continue;
     const _feats = _byLayer.get(layer); if (!_feats) continue;
@@ -2167,10 +2170,21 @@ function draw() {
         const v = labelOf(f);
         if (v !== undefined && v !== "" && v !== null) {
           const lf = st.label_font || {};
-          ctx.fillStyle = lf.color || cvColor("label", "#5c5a54");
-          ctx.font = `${Math.min(72, Math.max(6, lf.size || 11))}px ${LABEL_FONTS[lf.family] || "sans-serif"}`;
-          ctx.textAlign = "center";
-          ctx.fillText(String(v), ...w2s(...c));
+          const fsize = Math.min(72, Math.max(6, lf.size || 11));
+          ctx.font = `${fsize}px ${LABEL_FONTS[lf.family] || "sans-serif"}`;
+          const [sx, sy] = w2s(...c);
+          const tw = ctx.measureText(String(v)).width;
+          const bbox = [sx - tw / 2, sy - fsize, sx + tw / 2, sy + fsize * 0.25];
+          let _placed = _placedLabels.get(layer);
+          if (!_placed) _placedLabels.set(layer, _placed = []);
+          const _overlaps = _placed.some(b =>
+            bbox[0] < b[2] && bbox[2] > b[0] && bbox[1] < b[3] && bbox[3] > b[1]);
+          if (!_overlaps) {
+            _placed.push(bbox);
+            ctx.fillStyle = lf.color || cvColor("label", "#5c5a54");
+            ctx.textAlign = "center";
+            ctx.fillText(String(v), sx, sy);
+          }
         }
       }
       if (state.selectedIds.has(f.id)) {

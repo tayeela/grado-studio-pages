@@ -32,10 +32,86 @@ const DATA_SOURCE_GROUPS = [
       { key: "nspd.zouit", label: "ЗОУИТ (все виды)", def: false },
     ]},
   { title: "Рельеф", hint: "горизонтали из открытого DEM (SRTM)", web: false,
-    maxKm2: 80, items: [
+    maxKm2: 80, webNote: "В веб-версии рельеф пока недоступен", items: [
       { key: "terrain.contours", label: "Горизонтали (сечение авто)", def: false },
     ]},
+  // ОГД по области: портал не фильтрует по bbox — слой качается целиком один
+  // раз в кэш сервера (функц. зоны Москвы ≈15 МБ), дальше режется локально.
+  { title: "ГИС ОГД Москвы", hint: "Генплан и ЗОУИТ · первая загрузка слоя дольше",
+    web: false, maxKm2: 80, picker: true,
+    webNote: "В веб-версии слои ОГД по области недоступны — нужна настольная версия",
+    items: [
+      { key: "gisogd.func_zones", label: "Функц. зоны Генплана (старая Москва)", def: false },
+      { key: "gisogd.func_zones_tinao", label: "Функц. зоны (Новая Москва, ТиНАО)", def: false },
+      { key: "gisogd.szz", label: "Санитарно-защитные зоны", def: false },
+      { key: "gisogd.vodookhr", label: "Водоохранные зоны", def: false },
+    ]},
 ];
+
+// Слои портала ОГД, добавленные пользователем через каталог (кроме кураторских):
+// ключ «gisogd:{code}» — сервер сам определит маршрут и знак по имени слоя.
+const GISOGD_EXTRA_KEY = "grado_gisogd_extra";
+function gisogdExtras() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(GISOGD_EXTRA_KEY) || "[]");
+    return arr.filter(x => x && x.code).map(x =>
+      ({ key: `gisogd:${x.code}`, label: x.name || x.code, def: false }));
+  } catch (e) { return []; }
+}
+function gisogdAddExtra(code, name) {
+  let arr = [];
+  try { arr = JSON.parse(localStorage.getItem(GISOGD_EXTRA_KEY) || "[]"); } catch (e) {}
+  if (!arr.some(x => x.code === code)) arr.push({ code, name });
+  localStorage.setItem(GISOGD_EXTRA_KEY, JSON.stringify(arr));
+}
+
+// Каталог слоёв портала (≈660): поиск по названию/пути, выбранный слой
+// добавляется в группу «ГИС ОГД Москвы» как обычный источник.
+async function openGisogdPicker(onPick) {
+  let layers = [];
+  try {
+    const r = await fetch("/api/gisogd-catalog");
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    layers = d.layers || [];
+  } catch (e) { toast(`Каталог ГИС ОГД недоступен: ${e.message}`, "warn"); return; }
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal fmt-modal" role="dialog" aria-modal="true" aria-labelledby="ogdc-title">
+    <div class="modal-head"><span id="ogdc-title">Слои ГИС ОГД</span>
+      <button class="modal-x" aria-label="Закрыть каталог слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body compact">
+      <label class="cf-row"><span>Поиск</span><input id="ogdc-q" type="search" placeholder="например, красные линии" autocomplete="off"></label>
+      <div class="fc-help">Всего слоёв на портале: ${layers.length}. Слой ляжет в слой-приёмник по своему названию.</div>
+      <div id="ogdc-list" class="ogdc-list"></div>
+    </div>
+    <div class="modal-actions"><span class="spacer"></span>
+      <button class="ogdc-cancel">Закрыть</button></div></div>`;
+  document.body.appendChild(overlay);
+  const list = overlay.querySelector("#ogdc-list");
+  const render = q => {
+    const low = q.trim().toLowerCase();
+    const hit = (low ? layers.filter(l =>
+      (l.name || "").toLowerCase().includes(low) ||
+      (l.path || "").toLowerCase().includes(low)) : layers).slice(0, 200);
+    list.innerHTML = hit.length ? hit.map(l => `<button class="ogdc-row" data-code="${escHtml(l.code)}"
+      data-name="${escHtml(l.name || l.code)}"><b>${escHtml(l.name || l.code)}</b>
+      <span>${escHtml(l.path || "")}</span></button>`).join("")
+      : `<div class="fc-help">Ничего не найдено</div>`;
+  };
+  render("");
+  overlay.querySelector("#ogdc-q").addEventListener("input", e => render(e.target.value));
+  const close = () => overlay.remove();
+  overlay.querySelector(".modal-x").addEventListener("click", close);
+  overlay.querySelector(".ogdc-cancel").addEventListener("click", close);
+  overlay.addEventListener("click", e => {
+    const row = e.target.closest(".ogdc-row");
+    if (!row) return;
+    gisogdAddExtra(row.dataset.code, row.dataset.name);
+    close();
+    onPick && onPick();
+  });
+}
 
 function viewExtentBbox() {
   // текущий видимый прямоугольник холста → [west, south, east, north] WGS84
@@ -68,7 +144,8 @@ async function openDataFetch() {
     const unavailable = !!window.GRADO_STATIC && g.web === false;
     const over = km2 > g.maxKm2;
     const disabled = unavailable || over;
-    const rows = g.items.map(it => {
+    const items = g.picker ? g.items.concat(gisogdExtras()) : g.items;
+    const rows = items.map(it => {
       const checked = (saved[it.key] ?? it.def) && !disabled;
       return `<label class="data-src${disabled ? " disabled" : ""}">
         <input type="checkbox" data-src="${it.key}" data-gi="${gi}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}>
@@ -78,9 +155,10 @@ async function openDataFetch() {
       <div class="data-card-head">
         <div class="data-card-title">${escHtml(g.title)}
           <span class="data-card-sub">${escHtml(g.hint)} · до ${g.maxKm2} км²</span></div>
+        ${g.picker && !unavailable ? `<button class="data-ogd-more" data-gi="${gi}">+ слой портала…</button>` : ""}
         <button class="data-all" data-gi="${gi}"${disabled ? " disabled" : ""}>все</button>
       </div>
-      ${unavailable ? `<div class="data-over">В веб-версии рельеф пока недоступен</div>` : over ? `<div class="data-over">Область ${areaTxt} км² больше лимита ${g.maxKm2} км²
+      ${unavailable ? `<div class="data-over">${escHtml(g.webNote || "В веб-версии источник недоступен")}</div>` : over ? `<div class="data-over">Область ${areaTxt} км² больше лимита ${g.maxKm2} км²
         <button class="data-zoom" data-target="${g.maxKm2}">Приблизить</button></div>` : ""}
       <div class="data-rows">${rows}</div>
     </div>`;
@@ -97,8 +175,8 @@ async function openDataFetch() {
       ${cardsHtml}
       <div class="data-card data-card-ogd">
         <div class="data-card-head">
-          <div class="data-card-title">ГИС ОГД Москвы
-            <span class="data-card-sub">официальные слои · портал mos.ru</span></div>
+          <div class="data-card-title">ГИС ОГД — другие слои
+            <span class="data-card-sub">ZIP/GeoJSON с портала mos.ru</span></div>
         </div>
         <div class="data-ogd-row">
           <button class="data-ogd-portal">${ogdAction}</button>
@@ -118,6 +196,15 @@ async function openDataFetch() {
   overlay.querySelector(".data-cancel").addEventListener("click", close);
   overlay.addEventListener("click", ev => { if (ev.target === overlay) close(); });
   overlay.addEventListener("keydown", ev => { if (ev.key === "Escape") close(); });
+  // каталог портала: выбранный слой добавляется в группу — переоткрываем диалог,
+  // чтобы он появился обычным чекбоксом (галочки текущей сессии уже сохранены)
+  const moreBtn = overlay.querySelector(".data-ogd-more");
+  if (moreBtn) moreBtn.addEventListener("click", () => {
+    const sel = {};
+    allBoxes().forEach(b => { if (!b.disabled) sel[b.dataset.src] = b.checked; });
+    try { localStorage.setItem("grado_data_sources", JSON.stringify(sel)); } catch (e) {}
+    openGisogdPicker(() => { close(); openDataFetch(); });
+  });
 
   const loadBtn = overlay.querySelector(".data-load");
   const status = overlay.querySelector(".data-status");
