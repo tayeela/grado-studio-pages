@@ -2158,11 +2158,15 @@ function draw() {
         if (st.double) drawDoubleLine(f.ring || f.line, st.double, !!f.ring);
         if (st.line_marker && (f.ring || f.line)) {
           // направление засечки по знаку Эталона: по умолчанию остриём ВНУТРЬ
-          // зоны, dir "out" — наружу (ООПТ/ПК/водоохранная/прибрежная/ландшафт)
-          let inw = f.ring && f.ring.length > 2 ? inwardSign(f.ring) : 1;
-          if (st.line_marker.dir === "out") inw = -inw;
-          drawLineMarkers(f.ring || f.line, st.line_marker,
-                          st.stroke || cvColor("redline", "#df0024"), !!f.ring, inw);
+          // зоны, dir "out" — наружу (ООПТ/ландшафт ОКН/водоохранная/прибрежная),
+          // dir "both" — по ОБЕ стороны линии (в QML это два под-маркера с
+          // углами 0 и 180: 8 ООПТ, 18 ПК, 55 памятник природы)
+          const inw = f.ring && f.ring.length > 2 ? inwardSign(f.ring) : 1;
+          const sides = st.line_marker.dir === "both" ? [inw, -inw]
+                      : st.line_marker.dir === "out" ? [-inw] : [inw];
+          for (const side of sides)
+            drawLineMarkers(f.ring || f.line, st.line_marker,
+                            st.stroke || cvColor("redline", "#df0024"), !!f.ring, side);
         }
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
@@ -5928,7 +5932,11 @@ if (bufSch) bufSch.onclick = () => { document.getElementById("buf-dist").value =
 function hexOf(c) { return toHexColor(c, "#000000"); }
 // эффективный стиль объекта (styleOf, экранные px) → знак в формате бэкенда
 // (styles/default.json: мм листа, fill+fill_opacity). Конвенция студии:
-// px = мм × 2 (см. рендер маркеров/пикетажа), поэтому мм = px / 2.
+// px = мм × MM_PX (96 dpi / 25.4 = 3.7795 — тот же множитель, что в
+// tools/gen_moscow_lgr.py и в подписи масштабной линейки), поэтому мм = px / MM_PX.
+// Прежде здесь стояло деление на 2, а генератор умножал ширину на 3.2 и
+// штриховку на 3.75 — round-trip портил знак (1.0 мм → 3.2 px → 1.6 мм).
+const MM_PX = 96 / 25.4;
 function canvasStyleToBackend(st) {
   const out = {};
   if (st.fill && st.fill !== "transparent") {
@@ -5937,17 +5945,17 @@ function canvasStyleToBackend(st) {
     if (op < 1) out.fill_opacity = op;
   } else out.fill = null;
   if (st.stroke) out.stroke = hexOf(st.stroke);
-  out.width_mm = Math.max(0.05, (st.width || 1) / 2);
-  if (st.dash && st.dash.length) out.dash_mm = st.dash.map(v => v / 2);
+  out.width_mm = Math.max(0.05, (st.width || 1) / MM_PX);
+  if (st.dash && st.dash.length) out.dash_mm = st.dash.map(v => v / MM_PX);
   if (st.hatch && typeof st.hatch === "object") {
     out.hatch = { angle: st.hatch.angle ?? 45, cross: !!st.hatch.cross,
-                  spacing_mm: (st.hatch.spacing_px || 9) / 2,
+                  spacing_mm: (st.hatch.spacing_px || 9) / MM_PX,
                   color: hexOf(st.hatch.color || st.stroke || "#888888") };
   } else if (st.hatch) out.hatch = true;
   if (st.line_marker) out.line_marker = {
     shape: st.line_marker.shape, dir: st.line_marker.dir || "in",
-    period_mm: (st.line_marker.period || 40) / 2,
-    size_mm: (st.line_marker.size || 4) / 2 };
+    period_mm: (st.line_marker.period || 40) / MM_PX,
+    size_mm: (st.line_marker.size || 4) / MM_PX };
   if (st.double) out.double_mm = st.double / 2;
   if (st.line_label) out.line_label = st.line_label;
   if (st.label_field) {
