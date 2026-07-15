@@ -716,7 +716,103 @@
     return result;
   }
 
+  // ---- ГИС ОГД Москвы по видимой области (портал отдаёт CORS: браузеру можно) --
+  // Портал ИГНОРИРУЕТ bbox — слой всегда приходит целиком (функц. зоны Москвы
+  // ≈14 МБ gzip). Поэтому слой качается один раз, кладётся в кэш (IndexedDB на
+  // стороне адаптера), а по области режем сами. Маршрут и знак — по имени слоя
+  // (те же GISOGD_LAYER_RULES, что у ручного импорта GeoJSON).
+  const GISOGD_BASE = "https://gisogd.mos.ru/gis/api/2.8/gisogd/isogd";
+  const gisogdCatalogUrl = () => `${GISOGD_BASE}/layers/`;
+  const gisogdLayerUrl = code => `${GISOGD_BASE}/layers/${encodeURIComponent(code)}/export/?format=geojson`;
+
+  function buildGisogdCatalog(raw) {
+    if (!Array.isArray(raw)) throw new Error("ГИС ОГД вернул некорректный каталог");
+    const byId = new Map(raw.map(x => [x.id, x]));
+    const path = x => {
+      const parts = []; let cur = x, guard = 0;
+      while (cur && guard < 8) { parts.unshift(cur.name || ""); cur = byId.get(cur.parent_id); guard += 1; }
+      return parts.filter(Boolean).join(" / ");
+    };
+    return raw.filter(x => x.type === "layer" && x.code)
+      .map(x => ({ code: x.code, name: x.name || x.code, path: path(x) }));
+  }
+
+  const geomBbox = geom => {
+    const xs = [], ys = [];
+    const walk = c => {
+      if (!Array.isArray(c) || !c.length) return;
+      if (typeof c[0] === "number") { xs.push(c[0]); ys.push(c[1]); return; }
+      c.forEach(walk);
+    };
+    walk((geom || {}).coordinates);
+    return xs.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] : null;
+  };
+  const bboxHit = (a, b) => !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
+  const gisogdKey = (props, feature, index) =>
+    String(props.orbis_id ?? props.id ?? feature.id ?? index).replace(/\.0$/, "");
+
+  // Кураторские наборы: маршрут задан явно. У слоёв ТиНАО имя — это тип зоны
+  // («Жилая зона»), правила по имени его не опознают как функц. зону и увели бы
+  // в «прочие», поэтому kind/layer_id проставлены руками (как в настольной версии).
+  const _TINAO_FZ = [["virtual1982", "Жилая зона"], ["virtual1981", "Зона объектов внешнего транспорта"],
+    ["virtual1980", "Общественная зона"], ["virtual1979", "Общественно-жилая зона"],
+    ["virtual1978", "Общественно-производственная зона"], ["virtual1977", "Общественно-производственно-жилая зона"],
+    ["virtual1976", "Природная зона"], ["virtual1975", "Природно-жилая зона"],
+    ["virtual1971", "Природно-общественная зона"], ["virtual1970", "Природно-общественно-жилая зона"],
+    ["virtual1969", "Природно-общественно-производственная зона"], ["virtual1968", "Природно-производственная зона"],
+    ["virtual1967", "Производственная зона"], ["virtual1966", "Производственно-жилая зона"],
+    ["virtual1965", "Сельскохозяйственная зона"]];
+  const _FZ_ROUTE = { kind: "zone", layer_id: "source.gisogd.func_zones" };
+  const GISOGD_WEB_LAYERS = {
+    "gisogd.func_zones": [{ code: "virtual1742", name: "Функциональные зоны", ..._FZ_ROUTE }],
+    "gisogd.func_zones_tinao": _TINAO_FZ.map(([code, name]) => ({ code, name, ..._FZ_ROUTE })),
+    "gisogd.szz": [["virtual1743", "СЗЗ установленная"], ["virtual1746", "СЗЗ ориентировочная"],
+      ["virtual1745", "СЗЗ расчётная"]].map(([code, name]) =>
+      ({ code, name, kind: "restrict", layer_id: "source.gisogd.restrict" })),
+    "gisogd.vodookhr": [{ code: "virtual1747", name: "Водоохранная зона",
+      kind: "restrict", layer_id: "source.gisogd.restrict" }],
+  };
+
+  // layer = {code, name, kind?, layer_id?}; payload — сырой GeoJSON слоя целиком
+  function importGisogdExtent(payload = {}, layer = {}, bbox = []) {
+    if (!payload || !Array.isArray(payload.features))
+      throw new Error(`ГИС ОГД: слой ${layer.code} — не FeatureCollection`);
+    const name = layer.name || layer.code || "";
+    let kind = layer.kind, layerId = layer.layer_id;
+    if (!layerId) [kind, layerId] = gisogdRoute(name);
+    if (!layerId) { kind = "generic"; layerId = "source.gisogd.other"; }
+    const styleId = gisogdStyle(name);
+    const group = { source: `gisogd:${layer.code}`, title: name, layer_id: layerId,
+                    kind, features: [], fields: [], count: 0 };
+    let skipped = 0;
+    payload.features.forEach((f, i) => {
+      const fb = geomBbox(f && f.geometry);
+      if (!fb || !bboxHit(fb, bbox)) return;
+      let parts;
+      try { parts = geometryParts(f.geometry); } catch (e) { skipped += 1; return; }
+      const props = Object.fromEntries(Object.entries(f.properties || {})
+        .filter(([, v]) => v !== null && v !== ""));
+      const key = gisogdKey(f.properties || {}, f, i);
+      parts.forEach((part, pi) => {
+        const out = { kind, layer_id: layerId, ...part, props: { ...props },
+                      srcKey: `${layerId}:${layer.code}:${key}#${pi}` };
+        if (styleId) out.style_id = styleId;
+        group.features.push(out);
+        addFields(group, props);
+      });
+    });
+    group.count = group.features.length;
+    const manifest = snapshot("gisogd", `ГИС ОГД Москвы (gisogd.mos.ru), слой «${name}»`,
+      group.features, { bbox, code: layer.code });
+    const prov = provenance(manifest);
+    group.features.forEach(f => { f.prov = { ...prov }; });
+    return { groups: [group], notes: skipped ? [`пропущено повреждённых: ${skipped}`] : [],
+             snapshots: [manifest] };
+  }
+
   return { computeTep, preflightProject, webProject, importNspd, importGeoJson,
+    gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent,
+    GISOGD_WEB_LAYERS,
     originWgs84: [...ORIGIN_WGS84],
     buildOsmExtentRequest, importOsmExtent, buildNspdExtentRequest, importNspdExtent };
 });

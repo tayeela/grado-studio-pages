@@ -988,11 +988,16 @@ new ResizeObserver(() => {
 }).observe(cv);
 
 // ---------- сетка ----------
+// Авто-шаг: первый из ряда, дающий на экране >= 22 px. Ряд расширен в обе
+// стороны под новые пределы зума (K_MIN/K_MAX): без мелких ступеней сетка на
+// приближении застревала на 1 м (одна линия через пол-экрана), без крупных —
+// на отдалении вырождалась в сплошную кашу с шагом 10 px. На привычных зумах
+// выбор не изменился (напр. k≈1 → по-прежнему 50 м).
 function gridStep() {
   if (state.gridMode !== "auto") return +state.gridMode;
-  for (const g of [1, 2, 5, 10, 20, 50, 100, 200, 500])
+  for (const g of [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000])
     if (g * state.view.k >= 22) return g;
-  return 1000;
+  return 10000;
 }
 
 // ---------- подложка (тайлы XYZ) ----------
@@ -2486,10 +2491,19 @@ function updateOverlay() {
 }
 
 // ---------- вид ----------
+// Пределы зума (k — экранных пикселей на метр мира). Прежде было [0.05, 40]:
+// приближение упиралось в ~1:95, где один пиксель = 2.5 см, — в 250 раз грубее
+// точности самой модели (координаты хранятся до 0.1 мм), поэтому вычертить и
+// проверить узел/сопряжение было нечем. Сейчас:
+//   K_MAX 2000 → ~1:1.9  (пиксель ≈ 0.5 мм — предел осмысленного черчения)
+//   K_MIN 0.01 → ~1:378 000 (~160 км по ширине холста — регион целиком)
+// Знаменатель ≈ 3779.5 / k (см. подпись масштабной линейки).
+const K_MIN = 0.01, K_MAX = 2000;
+const clampK = k => Math.min(K_MAX, Math.max(K_MIN, k));
 function zoomBy(factor) {
   const w = cv.clientWidth, h = cv.clientHeight;
   const [wx, wy] = s2w(w / 2, h / 2);        // мировая точка под центром экрана
-  state.view.k = Math.min(40, Math.max(0.05, state.view.k * factor));
+  state.view.k = clampK(state.view.k * factor);
   state.view.tx = w / 2 - wx * state.view.k;
   state.view.ty = h / 2 + wy * state.view.k;
   draw();
@@ -2498,7 +2512,7 @@ function fitBox(x0, y0, x1, y1, pad = 0.82) {
   const w = cv.clientWidth, h = cv.clientHeight;
   if (w < 2 || h < 2) return;
   const dx = Math.max(x1 - x0, 10), dy = Math.max(y1 - y0, 10);
-  state.view.k = Math.max(0.05, Math.min(40, Math.min(w / dx, h / dy) * pad));
+  state.view.k = clampK(Math.min(w / dx, h / dy) * pad);
   state.view.tx = w / 2 - (x0 + dx / 2) * state.view.k;
   state.view.ty = h / 2 + (y0 + dy / 2) * state.view.k;
   draw();
@@ -5622,7 +5636,7 @@ cv.addEventListener("wheel", e => {
   e.preventDefault();
   const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
   const [wx, wy] = s2w(e.offsetX, e.offsetY);
-  state.view.k = Math.min(40, Math.max(0.05, state.view.k * factor));
+  state.view.k = clampK(state.view.k * factor);
   state.view.tx = e.offsetX - wx * state.view.k;
   state.view.ty = e.offsetY + wy * state.view.k;
   draw();

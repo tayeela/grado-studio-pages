@@ -185,6 +185,44 @@
     }
     throw new Error(`Overpass недоступен: ${lastError?.message || lastError || "нет ответа"}`);
   };
+  // ---- ГИС ОГД: слой качается целиком (портал не фильтрует по bbox) и живёт
+  // в IndexedDB; повторная выгрузка любой площадки берёт его из кэша.
+  const GISOGD_TTL_MS = 7 * 24 * 3600 * 1000;
+  const gisogdCacheKey = code => `gisogd_layer_${code}`;
+  async function gisogdLayerJson(code, notes) {
+    try {
+      const hit = await databaseGet(gisogdCacheKey(code));
+      if (hit && hit.at && (Date.now() - hit.at) < GISOGD_TTL_MS) return hit.data;
+    } catch (error) { /* кэш недоступен — тянем из сети */ }
+    const response = await nativeFetch(pagesCore.gisogdLayerUrl(code));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    notes.push(`слой ${code} загружен целиком (${(data.features || []).length} об.) — `
+      + "портал не фильтрует по области; дальше берётся из кэша браузера");
+    try { await databaseSet(gisogdCacheKey(code), { at: Date.now(), data }); }
+    catch (error) { notes.push(`слой ${code} не поместился в кэш — будет качаться заново`); }
+    return data;
+  }
+  let gisogdCatalogCache = null;
+  async function gisogdCatalog() {
+    if (gisogdCatalogCache) return gisogdCatalogCache;
+    const response = await nativeFetch(pagesCore.gisogdCatalogUrl());
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    gisogdCatalogCache = pagesCore.buildGisogdCatalog(await response.json());
+    return gisogdCatalogCache;
+  }
+  // ключ источника → {code, name}: кураторские (gisogd.func_zones…) и любой
+  // слой портала (gisogd:{code}); имя берём из каталога — по нему идёт маршрут
+  async function gisogdLayersFor(key) {
+    const curated = pagesCore.GISOGD_WEB_LAYERS[key];
+    if (curated) return curated;
+    if (!key.startsWith("gisogd:")) return [];
+    const code = key.slice("gisogd:".length);
+    if (!/^[A-Za-z0-9_.-]{1,40}$/.test(code)) return [];
+    const row = (await gisogdCatalog()).find(l => l.code === code);
+    return row ? [{ code, name: row.name }] : [];
+  }
+
   async function browserFetchExtent(payload) {
     const bbox = payload && payload.bbox;
     const sources = [...new Set(Array.isArray(payload && payload.sources) ? payload.sources : [])];
@@ -211,6 +249,37 @@
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           mergeExtent(result, pagesCore.importNspdExtent(await response.json(), source, bbox));
         } catch (error) { result.notes.push(`${source}: ${error.message || error}`); }
+      }
+    }
+    // ГИС ОГД: кураторские наборы (gisogd.*) и любой слой портала (gisogd:{code}).
+    // Один источник может быть несколькими слоями портала (ТиНАО) — сливаем.
+    const ogdSources = sources.filter(s => s.startsWith("gisogd.") || s.startsWith("gisogd:"));
+    if (ogdSources.length) {
+      if (area > 80) throw new Error(`Область ${area.toFixed(1)} км² больше предела 80 км² для ГИС ОГД — приблизьте вид`);
+      for (const source of ogdSources) {
+        let merged = null;
+        for (const layer of await gisogdLayersFor(source)) {
+          try {
+            const raw = await gisogdLayerJson(layer.code, result.notes);
+            const part = pagesCore.importGisogdExtent(raw, layer, bbox);
+            if (!merged) merged = part;
+            else {
+              merged.groups[0].features.push(...part.groups[0].features);
+              merged.groups[0].count = merged.groups[0].features.length;
+              part.groups[0].fields.forEach(fd => {
+                if (!merged.groups[0].fields.some(x => x.name === fd.name))
+                  merged.groups[0].fields.push(fd);
+              });
+              merged.snapshots.push(...part.snapshots);
+            }
+          } catch (error) { result.notes.push(`ГИС ОГД [${layer.code}]: ${error.message || error}`); }
+        }
+        if (merged) {
+          merged.groups[0].source = source;
+          mergeExtent(result, merged);
+        } else if (!result.notes.some(n => n.includes(source))) {
+          result.notes.push(`${source}: слой не найден в каталоге портала`);
+        }
       }
     }
     if (sources.includes("terrain.contours"))
@@ -256,6 +325,11 @@
         s2: "Tiles © Esri",
       },
     });
+    if (path === "/api/gisogd-catalog") {
+      // портал отдаёт CORS (Access-Control-Allow-Origin) → браузеру можно
+      try { return json({ layers: await gisogdCatalog() }); }
+      catch (error) { return json({ error: `каталог ГИС ОГД недоступен: ${error.message || error}` }, 502); }
+    }
     if (path === "/api/initial-grado") return json(null);
     if (path === "/api/autosave/backups") {
       try {

@@ -38,9 +38,7 @@ const DATA_SOURCE_GROUPS = [
   // ОГД по области: портал не фильтрует по bbox — слой качается целиком один
   // раз в кэш сервера (функц. зоны Москвы ≈15 МБ), дальше режется локально.
   { title: "ГИС ОГД Москвы", hint: "Генплан и ЗОУИТ · первая загрузка слоя дольше",
-    web: false, maxKm2: 80, picker: true,
-    webNote: "В веб-версии слои ОГД по области недоступны — нужна настольная версия",
-    items: [
+    maxKm2: 80, picker: true, items: [
       { key: "gisogd.func_zones", label: "Функц. зоны Генплана (старая Москва)", def: false },
       { key: "gisogd.func_zones_tinao", label: "Функц. зоны (Новая Москва, ТиНАО)", def: false },
       { key: "gisogd.szz", label: "Санитарно-защитные зоны", def: false },
@@ -77,27 +75,63 @@ async function openGisogdPicker(onPick) {
   } catch (e) { toast(`Каталог ГИС ОГД недоступен: ${e.message}`, "warn"); return; }
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
+  // шапка и поля — как во всех окнах студии: kicker + название + X, поле во всю
+  // ширину (36px), пояснение под ним; иначе окно выглядит чужим
   overlay.innerHTML = `<div class="modal fmt-modal" role="dialog" aria-modal="true" aria-labelledby="ogdc-title">
-    <div class="modal-head"><span id="ogdc-title">Слои ГИС ОГД</span>
+    <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Каталог портала</span><span id="ogdc-title">Слои ГИС ОГД</span></span>
       <button class="modal-x" aria-label="Закрыть каталог слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
-      <label class="cf-row"><span>Поиск</span><input id="ogdc-q" type="search" placeholder="например, красные линии" autocomplete="off"></label>
-      <div class="fc-help">Всего слоёв на портале: ${layers.length}. Слой ляжет в слой-приёмник по своему названию.</div>
+      <label class="ogdc-search"><span>Поиск слоя</span>
+        <input id="ogdc-q" type="search" placeholder="например, красные линии" autocomplete="off"></label>
+      <p class="ogdc-hint">Всего слоёв на портале — ${layers.length}. Объекты лягут в слой-приёмник
+        по названию слоя, атрибуты сохранятся целиком.</p>
       <div id="ogdc-list" class="ogdc-list"></div>
     </div>
     <div class="modal-actions"><span class="spacer"></span>
       <button class="ogdc-cancel">Закрыть</button></div></div>`;
   document.body.appendChild(overlay);
   const list = overlay.querySelector("#ogdc-list");
+  // Дерево папок как на портале: путь слоя («Слои / Генплан / …») — это и есть
+  // ветка каталога; последний сегмент — сам слой, его в заголовок папки не берём.
+  // Вложенное дерево, как на портале: путь «Слои / Генплан / 01. Функц. зоны»
+  // разворачивается в ветки. Плоский полный путь не годится — у всех папок
+  // одинаковый длинный префикс, и различить их нельзя.
+  const buildTree = items => {
+    const root = { kids: new Map(), layers: [] };
+    items.forEach(l => {
+      const parts = (l.path || "").split(" / ").filter(Boolean).slice(0, -1);
+      let node = root;
+      parts.forEach(p => {
+        if (!node.kids.has(p)) node.kids.set(p, { kids: new Map(), layers: [] });
+        node = node.kids.get(p);
+      });
+      node.layers.push(l);
+    });
+    return root;
+  };
+  const countOf = n => n.layers.length + [...n.kids.values()].reduce((s, k) => s + countOf(k), 0);
+  // Отступ — обычным padding'ом. Направляющие линии не рисуем: на стыках строк
+  // они рвутся и выглядят пунктиром; глубину и так держат отступ и вес шрифта.
+  const pad = d => 12 + d * 16;
+  const renderNode = (node, open, depth) => {
+    const folders = [...node.kids].map(([name, kid]) => `<details class="ogdc-folder"${open ? " open" : ""}>
+      <summary style="padding-left:${pad(depth)}px"><span class="ogdc-tw">▶</span><span class="ogdc-fname">${escHtml(name)}</span>
+        <span class="ogdc-fcount">${countOf(kid)}</span></summary>
+      ${renderNode(kid, open, depth + 1)}</details>`).join("");
+    // у слоя треугольника нет — его место держит отступ, имя идёт по той же линии
+    const rows = node.layers.map(l => `<button class="ogdc-row" style="padding-left:${pad(depth) + 19}px"
+      data-code="${escHtml(l.code)}" data-name="${escHtml(l.name || l.code)}"><span
+      class="ogdc-fname" style="white-space:normal">${escHtml(l.name || l.code)}</span></button>`).join("");
+    return folders + rows;
+  };
   const render = q => {
     const low = q.trim().toLowerCase();
-    const hit = (low ? layers.filter(l =>
+    const hit = low ? layers.filter(l =>
       (l.name || "").toLowerCase().includes(low) ||
-      (l.path || "").toLowerCase().includes(low)) : layers).slice(0, 200);
-    list.innerHTML = hit.length ? hit.map(l => `<button class="ogdc-row" data-code="${escHtml(l.code)}"
-      data-name="${escHtml(l.name || l.code)}"><b>${escHtml(l.name || l.code)}</b>
-      <span>${escHtml(l.path || "")}</span></button>`).join("")
-      : `<div class="fc-help">Ничего не найдено</div>`;
+      (l.path || "").toLowerCase().includes(low)) : layers;
+    if (!hit.length) { list.innerHTML = `<div class="fc-help">Ничего не найдено</div>`; return; }
+    // при поиске ветки раскрыты (видно, что нашлось), без поиска — свёрнуты
+    list.innerHTML = renderNode(buildTree(hit), !!low, 0);
   };
   render("");
   overlay.querySelector("#ogdc-q").addEventListener("input", e => render(e.target.value));
