@@ -1918,6 +1918,48 @@ function drawMarkerGlyph(shape, px, py, tx, ty, nx, ny, s, period) {
   }
 }
 
+// ---------- размещение подписей объектов ----------
+// Занятость мест — ГРИД, а не список. Раньше каждая подпись сверялась ЛИНЕЙНЫМ
+// перебором со всеми уже поставленными (`_placed.some(...)`): на городском слое
+// в 30 000 зданий с ~3 800 поставленными подписями это ~113 млн проверок
+// прямоугольников ЗА КАДР — 93% времени отрисовки (замер: 386 мс с перебором
+// против 27 мс без него). Правило размещения не изменилось: greedy, побеждает
+// первый занявший место; подпись задевает 1-4 ячейки и сравнивается только с
+// соседями по этим ячейкам — результат тот же, что у полного перебора.
+const LABEL_CELL = 64;               // px экрана; подпись заведомо мельче
+function labelGrid() {
+  const cells = new Map();
+  const each = (b, fn) => {
+    for (let cx = Math.floor(b[0] / LABEL_CELL); cx <= Math.floor(b[2] / LABEL_CELL); cx++)
+      for (let cy = Math.floor(b[1] / LABEL_CELL); cy <= Math.floor(b[3] / LABEL_CELL); cy++)
+        if (fn(cx + "_" + cy)) return true;
+    return false;
+  };
+  return {
+    hits: b => each(b, k => {
+      const a = cells.get(k);
+      return a ? a.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) : false;
+    }),
+    add: b => { each(b, k => { let a = cells.get(k); if (!a) cells.set(k, a = []); a.push(b); }); },
+  };
+}
+// Ширина текста: measureText дорогой, а на городском слое подписи повторяются
+// (этажность «5» у тысяч зданий) — ключ «шрифт + строка» даёт высокий процент
+// попаданий. Сам ctx.font при этом ставится ВСЕГДА: его меняют и соседние
+// рисовалки того же кадра (подпись линии, размерная линия), поэтому кешировать
+// шрифт нельзя — кеш разъехался бы с фактическим состоянием холста, и подпись
+// уехала бы чужим шрифтом.
+const _measCache = new Map();
+function measureLabel(s, font) {
+  const key = font + " " + s;
+  let w = _measCache.get(key);
+  if (w === undefined) {
+    if (_measCache.size > 4000) _measCache.clear();   // страховка от роста
+    _measCache.set(key, w = ctx.measureText(s).width);
+  }
+  return w;
+}
+
 // Засечки вдоль линии/контура. Размещение ПОСЕГМЕНТНОЕ: на каждом прямом
 // ребре засечки распределяются равномерно с отступом от вершин, а не
 // непрерывно по периметру — иначе на углах засечки соседних рёбер
@@ -2175,24 +2217,27 @@ function draw() {
       }
       ctx.setLineDash([]);
       if (st.label_field && f.ring) {
-        const c = f.ring.reduce((a, p) => [a[0] + p[0] / f.ring.length, a[1] + p[1] / f.ring.length], [0, 0]);
+        // центр кольца без reduce: тот возвращал НОВЫЙ массив на каждую вершину
+        let _cx = 0, _cy = 0;
+        for (const p of f.ring) { _cx += p[0]; _cy += p[1]; }
+        _cx /= f.ring.length; _cy /= f.ring.length;
         const v = labelOf(f);
         if (v !== undefined && v !== "" && v !== null) {
           const lf = st.label_font || {};
           const fsize = Math.min(72, Math.max(6, lf.size || 11));
-          ctx.font = `${fsize}px ${LABEL_FONTS[lf.family] || "sans-serif"}`;
-          const [sx, sy] = w2s(...c);
-          const tw = ctx.measureText(String(v)).width;
+          const _font = `${fsize}px ${LABEL_FONTS[lf.family] || "sans-serif"}`;
+          ctx.font = _font;
+          const [sx, sy] = w2s(_cx, _cy);
+          const _s = String(v);
+          const tw = measureLabel(_s, _font);
           const bbox = [sx - tw / 2, sy - fsize, sx + tw / 2, sy + fsize * 0.25];
           let _placed = _placedLabels.get(layer);
-          if (!_placed) _placedLabels.set(layer, _placed = []);
-          const _overlaps = _placed.some(b =>
-            bbox[0] < b[2] && bbox[2] > b[0] && bbox[1] < b[3] && bbox[3] > b[1]);
-          if (!_overlaps) {
-            _placed.push(bbox);
+          if (!_placed) _placedLabels.set(layer, _placed = labelGrid());
+          if (!_placed.hits(bbox)) {
+            _placed.add(bbox);
             ctx.fillStyle = lf.color || cvColor("label", "#5c5a54");
             ctx.textAlign = "center";
-            ctx.fillText(String(v), sx, sy);
+            ctx.fillText(_s, sx, sy);
           }
         }
       }
@@ -5245,45 +5290,116 @@ function isFilled(f) {
   if (st.fillOpacity != null && st.fillOpacity <= 0) return false;
   return true;
 }
+// ---------- пространственный индекс объектов (для выбора/наведения) ----------
+// Грид по габаритам объектов. Кеш в state._ix — слот уже существовал и всюду
+// инвалидировался (afterChange/live-edit), но индекс никогда не строился.
+//
+// Зачем: hitTest звался ПЕРЕБОРОМ «слои × объекты» — при 16 слоях и 20 000
+// объектов это ~320 000 проверок, причём на КАЖДОЕ движение мыши (курсор в
+// режиме «Выбор» выбирается через hitTest). Замерено: 21.7 мс на одно наведение
+// — отсюда «тупит». В draw() эту же ошибку уже чинили бакетами по слоям.
+//
+// rank хранит приоритет объекта ОДНИМ числом, чтобы порядок выбора не изменился:
+// сначала верхний слой (позже в LAYERS_V2), внутри слоя — объект, добавленный
+// позже. Кандидаты сортируются по rank убыв. и проходят те же две фазы.
+function featureIndex() {
+  if (state._ix) return state._ix;
+  const items = [];
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  const layerRank = new Map(LAYERS_V2.map((l, i) => [l, i]));
+  for (let i = 0; i < state.features.length; i++) {
+    const f = state.features[i];
+    const L = layerOf(f);
+    if (!L) continue;                       // как раньше: объект вне реестра слоёв не ловится
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const bump = (x, y) => { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; };
+    if (f.point) bump(f.point[0], f.point[1]);
+    const pts = f.ring || f.line;
+    if (pts) for (const p of pts) bump(p[0], p[1]);
+    const c = f.circle || f.arc;
+    if (c) { bump(c.cx - c.r, c.cy - c.r); bump(c.cx + c.r, c.cy + c.r); }
+    if (x0 === Infinity) continue;
+    items.push({ f, L, x0, y0, x1, y1, rank: (layerRank.get(L) || 0) * 1e7 + i });
+    if (x0 < minx) minx = x0; if (x1 > maxx) maxx = x1;
+    if (y0 < miny) miny = y0; if (y1 > maxy) maxy = y1;
+  }
+  const diag = Math.hypot(maxx - minx, maxy - miny) || 100;
+  const cellSize = Math.max(diag / 160, 1e-6);
+  const cellOf = v => Math.floor(v / cellSize);
+  const cells = new Map();
+  for (const it of items) {
+    for (let cx = cellOf(it.x0); cx <= cellOf(it.x1); cx++)
+      for (let cy = cellOf(it.y0); cy <= cellOf(it.y1); cy++) {
+        const k = cx + "_" + cy;
+        let a = cells.get(k); if (!a) cells.set(k, a = []);
+        a.push(it);
+      }
+  }
+  return (state._ix = { cells, cellOf });
+}
+
+// кандидаты рядом с точкой: объекты, чей габарит задет [wx±tol, wy±tol]
+function hitCandidates(wx, wy, tolW) {
+  const { cells, cellOf } = featureIndex();
+  const seen = new Set(), out = [];
+  for (let cx = cellOf(wx - tolW); cx <= cellOf(wx + tolW); cx++)
+    for (let cy = cellOf(wy - tolW); cy <= cellOf(wy + tolW); cy++) {
+      const a = cells.get(cx + "_" + cy);
+      if (!a) continue;
+      for (const it of a) {
+        if (seen.has(it)) continue;         // объект лежит в нескольких ячейках
+        seen.add(it);
+        if (it.x1 < wx - tolW || it.x0 > wx + tolW ||
+            it.y1 < wy - tolW || it.y0 > wy + tolW) continue;
+        if (!it.L.visible || it.L.locked) continue;
+        out.push(it);
+      }
+    }
+  return out.sort((a, b) => b.rank - a.rank);
+}
+
 function hitTest(wx, wy) {
   const tolW = 7 / state.view.k;
-  const layers = [...LAYERS_V2].reverse();
+  const cand = hitCandidates(wx, wy, tolW);
   // Проход 1 — по ОБВОДКЕ (штрихам): точки, линии, дуги, окружности и
   // полигоны БЕЗ заливки. Клик точно по контуру выбирает именно его объект,
   // даже если сверху лежит другой полигон — у незалитого нет «тела», ловим
   // за обводку (и она видна, т.к. заливкой сверху не перекрыта).
-  for (const layer of layers) {
-    if (!layer.visible || layer.locked) continue;
-    for (let i = state.features.length - 1; i >= 0; i--) {
-      const f = state.features[i];
-      if (layerOf(f) !== layer) continue;
-      if (f.point && Math.hypot(f.point[0] - wx, f.point[1] - wy) < tolW + 4 / state.view.k) return f;
-      if (f.line && nearChain(wx, wy, f.line, tolW) !== null) return f;
-      if (f.ring && !isFilled(f) && nearChain(wx, wy, [...f.ring, f.ring[0]], tolW) !== null) return f;
-      if (f.arc) {
-        const aa = f.arc; const dd = Math.hypot(aa.cx - wx, aa.cy - wy);
-        if (Math.abs(dd - aa.r) < tolW) return f;
-      }
-      if (f.circle) {
-        const cc = f.circle; const dd = Math.hypot(cc.cx - wx, cc.cy - wy);
-        if (Math.abs(dd - cc.r) < tolW) return f;
-      }
+  for (const { f } of cand) {
+    if (f.point && Math.hypot(f.point[0] - wx, f.point[1] - wy) < tolW + 4 / state.view.k) return f;
+    if (f.line && nearChain(wx, wy, f.line, tolW) !== null) return f;
+    if (f.ring && !isFilled(f) && nearRing(wx, wy, f.ring, tolW)) return f;
+    if (f.arc) {
+      const aa = f.arc; const dd = Math.hypot(aa.cx - wx, aa.cy - wy);
+      if (Math.abs(dd - aa.r) < tolW) return f;
+    }
+    if (f.circle) {
+      const cc = f.circle; const dd = Math.hypot(cc.cx - wx, cc.cy - wy);
+      if (Math.abs(dd - cc.r) < tolW) return f;
     }
   }
   // Проход 2 — по ПЛОЩАДИ/контуру: полигон, содержащий точку ИЛИ задетый за
   // обводку (верхний побеждает). Залитый полигон ловится телом; допуск по
   // контуру даёт клик по самой границе (pointInRing ровно на грани неустойчив),
   // но порядок «сверху вниз» защищает от выбора скрытого под заливкой контура.
-  for (const layer of layers) {
-    if (!layer.visible || layer.locked) continue;
-    for (let i = state.features.length - 1; i >= 0; i--) {
-      const f = state.features[i];
-      if (layerOf(f) !== layer) continue;
-      if (f.ring && (pointInRing(wx, wy, f.ring)
-                     || nearChain(wx, wy, [...f.ring, f.ring[0]], tolW) !== null)) return f;
-    }
+  for (const { f } of cand) {
+    if (f.ring && (pointInRing(wx, wy, f.ring) || nearRing(wx, wy, f.ring, tolW))) return f;
   }
   return null;
+}
+// Замкнутый контур рядом с точкой. Раньше звалось как
+// nearChain(wx, wy, [...ring, ring[0]], tolW) — копия всего кольца на КАЖДЫЙ
+// объект и КАЖДЫЙ из двух проходов; на городском слое это десятки тысяч лишних
+// массивов за одно движение мыши. Здесь замыкание берётся по модулю, без копии.
+function nearRing(wx, wy, ring, tolW) {
+  const n = ring.length, t2 = tolW * tolW;
+  for (let i = 0; i < n; i++) {
+    const a = ring[i], b = ring[(i + 1) % n];
+    const q = nearestOnSeg([wx, wy], a, b);
+    const dx = wx - q[0], dy = wy - q[1];
+    if (dx * dx + dy * dy < t2) return true;
+  }
+  return false;
 }
 // объекты, попавшие в рамку выделения [a,b] (любая вершина внутри), видимые слои
 function marqueeHit(a, b) {
