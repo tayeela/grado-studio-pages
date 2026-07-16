@@ -110,6 +110,20 @@ async function applyGisogdData(data, askText) {
     { ok: "Импортировать", cancel: "Отмена" });
   if (!ok) return false;
   snapshot();
+  // Слои-приёмники, которых нет в статическом LAYERS_V2 (source.gisogd.zouit.* —
+  // свой слой на каждый знак ЛГР, объекты разъезжаются по LineCode): заводим ДО
+  // раскладки, иначе layerOf откатится на слой по ВИДУ и все ЗОУИТ снова лягут
+  // в одну кучу (железное правило 7).
+  for (const ld of (data.layers || [])) {
+    if (LAYER_BY_ID[ld.id]) continue;
+    const L = { id: ld.id, title: ld.title, kind: ld.kind || "restrict",
+      semantic_class: ld.code, geometry_type: "polygon", style_id: ld.style_id,
+      stage: ld.stage || "existing", source_kind: ld.source_kind,
+      import_only: true, visible: true, defaults: () => ({}) };
+    if (["boundary", "restrict", "zone"].includes(L.kind)) L.topology = "coverage";
+    LAYERS_V2.push(L);
+    LAYER_BY_ID[L.id] = L;
+  }
   const { added, dup, invalid } = importSourceFeatures(data.features);
   state.selected = null;
   recordSource(data.snapshot, data.diff);
@@ -123,10 +137,18 @@ async function applyGisogdData(data, askText) {
         if (!taken.has(fd.name)) { L.fields.push(fd); taken.add(fd.name); }
     }
   }
-  ["source.gisogd.func_zones", "source.gisogd.red_lines", "source.gisogd.restrict",
-   "source.gisogd.other"].forEach(id => {
-    const L = LAYER_BY_ID[id]; if (L) L.visible = true;
-  });
+  // показываем слои, в которые РЕАЛЬНО легли объекты (прежде список был зашит
+  // четырьмя id — слои по знакам в него не попадали и оставались невидимыми).
+  // Штриховка и подпись у импортированных зон по умолчанию выключены:
+  // включаются в «Оформлении слоя».
+  for (const lid of new Set(data.features.map(f => f.layer_id).filter(Boolean))) {
+    const L = LAYER_BY_ID[lid]; if (!L) continue;
+    L.visible = true;
+    if (lid.startsWith("source.gisogd.") && !L._fmtInit) {
+      L._fmtInit = true;
+      L.fmt = { hatch: false, line_label: null, ...(L.fmt || {}) };
+    }
+  }
   afterChange();
   fitView();
   renderLayers();

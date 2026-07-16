@@ -545,6 +545,32 @@
       const sourceKey = `${member}:${feature.id ?? index}`;
       const name = props.NAME || props.name;
       const fieldList = Object.keys(props).map(key => ({ name: key, type: "text" }));
+      // LineCode из объекта важнее маршрута по имени файла (как в выгрузке по
+      // области): на каждый код — свой объект в свой слой со своим знаком, знак
+      // кода = сторона. Объект БЕЗ LineCode идёт прежним путём по имени.
+      const routes = lineCodeRoutes(rawProps);
+      const pushField = (layerId) => {
+        if (!fields[layerId]) fields[layerId] = [];
+        const taken = new Set(fields[layerId].map(f => f.name));
+        fieldList.forEach(f => { if (!taken.has(f.name)) { fields[layerId].push(f); taken.add(f.name); } });
+      };
+      if (routes.length) {
+        parts.forEach((part, partIndex) => {
+          for (const [code, side, csid, clid] of routes) {
+            const ck = REDLINE_CODES.has(code) ? "redline" : "restrict";
+            if (ck === "redline" && !part.line) continue;
+            if (ck === "restrict" && !part.ring && !part.line) continue;
+            const out = { kind: ck, layer_id: clid, ...part, style_id: csid,
+              props: ck === "redline"
+                ? { status: "существующая", ...props, line_code: code, line_side: side }
+                : { basis: "ГИС ОГД", ...props, line_code: code, line_side: side },
+              srcKey: `${clid}:${sourceKey}#${partIndex}` };
+            features.push(out);
+            pushField(clid);
+          }
+        });
+        return;
+      }
       parts.forEach((part, partIndex) => {
         let output;
         if (kind === "redline" && part.line) {
@@ -575,7 +601,18 @@
     const manifest = snapshot("gisogd", sourceDoc, features, { filename, payload });
     const prov = provenance(manifest);
     features.forEach(feature => { feature.prov = { ...prov }; });
-    return { features, notes, fields, source_doc: sourceDoc, snapshot: manifest, diff: null };
+    // слои-приёмники по знакам (source.gisogd.zouit.*): фронт их регистрирует,
+    // иначе объект молча уедет в общий слой по ВИДУ (правило 7)
+    const layers = [], seenLayer = new Set();
+    for (const f of features) {
+      if (!f.layer_id || seenLayer.has(f.layer_id)) continue;
+      seenLayer.add(f.layer_id);
+      if (!f.layer_id.startsWith("source.gisogd.zouit.")) continue;
+      layers.push({ id: f.layer_id, title: `ГИС ОГД: ${LGR_STYLE_TITLE[f.style_id] || f.style_id}`,
+        code: "terr.restrict", kind: f.kind, style_id: f.style_id,
+        stage: "existing", source_kind: "gisogd" });
+    }
+    return { features, notes, fields, source_doc: sourceDoc, snapshot: manifest, diff: null, layers };
   }
 
   // Static Pages edition: direct extent imports. Public OSM Overpass and
