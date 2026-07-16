@@ -1859,11 +1859,14 @@ function drawMarkerGlyph(shape, px, py, tx, ty, nx, ny, s, period) {
       ctx.lineTo(px + nx * s + tx * s, py + ny * s + ty * s);
       ctx.stroke(); break;
     case "chevron": case "chevron_dot": {
-      // остриё внутрь зоны, плечи на линии (Эталон: зубец «▽» остриём в зону)
+      // Галка-стрелка: УЗКИЙ конец (остриё) НА линии, плечи раскрываются по
+      // нормали. Раньше остриё уходило ОТ линии, а плечи стояли на черте —
+      // выглядело как «▽», а не как галка, направленная в линию (правка юзера:
+      // «узким концом повёрнуты к линии»). Теперь apex = (px,py) на линии.
       const w2 = s * 0.5;
-      ctx.moveTo(px - tx * w2, py - ty * w2);
-      ctx.lineTo(px + nx * s, py + ny * s);
-      ctx.lineTo(px + tx * w2, py + ty * w2);
+      ctx.moveTo(px + nx * s - tx * w2, py + ny * s - ty * w2);
+      ctx.lineTo(px, py);
+      ctx.lineTo(px + nx * s + tx * w2, py + ny * s + ty * w2);
       ctx.stroke();
       if (shape === "chevron_dot") {
         ctx.beginPath();
@@ -1970,25 +1973,61 @@ function measureLabel(s, font) {
 // ребре засечки распределяются равномерно с отступом от вершин, а не
 // непрерывно по периметру — иначе на углах засечки соседних рёбер
 // сходятся вплотную (в Эталоне углы свободны). mk={shape,period,size} px.
-function drawLineMarkers(pts, mk, color, closed, inward) {
+function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
   const chain = closed ? [...pts, pts[0]] : pts;
   const scr = chain.map(p => w2s(...p));
   const period = mk.period || 40, s = mk.size || 4;
   ctx.save();
   ctx.setLineDash([]);
-  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.2;
-  for (let i = 1; i < scr.length; i++) {
-    const [x1, y1] = scr[i - 1], [x2, y2] = scr[i];
-    const d = Math.hypot(x2 - x1, y2 - y1);
-    if (d < period * 0.5) continue;      // ребро короче половины периода
-    const tx = (x2 - x1) / d, ty = (y2 - y1) / d;
-    const nx = -ty * inward, ny = tx * inward;
-    const n = Math.max(1, Math.round(d / period));
-    const gap = d / n;
-    for (let k = 0; k < n; k++) {
-      const t = (gap * (k + 0.5)) / d;
-      drawMarkerGlyph(mk.shape, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
-                      tx, ty, nx, ny, s, period);
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  // штрих засечки — той же толщины, что линия (правка юзера), не фикс. 1.2
+  ctx.lineWidth = Math.max(0.5, width || 1);
+  const dashArr = (dash && dash.length) ? dash : null;
+  if (dashArr) {
+    // Линия штриховая → засечка стоит ТОЛЬКО на черте, не в разрыве (правка
+    // юзера). Привязываемся к центру самого длинного «штриха» в цикле dash и
+    // ставим засечку на каждом k-м штрихе (k≈period/цикл, минимум 1). Фаза
+    // dash отсчитывается от начала цепочки — как её рисует ctx.
+    const cycle = dashArr.reduce((a, b) => a + b, 0) || period;
+    let bestLen = -1, bestOff = 0, run = 0;
+    for (let i = 0; i < dashArr.length; i++) {
+      if (i % 2 === 0 && dashArr[i] > bestLen) { bestLen = dashArr[i]; bestOff = run + dashArr[i] / 2; }
+      run += dashArr[i];
+    }
+    const k = Math.max(1, Math.round(period / cycle));
+    let acc = 0;
+    for (let i = 1; i < scr.length; i++) {
+      const [x1, y1] = scr[i - 1], [x2, y2] = scr[i];
+      const d = Math.hypot(x2 - x1, y2 - y1);
+      if (d < 1e-6) continue;
+      const tx = (x2 - x1) / d, ty = (y2 - y1) / d;
+      const nx = -ty * inward, ny = tx * inward;
+      let j = Math.ceil((acc - bestOff) / cycle);
+      for (; ; j++) {
+        const L = j * cycle + bestOff;      // глобальная длина центра j-го штриха
+        if (L > acc + d) break;
+        if (L < acc || ((j % k) + k) % k !== 0) continue;
+        const t = (L - acc) / d;
+        drawMarkerGlyph(mk.shape, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
+                        tx, ty, nx, ny, s, period);
+      }
+      acc += d;
+    }
+  } else {
+    // сплошная линия — равномерно по period (углы свободны, как раньше)
+    for (let i = 1; i < scr.length; i++) {
+      const [x1, y1] = scr[i - 1], [x2, y2] = scr[i];
+      const d = Math.hypot(x2 - x1, y2 - y1);
+      if (d < period * 0.5) continue;
+      const tx = (x2 - x1) / d, ty = (y2 - y1) / d;
+      const nx = -ty * inward, ny = tx * inward;
+      const n = Math.max(1, Math.round(d / period));
+      const gap = d / n;
+      for (let k = 0; k < n; k++) {
+        const t = (gap * (k + 0.5)) / d;
+        drawMarkerGlyph(mk.shape, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
+                        tx, ty, nx, ny, s, period);
+      }
     }
   }
   ctx.restore();
@@ -2220,7 +2259,8 @@ function draw() {
                       : (!side0 && st.line_marker.dir === "out") ? [-inw] : [inw];
           for (const side of sides)
             drawLineMarkers(f.ring || f.line, st.line_marker,
-                            st.stroke || cvColor("redline", "#df0024"), !!f.ring, side);
+                            st.stroke || cvColor("redline", "#df0024"), !!f.ring, side,
+                            st.width, st.dash);
         }
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
