@@ -1843,10 +1843,20 @@ function drawHatch(ring, hatch, strokeColor) {
   ctx.restore();
 }
 
+// Штрих засечки-маркера чуть тоньше самой линии (см. drawLineMarkers).
+// Единая величина с scene.py MARKER_WIDTH_RATIO — холст и печать не должны
+// расходиться по толщине галок.
+const MARKER_WIDTH_RATIO = 0.65;
+
 // Одна засечка в экранной точке (px,py): касательная (tx,ty), нормаль
 // внутрь (nx,ny). Формы: tick ⊢, tee ⊥, corner Г, chevron ∨, chevron_dot ∨.,
 // triangle ▼, dot ●, square ■, diamond ◇.
-function drawMarkerGlyph(shape, px, py, tx, ty, nx, ny, s, period) {
+function drawMarkerGlyph(mk, px, py, tx, ty, nx, ny, s, period) {
+  const shape = mk.shape;
+  // Толщина штриха маркера = его собственная (mk.ow из QML outline_width),
+  // а не толщина линии — иначе засечки-штрихи выходят волоском и не читаются
+  // (код 9 при этом вообще исчезал). Залитые формы (▼/●) ow не используют.
+  if (mk.ow) ctx.lineWidth = mk.ow;
   ctx.beginPath();
   switch (shape) {
     case "tee":
@@ -1877,22 +1887,28 @@ function drawMarkerGlyph(shape, px, py, tx, ty, nx, ny, s, period) {
       break;
     }
     case "triangle": {
-      // залитый «▼» остриём внутрь зоны, основание на линии (Эталон)
+      // «▼» остриём внутрь зоны, основание на линии. filled===false → КОНТУРНЫЙ
+      // (в QML fill alpha=0, рисуется только обводка: коды 11/18/50). Прежде
+      // заливали сплошняком — отсюда «ПК (18) неправильно».
       const b = s * 0.5;
       ctx.moveTo(px - tx * b, py - ty * b);
       ctx.lineTo(px + tx * b, py + ty * b);
       ctx.lineTo(px + nx * s, py + ny * s);
-      ctx.closePath(); ctx.fill(); break;
+      ctx.closePath();
+      if (mk.filled === false) ctx.stroke(); else ctx.fill();
+      break;
     }
     case "triangle2": {
-      // два наложенных залитых треугольника остриём внутрь зоны (Эталон ООЗТ)
-      const b = s * 0.5;
-      for (const [base, apex] of [[0, s * 0.85], [s * 0.45, s * 1.3]]) {
-        const bx = px + nx * base, by = py + ny * base;
+      // ООЗТ (код 47): ДВА раздельных треугольника ▲▲ вдоль линии, остриём
+      // внутрь зоны. Прежде два треугольника накладывались почти в одну точку
+      // и слипались в блоб (жалоба юзера) — теперь разнесены по касательной.
+      const b = s * 0.42, gap = s * 0.7;
+      for (const o of [-gap, gap]) {
+        const bx = px + tx * o, by = py + ty * o;
         ctx.beginPath();
         ctx.moveTo(bx - tx * b, by - ty * b);
         ctx.lineTo(bx + tx * b, by + ty * b);
-        ctx.lineTo(px + nx * apex, py + ny * apex);
+        ctx.lineTo(bx + nx * s, by + ny * s);
         ctx.closePath(); ctx.fill();
       }
       break;
@@ -1921,9 +1937,16 @@ function drawMarkerGlyph(shape, px, py, tx, ty, nx, ny, s, period) {
       }
       ctx.stroke(); break;
     }
-    default:  // tick
-      ctx.moveTo(px, py); ctx.lineTo(px + nx * s, py + ny * s);
+    default: {  // tick — перпендикулярный штрих
+      // Видимый РАЗМАХ засечки = бо́льшая из (длина size, толщина ow), толщина
+      // штриха = меньшая. Иначе код 9 (size 0.25px, ow 7px) вырождался в
+      // невидимый смаз вдоль линии — жалоба «маркеры не видно».
+      const ext = Math.max(s, mk.ow || 0);
+      if (mk.ow) ctx.lineWidth = Math.max(0.4, Math.min(s, mk.ow));
+      ctx.moveTo(px, py); ctx.lineTo(px + nx * ext, py + ny * ext);
       ctx.stroke();
+      break;
+    }
   }
 }
 
@@ -1980,8 +2003,10 @@ function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
   ctx.save();
   ctx.setLineDash([]);
   ctx.strokeStyle = color; ctx.fillStyle = color;
-  // штрих засечки — той же толщины, что линия (правка юзера), не фикс. 1.2
-  ctx.lineWidth = Math.max(0.5, width || 1);
+  // штрих засечки — чуть ТОНЬШЕ линии (правка юзера): галка на толщине линии
+  // читалась грубовато. MARKER_WIDTH_RATIO держим единым с scene.py (печать),
+  // иначе холст и PDF разойдутся.
+  ctx.lineWidth = Math.max(0.4, (width || 1) * MARKER_WIDTH_RATIO);
   const dashArr = (dash && dash.length) ? dash : null;
   if (dashArr) {
     // Линия штриховая → засечка стоит ТОЛЬКО на черте, не в разрыве (правка
@@ -2008,7 +2033,7 @@ function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
         if (L > acc + d) break;
         if (L < acc || ((j % k) + k) % k !== 0) continue;
         const t = (L - acc) / d;
-        drawMarkerGlyph(mk.shape, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
+        drawMarkerGlyph(mk, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
                         tx, ty, nx, ny, s, period);
       }
       acc += d;
@@ -2025,7 +2050,7 @@ function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
       const gap = d / n;
       for (let k = 0; k < n; k++) {
         const t = (gap * (k + 0.5)) / d;
-        drawMarkerGlyph(mk.shape, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
+        drawMarkerGlyph(mk, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
                         tx, ty, nx, ny, s, period);
       }
     }
