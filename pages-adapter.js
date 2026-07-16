@@ -513,7 +513,16 @@
   window.addEventListener("DOMContentLoaded", () => {
     document.body.classList.add("pages-mode");
     const logo = document.getElementById("logo");
-    if (logo) logo.insertAdjacentHTML("beforeend", '<b class="web-badge">Веб</b>');
+    if (logo) {
+      logo.insertAdjacentHTML("beforeend", '<b class="web-badge">Веб</b>');
+      // Номер ЗАГРУЖЕННОГО кода (из __GRADO_ASSET_VERSION__ — печётся в index.html
+      // в связке с app.js?v=, поэтому НЕ врёт как version.json, который грузится
+      // отдельно и может обновиться, пока код в кэше старый). Если после
+      // обновления число не сменилось — страница из кэша браузера.
+      var bv = window.__GRADO_ASSET_VERSION__;
+      if (bv) logo.insertAdjacentHTML("beforeend",
+        '<b class="build-badge" title="Номер загруженного кода. Если после обновления он не сменился — страница открыта из кэша браузера (жёсткая перезагрузка или новый адрес со ?смена-номера).">b' + bv + '</b>');
+    }
     const album = document.getElementById("btn-album");
     if (album) { album.textContent = "Альбом"; album.title = "Настроить состав альбома"; }
     const buffer = document.getElementById("btn-buffer-open");
@@ -546,7 +555,7 @@
     addMenuNote("menu-data", "В веб-версии доступны OSM и НСПД по видимой области, а также файлы НСПД и GeoJSON. ZIP и прямые ссылки требуют настольную версию.");
     addMenuNote("menu-out", "DXF и печать в масштабе доступны в настольной версии.");
     const style = document.createElement("style");
-    style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.web-disabled{opacity:.46;cursor:default}.web-disabled:hover,.web-disabled:focus{background:transparent;color:var(--text)}.web-menu-note{max-width:250px;margin:6px 4px 2px;padding:8px 9px;border-radius:8px;background:var(--field-bg);color:var(--text-2);font-size:11px;line-height:1.35}.pages-mode #st-bridge{display:none!important}`;
+    style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.build-badge{margin-left:5px;padding:2px 6px;border-radius:6px;background:var(--field-bg);color:var(--text-2);font-size:9px;letter-spacing:.03em;font-weight:600;opacity:.7;cursor:help}.web-disabled{opacity:.46;cursor:default}.web-disabled:hover,.web-disabled:focus{background:transparent;color:var(--text)}.web-menu-note{max-width:250px;margin:6px 4px 2px;padding:8px 9px;border-radius:8px;background:var(--field-bg);color:var(--text-2);font-size:11px;line-height:1.35}.pages-mode #st-bridge{display:none!important}`;
     document.head.appendChild(style);
   });
 })();
