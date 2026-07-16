@@ -171,6 +171,11 @@
     target.groups.push(...(part.groups || []));
     target.notes.push(...(part.notes || []));
     target.snapshots.push(...(part.snapshots || []));
+    // слои-приёмники (source.gisogd.zouit.* по LineCode) — фронт их регистрирует;
+    // без этого объект молча уедет в общий слой по ВИДУ (правило 7)
+    for (const L of (part.layers || []))
+      if (!(target.layers || (target.layers = [])).some(x => x.id === L.id))
+        target.layers.push(L);
   };
   const fetchOverpass = async query => {
     let lastError = null;
@@ -229,7 +234,7 @@
     if (!Array.isArray(bbox) || bbox.length !== 4 || !bbox.every(value => Number.isFinite(Number(value))))
       throw new Error("Некорректная видимая область");
     const area = bboxKm2(bbox);
-    const result = { groups: [], notes: [], snapshots: [] };
+    const result = { groups: [], notes: [], snapshots: [], layers: [] };
     const osmSources = sources.filter(source => source.startsWith("osm."));
     const nspdSources = sources.filter(source => source.startsWith("nspd."));
     if (osmSources.length) {
@@ -271,6 +276,9 @@
                   merged.groups[0].fields.push(fd);
               });
               merged.snapshots.push(...part.snapshots);
+              for (const L of (part.layers || []))
+                if (!(merged.layers || (merged.layers = [])).some(x => x.id === L.id))
+                  merged.layers.push(L);
             }
           } catch (error) { result.notes.push(`ГИС ОГД [${layer.code}]: ${error.message || error}`); }
         }
@@ -314,7 +322,12 @@
       const stylesUrl = new URL("./styles.json", window.location.href);
       const release = window.__GRADO_ASSET_VERSION__;
       if (release) stylesUrl.searchParams.set("v", release);
-      return nativeFetch(stylesUrl, options);
+      const response = await nativeFetch(stylesUrl, options);
+      // Таблица «код ЛГР → знак» для маршрутизации по LineCode строится из самой
+      // библиотеки знаков — не дублируем её в коде (источник: moscow_lgr.json).
+      try { pagesCore.setLgrCodeStyles(await response.clone().json()); }
+      catch (e) { /* без библиотеки останется маршрут по имени слоя */ }
+      return response;
     }
     if (path === "/api/basemap-info") return json({
       origin_lon: pagesCore.originWgs84[0], origin_lat: pagesCore.originWgs84[1],

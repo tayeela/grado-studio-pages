@@ -408,6 +408,66 @@
       snapshot: manifest, diff: null };
   }
 
+  // ---- LineCode: тип линии из САМИХ данных (зеркало studio_core) ----------
+  // Портал отдаёт его в каждом объекте: поле `linelineco` («LineLineCode»,
+  // обрезанный до 10 символов по правилам DBF). Ровно по нему фильтруют QML:
+  //   array_intersect(string_to_array("LineCode", ','), array(-1,1))
+  // Формат — коды через запятую, каждый СО ЗНАКОМ: «1», «-1», «1,-29». Одна
+  // геометрия может нести несколько знаков (34% объектов слоя УДС), а знак
+  // различает СТОРОНУ линии. Маршрут по имени слоя остаётся запасным — для
+  // объектов, у которых LineCode нет.
+  const LINE_CODE_KEYS = ["linelineco", "linecode", "line_code"];
+  const REDLINE_CODES = new Set([1, 2, 3, 4]);
+  let LGR_CODE_STYLE = Object.create(null);
+
+  // код ЛГР → style_id; строится из загруженной библиотеки знаков (styles.json),
+  // чтобы не дублировать таблицу: источник правды — moscow_lgr.json
+  let LGR_STYLE_TITLE = Object.create(null);
+  function setLgrCodeStyles(styles) {
+    LGR_CODE_STYLE = Object.create(null);
+    LGR_STYLE_TITLE = Object.create(null);
+    for (const [sid, s] of Object.entries(styles || {}))
+      if (s && s.lgr_code != null) {
+        LGR_CODE_STYLE[s.lgr_code] = sid;
+        LGR_STYLE_TITLE[sid] = s.title || sid;
+      }
+    return Object.keys(LGR_CODE_STYLE).length;
+  }
+
+  function parseLineCodes(value) {
+    const out = [], seen = new Set();
+    for (const part of String(value == null ? "" : value).split(",")) {
+      const t = part.trim();
+      if (!t) continue;
+      const n = Number.parseInt(t, 10);
+      if (!Number.isFinite(n) || n === 0 || seen.has(Math.abs(n))) continue;
+      seen.add(Math.abs(n));
+      out.push([Math.abs(n), n > 0 ? 1 : -1]);
+    }
+    return out;
+  }
+
+  function lineCodesOf(props) {
+    for (const [k, v] of Object.entries(props || {}))
+      if (LINE_CODE_KEYS.includes(k.toLowerCase()) && v !== null && v !== "")
+        return parseLineCodes(v);
+    return [];
+  }
+
+  // [код, сторона] → [код, сторона, style_id, layer_id]; коды без знака в
+  // библиотеке пропускаем (выдумывать знак нельзя)
+  function lineCodeRoutes(props) {
+    const out = [];
+    for (const [code, side] of lineCodesOf(props)) {
+      const sid = LGR_CODE_STYLE[code];
+      if (!sid) continue;
+      out.push([code, side, sid,
+        REDLINE_CODES.has(code) ? "source.gisogd.red_lines"
+          : "source.gisogd.zouit." + sid.slice(4)]);
+    }
+    return out;
+  }
+
   const GISOGD_LAYER_RULES = [
     [["функционал", "funkcional"], "zone", "source.gisogd.func_zones"],
     [["красн", "krasn"], "redline", "source.gisogd.red_lines"],
@@ -793,7 +853,23 @@
       const props = Object.fromEntries(Object.entries(f.properties || {})
         .filter(([, v]) => v !== null && v !== ""));
       const key = gisogdKey(f.properties || {}, f, i);
+      // LineCode из объекта важнее маршрута по имени слоя: на каждый код —
+      // СВОЙ объект в СВОЙ слой со своим знаком; знак кода = сторона линии
+      const routes = lineCodeRoutes(f.properties || {});
       parts.forEach((part, pi) => {
+        if (routes.length) {
+          for (const [code, side, csid, clid] of routes) {
+            group.features.push({
+              kind: REDLINE_CODES.has(code) ? "redline" : "restrict",
+              layer_id: clid, ...part,
+              props: { ...props, line_code: code, line_side: side },
+              style_id: csid,
+              srcKey: `${clid}:${layer.code}:${key}#${pi}`,
+            });
+          }
+          addFields(group, props);
+          return;
+        }
         const out = { kind, layer_id: layerId, ...part, props: { ...props },
                       srcKey: `${layerId}:${layer.code}:${key}#${pi}` };
         if (styleId) out.style_id = styleId;
@@ -806,11 +882,25 @@
       group.features, { bbox, code: layer.code });
     const prov = provenance(manifest);
     group.features.forEach(f => { f.prov = { ...prov }; });
+    // Описания слоёв, в которые реально попали объекты. Без них фронт не заведёт
+    // source.gisogd.zouit.* (его LAYERS_V2 — статический список) и объект молча
+    // уедет в общий слой по ВИДУ (правило 7).
+    const layers = [];
+    const seenL = new Set();
+    for (const f of group.features) {
+      if (!f.layer_id || seenL.has(f.layer_id)) continue;
+      seenL.add(f.layer_id);
+      if (!f.layer_id.startsWith("source.gisogd.zouit.")) continue;
+      layers.push({ id: f.layer_id, title: `ГИС ОГД: ${LGR_STYLE_TITLE[f.style_id] || f.style_id}`,
+                    code: "terr.restrict", kind: f.kind, style_id: f.style_id,
+                    stage: "existing", source_kind: "gisogd" });
+    }
     return { groups: [group], notes: skipped ? [`пропущено повреждённых: ${skipped}`] : [],
-             snapshots: [manifest] };
+             snapshots: [manifest], layers };
   }
 
-  return { computeTep, preflightProject, webProject, importNspd, importGeoJson,
+  return { setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
+    computeTep, preflightProject, webProject, importNspd, importGeoJson,
     gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent,
     GISOGD_WEB_LAYERS,
     originWgs84: [...ORIGIN_WGS84],
