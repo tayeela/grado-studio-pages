@@ -507,13 +507,18 @@
     [["технич", "инженерных коммуникаций", "tehnicheskaya_zona"], "lgr.tech.zone"],
   ];
   const GISOGD_RESTRICT_HINTS = ["зоуит", "zouit", "охран", "ohran", "sanit", "санит"];
+  const zouitLayerId = sid => "source.gisogd.zouit." + sid.slice(4);  // "lgr.vodookhr" → …zouit.vodookhr
   const gisogdRoute = member => {
     const lower = member.toLowerCase();
     for (const [keys, kind, layerId] of GISOGD_LAYER_RULES)
       if (keys.some(key => lower.includes(key))) return [kind, layerId];
-    if (GISOGD_RESTRICT_HINTS.some(key => lower.includes(key)) ||
-        GISOGD_STYLE_RULES.some(([keys]) => keys.some(key => lower.includes(key))))
-      return ["restrict", "source.gisogd.restrict"];
+    // опознанный знак → СВОЙ слой (как в настольной версии): раньше всё
+    // распознанное сваливалось в общий source.gisogd.restrict, и водоохранные,
+    // СЗЗ, пояса санохраны нельзя было отключить или оформить по отдельности
+    const rule = GISOGD_STYLE_RULES.find(([keys]) => keys.some(key => lower.includes(key)));
+    if (rule) return ["restrict", zouitLayerId(rule[1])];
+    if (GISOGD_RESTRICT_HINTS.some(key => lower.includes(key)))
+      return ["restrict", "source.gisogd.restrict"];  // ЗОУИТ-термин без точного знака
     return ["generic", "source.gisogd.other"];
   };
   const gisogdStyle = member => {
