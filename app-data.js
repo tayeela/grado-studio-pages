@@ -317,12 +317,47 @@ async function openDataFetch() {
         return;
       }
       snapshot();
+      // Слои-приёмники, которых нет в статическом LAYERS_V2 (напр.
+      // source.gisogd.zouit.* — свой слой на каждый знак ЛГР): регистрируем ДО
+      // раскладки объектов. Иначе layerOf не находит слой и молча откатывается
+      // на слой по ВИДУ — все ЗОУИТ снова в одной куче (железное правило 7).
+      for (const ld of (data.layers || [])) {
+        if (LAYER_BY_ID[ld.id]) continue;
+        const L = {
+          id: ld.id, title: ld.title, kind: ld.kind || "restrict",
+          semantic_class: ld.code, geometry_type: "polygon",
+          style_id: ld.style_id, stage: ld.stage || "existing",
+          source_kind: ld.source_kind, import_only: true, visible: true,
+          defaults: () => ({}),
+        };
+        if (["boundary", "restrict", "zone"].includes(L.kind)) L.topology = "coverage";
+        LAYERS_V2.push(L);
+        LAYER_BY_ID[L.id] = L;
+      }
       let addedAll = 0, dupAll = 0, invalidAll = 0;
       const parts = [];
       for (const g of groups) {
         const { added, dup, invalid } = importSourceFeatures(g.features);  // дедуп + валидация
         addedAll += added; dupAll += dup; invalidAll += invalid;
         parts.push(`${g.title} ${added}`);
+        // Объекты ОГД с LineCode разъезжаются по СВОИМ слоям (один код — один
+        // знак), поэтому показываем все затронутые слои, а не только слой
+        // группы: иначе объект есть, а слоя в панели не видно.
+        const touched = new Set([g.layer_id]);
+        for (const f of g.features) if (f.layer_id) touched.add(f.layer_id);
+        for (const lid of touched) {
+          const TL = LAYER_BY_ID[lid];
+          if (!TL) continue;
+          TL.visible = true;
+          // По умолчанию у импортированных зон штриховка и подпись ВЫКЛЮЧЕНЫ:
+          // на реальном чертеже поверх зон лежат линии ЛГР и сам проект, и
+          // сплошная штриховка «съедает» их. Включаются в «Оформлении слоя»
+          // (это переопределение слоя, знак в библиотеке не тронут).
+          if (lid.startsWith("source.gisogd.") && !TL._fmtInit) {
+            TL._fmtInit = true;
+            TL.fmt = { hatch: false, line_label: null, ...(TL.fmt || {}) };
+          }
+        }
         const L = LAYER_BY_ID[g.layer_id];
         if (!L) continue;
         L.visible = true;          // слой-приёмник сразу виден в панели

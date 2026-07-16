@@ -479,7 +479,13 @@ function ruleStyleFor(L, f) {
 function styleOf(f) {
   const L = layerOf(f);
   const sid = f.style_id;
-  const base = (sid && (state.projectStyles[sid] || STYLES_V2[sid])) || ruleStyleFor(L, f) || layerStyle(L) || {};
+  let base = (sid && (state.projectStyles[sid] || STYLES_V2[sid])) || ruleStyleFor(L, f) || layerStyle(L) || {};
+  // «Оформление слоя» действует и на объекты со СВОИМ знаком. Раньше явный
+  // f.style_id забирал стиль прямо из библиотеки, минуя L.fmt: правки слоя
+  // (напр. выключить штриховку/подпись у импортированных зон ОГД) просто не
+  // применялись — объект молча оставался с библиотечным знаком.
+  // Порядок остаётся: знак → оформление слоя → оформление объекта.
+  if (sid && L && L.fmt) base = { ...base, ...L.fmt };
   return f.fmt ? { ...base, ...f.fmt } : base;   // f.fmt — оформление отдельного объекта
 }
 
@@ -2203,9 +2209,15 @@ function draw() {
           // зоны, dir "out" — наружу (ООПТ/ландшафт ОКН/водоохранная/прибрежная),
           // dir "both" — по ОБЕ стороны линии (в QML это два под-маркера с
           // углами 0 и 180: 8 ООПТ, 18 ПК, 55 памятник природы)
-          const inw = f.ring && f.ring.length > 2 ? inwardSign(f.ring) : 1;
+          // Сторона из ДАННЫХ важнее знака: у объектов ОГД она задана знаком
+          // LineCode («1» и «-1» — одна линия, зона с разных сторон), и это
+          // точнее, чем наша догадка по центроиду. inwardSign остаётся для
+          // объектов без LineCode (начерченных вручную).
+          const side0 = f.props && f.props.line_side;
+          const inw = side0 ? side0
+                    : f.ring && f.ring.length > 2 ? inwardSign(f.ring) : 1;
           const sides = st.line_marker.dir === "both" ? [inw, -inw]
-                      : st.line_marker.dir === "out" ? [-inw] : [inw];
+                      : (!side0 && st.line_marker.dir === "out") ? [-inw] : [inw];
           for (const side of sides)
             drawLineMarkers(f.ring || f.line, st.line_marker,
                             st.stroke || cvColor("redline", "#df0024"), !!f.ring, side);
