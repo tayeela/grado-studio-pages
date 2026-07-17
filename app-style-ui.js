@@ -807,20 +807,65 @@ function openStyleLibrary() {
   const edited = {}, resetSet = new Set();
   const overridden = new Set(Object.keys(state.styleOverrides || {}));
   let sel = null;
-  const listHtml = [...groups.entries()].map(([g, ids]) => `<div class="lib-group">
-    <div class="lib-group-title">${escHtml(g)}</div>
-    ${ids.map(sid => `<div class="lib-item" data-sid="${escHtml(sid)}">
-      <span class="lib-sw" style="background:${swatchOf(sid)};border-color:${STYLES_V2[sid].stroke || "#999"}"></span>
-      <span class="lib-nm">${escHtml(STYLES_V2[sid].title)}</span>
-      <span class="lib-dot${overridden.has(sid) ? " on" : ""}" title="изменён"></span></div>`).join("")}
-  </div>`).join("");
-  overlay.innerHTML = `<div class="modal lib-modal">
-    <div class="modal-head">Библиотека знаков
+  // swatchOf объявлен раньше listHtml — нужен при первой отрисовке списка
+  function swatchOf(sid) {
+    const st = STYLES_V2[sid];
+    if (st.fill) return st.fill;
+    if (st.hatch && st.hatch.color) {
+      const a = st.hatch.cross ? 45 : (st.hatch.angle ?? 45);
+      return `repeating-linear-gradient(${90 - a}deg, ${st.hatch.color} 0 1px, transparent 1px 4px)`;
+    }
+    return "transparent";
+  }
+  // Аббревиатуры знаков живут в id латиницей (lgr.oozt, lgr.pk, lgr.szz), а
+  // ищут их кириллицей («ООЗТ», «ПК», «СЗЗ» — как в плейсхолдере). Транслит
+  // запроса → сверка с id, иначе поиск по собственному примеру давал пусто.
+  const _TR = { а:"a", б:"b", в:"v", г:"g", д:"d", е:"e", ё:"e", ж:"zh", з:"z",
+    и:"i", й:"y", к:"k", л:"l", м:"m", н:"n", о:"o", п:"p", р:"r", с:"s", т:"t",
+    у:"u", ф:"f", х:"kh", ц:"c", ч:"ch", ш:"sh", щ:"sch", ъ:"", ы:"y", ь:"",
+    э:"e", ю:"yu", я:"ya" };
+  const translit = s => s.replace(/[а-яё]/g, c => _TR[c] ?? c);
+  // Список + поиск — по системе окон студии (как каталог ОГД, beta.52):
+  // поле во всю ширину колонки 36px, focus-ring, фильтр мгновенный на input.
+  function listHtmlOf(query) {
+    const low = (query || "").trim().toLowerCase();
+    const tr = translit(low);
+    const parts = [];
+    let n = 0;
+    for (const [g, ids] of groups.entries()) {
+      const hit = low
+        ? ids.filter(sid => {
+            const t = (STYLES_V2[sid].title || "").toLowerCase();
+            const s = sid.toLowerCase();
+            return t.includes(low) || s.includes(low) || s.includes(tr)
+              || String(g).toLowerCase().includes(low);
+          })
+        : ids;
+      if (!hit.length) continue;
+      n += hit.length;
+      parts.push(`<div class="lib-group">
+        <div class="lib-group-title">${escHtml(g)}</div>
+        ${hit.map(sid => `<div class="lib-item" data-sid="${escHtml(sid)}" role="option" aria-selected="${sid === sel ? "true" : "false"}">
+          <span class="lib-sw" style="background:${swatchOf(sid)};border-color:${STYLES_V2[sid].stroke || "#999"}"></span>
+          <span class="lib-nm">${escHtml(STYLES_V2[sid].title)}</span>
+          <span class="lib-dot${overridden.has(sid) ? " on" : ""}" title="изменён"></span></div>`).join("")}
+      </div>`);
+    }
+    if (!parts.length)
+      return `<div class="lib-empty" role="status">Ничего не найдено</div>`;
+    return parts.join("") + (low ? `<div class="lib-count" aria-live="polite">${n} знак(ов)</div>` : "");
+  }
+  overlay.innerHTML = `<div class="modal lib-modal" role="dialog" aria-modal="true" aria-labelledby="lib-modal-title">
+    <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Библиотека</span><span id="lib-modal-title">Знаки ЛГР и базовые</span></span>
       <button class="modal-x" aria-label="Закрыть библиотеку знаков"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="lib-hint">Правка меняет сам эталонный знак — во всех проектах, на холсте и на печати. Синяя точка — знак изменён.</div>
       <div class="lib-body">
-        <div class="lib-list">${listHtml}</div>
+        <div class="lib-side">
+          <label class="lib-search"><span class="sr-only">Поиск знака</span>
+            <input id="lib-q" class="lib-q" type="search" placeholder="поиск знака — например, ООЗТ" autocomplete="off" spellcheck="false"></label>
+          <div class="lib-list" id="lib-list" role="listbox" aria-label="Знаки">${listHtmlOf("")}</div>
+        </div>
         <div class="lib-edit" id="lib-edit"><div class="muted" style="padding:var(--sp-4)">Выберите знак слева</div></div>
       </div>
     </div>
@@ -833,16 +878,29 @@ function openStyleLibrary() {
   document.body.appendChild(overlay);
   overlay.addEventListener("click", ev => ev.stopPropagation());
   const $ = id => overlay.querySelector("#" + id);
+  const listEl = $("lib-list");
+  const qEl = $("lib-q");
 
-  function swatchOf(sid) {
-    const st = STYLES_V2[sid];
-    if (st.fill) return st.fill;
-    if (st.hatch && st.hatch.color) {
-      const a = st.hatch.cross ? 45 : (st.hatch.angle ?? 45);
-      return `repeating-linear-gradient(${90 - a}deg, ${st.hatch.color} 0 1px, transparent 1px 4px)`;
-    }
-    return "transparent";
+  function bindListClicks() {
+    listEl.querySelectorAll(".lib-item").forEach(el =>
+      el.addEventListener("click", () => renderEditor(el.dataset.sid)));
   }
+  function refreshList() {
+    listEl.innerHTML = listHtmlOf(qEl.value);
+    bindListClicks();
+    if (sel) {
+      const active = listEl.querySelector(`.lib-item[data-sid="${CSS.escape(sel)}"]`);
+      if (active) {
+        active.classList.add("active");
+        active.setAttribute("aria-selected", "true");
+      }
+    }
+  }
+  // мгновенный отклик на pointer-down/input — без debounce (apple-design: kill latency)
+  qEl.addEventListener("input", refreshList);
+  bindListClicks();
+  // фокус в поиск при открытии — как в cmdk/каталоге
+  requestAnimationFrame(() => { try { qEl.focus({ preventScroll: true }); } catch (_) { qEl.focus(); } });
   const opt = (sel, v, lbl) => `<option value="${escHtml(v)}"${sel === v ? " selected" : ""}>${escHtml(lbl)}</option>`;
   function renderEditor(sid) {
     sel = sid;
@@ -951,8 +1009,6 @@ function openStyleLibrary() {
     const ed = $("lib-edit"); if (ed && ed._syncOp) ed._syncOp();
     updatePreview(); draw();
   }
-  overlay.querySelectorAll(".lib-item").forEach(el =>
-    el.addEventListener("click", () => renderEditor(el.dataset.sid)));
 
   const close = () => { overlay.remove(); initStyles(); };   // отмена → перечитать эталон+сохранённое
   overlay.querySelector(".modal-x").addEventListener("click", close);

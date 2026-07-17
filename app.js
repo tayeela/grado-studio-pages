@@ -805,11 +805,15 @@ function _markerGlyphsSVG(mk, x0, x1, midY, stroke) {
             return fillMode ? `<path d="${p}" fill="${stroke}"/>` : `<path d="${p}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`;
           }
           case "triangle2": {
-            const base = 2.4, g = 5;
-            const tri = (cx) => `M ${cx - base} ${midY} L ${cx + base} ${midY} L ${cx} ${apexY} Z`;
-            return [x - g, x + g].map(cx => fillMode
-              ? `<path d="${tri(cx)}" fill="${stroke}"/>`
-              : `<path d="${tri(cx)}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`).join("");
+            // два треугольника со сдвигом вверх (к apex), не вбок
+            const base = 2.6, h = midY - apexY, sh = h * 0.38;
+            const tri = (dy) => {
+              const y0 = midY - dy, y1 = apexY - dy;
+              return `M ${x - base} ${y0} L ${x + base} ${y0} L ${x} ${y1} Z`;
+            };
+            return [0, sh].map(dy => fillMode
+              ? `<path d="${tri(dy)}" fill="${stroke}"/>`
+              : `<path d="${tri(dy)}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`).join("");
           }
           case "tick":
             return `<line x1="${x}" y1="${midY}" x2="${x}" y2="${apexY}" stroke="${stroke}" stroke-width="${ow}"/>`;
@@ -2126,16 +2130,15 @@ function drawMarkerGlyph(mk, px, py, tx, ty, nx, ny, s, period) {
       break;
     }
     case "triangle2": {
-      // ООЗТ (код 47): ДВА раздельных треугольника ▲▲ вдоль линии, остриём
-      // внутрь зоны. Прежде два треугольника накладывались почти в одну точку
-      // и слипались в блоб (жалоба юзера) — теперь разнесены по касательной.
-      const b = s * 0.42, gap = s * 0.7;
-      for (const o of [-gap, gap]) {
-        const bx = px + tx * o, by = py + ty * o;
+      // ООЗТ (код 47) — как ООПТ на эталоне: два залитых треугольника,
+      // наложенных со сдвигом «вверх» (по нормали внутрь зоны), не ▲▲ вдоль линии.
+      const b = s * 0.5, shift = s * 0.38;
+      for (const o of [0, shift]) {
+        const cx = px + nx * o, cy = py + ny * o;
         ctx.beginPath();
-        ctx.moveTo(bx - tx * b, by - ty * b);
-        ctx.lineTo(bx + tx * b, by + ty * b);
-        ctx.lineTo(bx + nx * s, by + ny * s);
+        ctx.moveTo(cx - tx * b, cy - ty * b);
+        ctx.lineTo(cx + tx * b, cy + ty * b);
+        ctx.lineTo(cx + nx * s, cy + ny * s);
         ctx.closePath(); ctx.fill();
       }
       break;
