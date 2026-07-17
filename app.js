@@ -817,6 +817,11 @@ const state = {
   drawing: null, drag: null, pan: null, edit: null, measure: null,
   snapHit: null, guides: [], typed: "", mouse: null,
   view: { k: 1.1, tx: 120, ty: 0 },
+  // Читаемые знаки ЛГР — настройка ЭКРАНА (не проекта), см. groundFactor.
+  // По умолчанию выключено: по умолчанию рисуем ровно по эталону (QML).
+  lgrReadable: (() => {
+    try { return !!localStorage.getItem("grado_lgr_readable"); } catch (_) { return false; }
+  })(),
   undo: [], redo: [], nextId: 1,
   trimCtx: null,                  // { boundary: Set(id), ready: bool } — режимы «Обрезать»/«Продлить»
   xf: null,                       // { kind:'rotate'|'scale'|'mirror', phase:'base'|'act', pivot, orig, ref, val, p2 } — интерактивные преобразования
@@ -2049,13 +2054,23 @@ function measureLabel(s, font) {
 // обзоре выходил «пунктир с узкими галками» (правка юзера).
 const LGR_DETAIL_MAX_DENOM = 10000;
 function lgrDenom() { return 3779.5 / state.view.k; }
+// «Читаемый режим» (переключатель в «Сетка и привязки») — ТОЛЬКО для экрана.
+// По эталону знак задан в метрах, поэтому на рабочих 1:4000+ засечка ~3 px:
+// в QGIS так же, но чертить неудобно. В читаемом режиме коэффициент = 1, т.е.
+// знак всегда выглядит как на опорном 1:2000: постоянный разборчивый размер,
+// шаг заведомо крупнее засечки (37.8 px против 6.6) — вплотную не встают.
+// Печать/выпуск читаемый режим НЕ трогает: Style.for_scale в scene.py про него
+// не знает, лист всегда по эталону.
+function lgrReadable() { return !!(state.view && state.lgrReadable); }
 function groundFactor(st) {
   if (!st || !st.ground_units) return 1;
+  if (lgrReadable()) return 1;
   const refK = 3779.5 / (st.ref_scale || 2000);
   return state.view.k / refK;          // ровно по QML: без искусственного пола
 }
 function lgrDetailVisible(st) {
   if (!st || !st.ground_units) return true;
+  if (lgrReadable()) return true;      // в читаемом знак виден на любом зуме
   return lgrDenom() <= LGR_DETAIL_MAX_DENOM;
 }
 function scaledDash(st) {
@@ -6172,6 +6187,19 @@ on("btn-zoom-fit", "click", fitView);
 on("obj-snap", "change", e => setOsnap(e.target.checked));
 on("grid-snap", "change", e => setGridSnap(e.target.checked));
 on("grid-show", "change", e => { state.gridShow = e.target.checked; draw(); });
+// Читаемый режим знаков ЛГР — настройка ЭКРАНА, не проекта: живёт в
+// localStorage (как выбор источников данных), а не в .grado, чтобы не менять
+// файл проекта и не путать соседа по хабу. Печать не затрагивается.
+on("lgr-readable", "change", e => {
+  state.lgrReadable = e.target.checked;
+  try { localStorage.setItem("grado_lgr_readable", state.lgrReadable ? "1" : ""); } catch (_) {}
+  draw();
+});
+// галочка должна показывать сохранённый выбор, а не дефолт разметки
+(() => {
+  const el = document.getElementById("lgr-readable");
+  if (el) el.checked = !!state.lgrReadable;
+})();
 on("access-show", "change", e => {
   state.accessRadii.on = e.target.checked;
   const w = document.getElementById("access-r-wrap");

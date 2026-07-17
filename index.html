@@ -4,16 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ГРАДО Студия</title>
-<link rel="icon" type="image/svg+xml" href="./favicon.svg?v=9080">
-<link rel="stylesheet" href="./tokens.css?v=9080">
-<script src="./crs.js?v=9080"></script>
-<script>(function(){try{var B="9080";fetch("./version.json?ts="+Date.now(),{cache:"no-store"}).then(function(r){return r.json();}).then(function(v){var L=v&&String(v.bundle_version);if(L&&L!==B){var u=new URL(location.href);if(u.searchParams.get("b")!==L){u.searchParams.set("b",L);location.replace(u.toString());}}}).catch(function(){});}catch(e){}})();</script>
-<script>window.__GRADO_ASSET_VERSION__="9080";</script>
-<script src="./pages-core.js?v=9080"></script>
-<script src="./pages-adapter.js?v=9080"></script>
-<script src="./canvas-theme.js?v=9080"></script>
-<link rel="stylesheet" href="./redesign/shell.css?v=9080">
-<link rel="stylesheet" href="./redesign/studio2.css?v=9080">
+<link rel="icon" type="image/svg+xml" href="./favicon.svg?v=9081">
+<link rel="stylesheet" href="./tokens.css?v=9081">
+<script src="./crs.js?v=9081"></script>
+<script>(function(){try{var B="9081";fetch("./version.json?ts="+Date.now(),{cache:"no-store"}).then(function(r){return r.json();}).then(function(v){var L=v&&String(v.bundle_version);if(L&&L!==B){var u=new URL(location.href);if(u.searchParams.get("b")!==L){u.searchParams.set("b",L);location.replace(u.toString());}}}).catch(function(){});}catch(e){}})();</script>
+<script>window.__GRADO_ASSET_VERSION__="9081";</script>
+<script src="./pages-core.js?v=9081"></script>
+<script src="./pages-adapter.js?v=9081"></script>
+<script src="./canvas-theme.js?v=9081"></script>
+<link rel="stylesheet" href="./redesign/shell.css?v=9081">
+<link rel="stylesheet" href="./redesign/studio2.css?v=9081">
 <style>
   /* служебные слоты движка (скрытые контейнеры/поля, которые app.js биндит) и
      группы-заголовки в шапке. Новый интерфейс (редизайн Фаза 0-3). */
@@ -227,6 +227,8 @@
   <label class="chk"><input type="checkbox" id="grid-snap" checked> привязка к сетке (C)</label>
   <label class="chk"><input type="checkbox" id="obj-snap" checked> привязка к объектам (X)</label>
   <label class="chk"><input type="checkbox" id="access-show"> радиусы доступности соцобъектов</label>
+  <label class="chk" title="По эталону (QML) штрих и засечки знаков ЛГР заданы в метрах на местности: на 1:4000 засечка — около 3 px, как и в QGIS. Режим делает знак постоянного разборчивого размера на экране. На печать не влияет — лист всегда по эталону."><input type="checkbox" id="lgr-readable"> читаемые знаки ЛГР на любом зуме</label>
+  <div class="hint" id="lgr-readable-hint">Только на экране: печать и выпуск всегда по эталону.</div>
   <div class="field" id="access-r-wrap" style="display:none"><label>Радиус доступности, м</label>
     <input id="access-r" type="number" value="300" min="50" max="3000" step="50"></div>
 </div>
@@ -311,16 +313,16 @@
 </svg>
 
 <!-- реальный движок (тот же порядок, что в index.html) -->
-<script src="./app-transform.js?v=9080"></script>
-<script src="./app-snap.js?v=9080"></script>
-<script src="./app-data.js?v=9080"></script>
-<script src="./app-style-ui.js?v=9080"></script>
-<script src="./app-attr.js?v=9080"></script>
-<script src="./app.js?v=9080"></script>
-<script src="./app-import.js?v=9080"></script>
-<script src="./collab.js?v=9080"></script>
-<script src="./redesign/cmdk.js?v=9080"></script>
-<script src="./redesign/a11y.js?v=9080"></script>
+<script src="./app-transform.js?v=9081"></script>
+<script src="./app-snap.js?v=9081"></script>
+<script src="./app-data.js?v=9081"></script>
+<script src="./app-style-ui.js?v=9081"></script>
+<script src="./app-attr.js?v=9081"></script>
+<script src="./app.js?v=9081"></script>
+<script src="./app-import.js?v=9081"></script>
+<script src="./collab.js?v=9081"></script>
+<script src="./redesign/cmdk.js?v=9081"></script>
+<script src="./redesign/a11y.js?v=9081"></script>
 <script>
   // счётчик слоёв в заголовке карточки — следит за #layers-body (app.js не трогаем)
   (function () {
