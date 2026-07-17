@@ -2068,6 +2068,18 @@ function lgrDenom() { return 3779.5 / state.view.k; }
 // Печать/выпуск читаемый режим НЕ трогает: Style.for_scale в scene.py про него
 // не знает, лист всегда по эталону.
 function lgrReadable() { return !!(state.view && state.lgrReadable); }
+// Толщина линии знака в читаемом режиме. По QML она 1 px (line_width_unit=
+// Pixel — единица УСТРОЙСТВА, зумом не масштабируется), это волосок. Здесь
+// поднимаем до разборчивой, но НЕ переворачиваем пропорцию эталона: штрих
+// засечки на опорном 1:2000 = 2.34 px, поэтому линия остаётся тоньше него.
+// Только экран: печать берёт ширину из стиля как есть (Style.for_scale ширину
+// не трогает — Pixel не масштабируется).
+const LGR_READABLE_WIDTH_PX = 2;
+function lgrWidth(st) {
+  return (st && st.ground_units && lgrReadable())
+    ? Math.max(st.width || 1, LGR_READABLE_WIDTH_PX)
+    : (st ? st.width : 1);
+}
 function groundFactor(st) {
   if (!st || !st.ground_units) return 1;
   if (lgrReadable()) return 1;
@@ -2308,7 +2320,9 @@ function draw() {
       // считаться по ТОМУ ЖЕ штриху, которым рисуется линия.
       const stDash = scaledDash(st);
       ctx.setLineDash(stDash || []);
-      ctx.lineWidth = st.width; ctx.strokeStyle = canvasStrokeOf(f, st);
+      // читаемый режим поднимает волосок 1 px до разборчивого (см. lgrWidth)
+      const stWidth = lgrWidth(st);
+      ctx.lineWidth = stWidth; ctx.strokeStyle = canvasStrokeOf(f, st);
       if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
         const [ax, ay] = w2s(...f.line[0]);
@@ -2407,7 +2421,7 @@ function draw() {
           for (const side of sides)
             drawLineMarkers(f.ring || f.line, scaledMarker(st),
                             st.stroke || cvColor("redline", "#df0024"), !!f.ring, side,
-                            st.width, stDash);
+                            stWidth, stDash);
         }
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
