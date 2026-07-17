@@ -818,9 +818,15 @@ const state = {
   snapHit: null, guides: [], typed: "", mouse: null,
   view: { k: 1.1, tx: 120, ty: 0 },
   // Читаемые знаки ЛГР — настройка ЭКРАНА (не проекта), см. groundFactor.
-  // По умолчанию выключено: по умолчанию рисуем ровно по эталону (QML).
+  // По умолчанию ВКЛЮЧЕНО (решение юзера): по эталону засечка на рабочих
+  // 1:4000+ ~3 px, чертить неудобно. Печать этим режимом не затрагивается —
+  // лист всегда по эталону (Style.for_scale про режим не знает).
+  // null (настройку не трогали) → дефолт ВКЛ; "0" → осознанно выключено.
   lgrReadable: (() => {
-    try { return !!localStorage.getItem("grado_lgr_readable"); } catch (_) { return false; }
+    try {
+      const v = localStorage.getItem("grado_lgr_readable");
+      return v === null ? true : v === "1";
+    } catch (_) { return true; }
   })(),
   undo: [], redo: [], nextId: 1,
   trimCtx: null,                  // { boundary: Set(id), ready: bool } — режимы «Обрезать»/«Продлить»
@@ -6192,7 +6198,9 @@ on("grid-show", "change", e => { state.gridShow = e.target.checked; draw(); });
 // файл проекта и не путать соседа по хабу. Печать не затрагивается.
 on("lgr-readable", "change", e => {
   state.lgrReadable = e.target.checked;
-  try { localStorage.setItem("grado_lgr_readable", state.lgrReadable ? "1" : ""); } catch (_) {}
+  // "1"/"0", а не "1"/"" — пустая строка неотличима от «не трогали», и
+  // осознанное выключение терялось бы при следующей загрузке (дефолт ВКЛ).
+  try { localStorage.setItem("grado_lgr_readable", state.lgrReadable ? "1" : "0"); } catch (_) {}
   draw();
 });
 // галочка должна показывать сохранённый выбор, а не дефолт разметки
