@@ -460,7 +460,20 @@ function openLayerStyle(layer, opts = {}) {
     : (DASH_PRESETS[$("fmt-dashp").value] ?? null);
   const updateDashPreview = () => {
     const wv = Math.max(0.2, parseFloat($("fmt-width").value) || 1);
-    $("fmt-dash-preview").innerHTML = lineSampleSVG(currentDash(), strokeCF.get(), wv);
+    // Полный образец знака: штрих + ЗАСЕЧКИ (из контролов маркера или из
+    // базового знака) — правка юзера «превью должно полностью отображать стиль».
+    const base = $("fmt-preset").value && STYLES_V2[$("fmt-preset").value];
+    let marker = null;
+    if ($("fmt-marker") && $("fmt-marker").checked) {
+      marker = { shape: $("fmt-marker-shape").value || "tick",
+        size: parseFloat($("fmt-marker-size").value) || 4,
+        dir: $("fmt-marker-dir").value === "out" ? "out" : "in" };
+    } else if (base && base.line_marker) marker = base.line_marker;
+    const prev = { stroke: strokeCF.get(), dash: currentDash(), width: wv,
+      line_marker: marker,
+      hatch: $("fmt-hatch") && $("fmt-hatch").checked
+        ? { angle: 45, color: strokeCF.get() } : false };
+    $("fmt-dash-preview").innerHTML = styleSampleSVG(prev, { h: 20 });
     const shape = $("fmt-preview-shape");
     const alpha = Math.round(((parseInt($("fmt-opacity").value) || 100) / 100) * 255)
       .toString(16).padStart(2, "0");
@@ -925,7 +938,7 @@ function openStyleLibrary() {
   function updatePreview() {
     const st = edited[sel] || STYLES_V2[sel];
     const p = $("lib-prev");
-    if (p) p.innerHTML = lineSampleSVG(st.dash, st.stroke, st.width || 1);
+    if (p) p.innerHTML = styleSampleSVG(st, { h: 22 });   // полный знак: штрих + засечки + заливка
   }
   function onEdit() {
     const px = collectPx();

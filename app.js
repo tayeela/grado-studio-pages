@@ -430,13 +430,14 @@ function layerOf(f) { return LAYER_BY_ID[f.layer_id] || LAYER_BY_KIND[f.kind] ||
 // убрав слои-знаки, мы отняли бы возможность гасить отдельные классы — поэтому
 // выключенные категории храним в оформлении слоя (fmt.cats_off = [style_id]).
 function featCat(f) { return (f && f.style_id) || null; }
-// Объекты для РАСЧЁТОВ (ТЭП): скрытая категорией геометрия не считается —
-// пользователь её выключил, и цифры не должны расходиться с тем, что он видит.
-// Видимость СЛОЯ намеренно не фильтруем (историческое поведение: модель
-// считается целиком); сохранение (collectState) тоже всегда полное — это данные.
-function tepFeatures() {
+// Объекты БЕЗ скрытых категорией: пользователь выключил класс — он не должен
+// ни считаться в ТЭП, ни попадать в ВЫПУСК (печать/DXF/альбом). Это то же, что
+// он видит на холсте. Сохранение .grado НЕ фильтруем — это данные проекта, а
+// cats_off хранится в fmt и восстанавливает скрытое состояние при открытии.
+function catVisibleFeatures() {
   return state.features.filter(f => !catOff(layerOf(f), f));
 }
+function tepFeatures() { return catVisibleFeatures(); }
 function catOff(L, f) {
   const off = L && L.fmt && L.fmt.cats_off;
   if (!off || !off.length) return false;
@@ -737,6 +738,99 @@ function lineSampleSVG(dash, color, width) {
   return `<svg viewBox="0 0 200 18" preserveAspectRatio="none" width="100%" height="18">` +
     `<line x1="4" y1="9" x2="196" y2="9" stroke="${escHtml(color || "#888")}" ` +
     `stroke-width="${w}" stroke-linecap="butt"${da ? ` stroke-dasharray="${da}"` : ""}/></svg>`;
+}
+
+// Полный образец ЗНАКА для превью (список слоёв, библиотека, диалог): линия со
+// штрихом + засечки всех форм + заливка/штриховка зоны. В превью размеры засечек
+// НЕ эталонные, а разборчиво-крупные (это легенда — знак должен читаться), но
+// форма/направление/контурность/цвет — как у знака. st — фронт-стиль
+// {stroke, fill, dash, width, hatch, line_marker}.
+function styleSampleSVG(st, opts) {
+  st = st || {};
+  const W = (opts && opts.w) || 200, H = (opts && opts.h) || 22;
+  const midY = H / 2, x0 = 6, x1 = W - 6;
+  const stroke = escHtml(st.stroke || "#888");
+  const filled = st.fill && st.fill !== "transparent";
+  const hatched = st.hatch;
+  let defs = "", bg = "";
+  if (filled || hatched) {
+    // зона: заливка + штриховка + рамка
+    if (filled) bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="${escHtml(st.fill)}"/>`;
+    if (hatched) {
+      const h = (st.hatch === true) ? { angle: 45, spacing_px: 6, color: st.stroke } : st.hatch;
+      const col = escHtml(h.color || st.stroke || "#888");
+      const gap = Math.max(3, (h.spacing_px || 6));
+      const ang = h.cross ? 45 : (h.angle == null ? 45 : h.angle);
+      defs += `<pattern id="hp${styleSampleSVG._n = (styleSampleSVG._n || 0) + 1}" patternUnits="userSpaceOnUse" width="${gap}" height="${gap}" patternTransform="rotate(${90 - ang})"><line x1="0" y1="0" x2="0" y2="${gap}" stroke="${col}" stroke-width="0.8"/></pattern>`;
+      bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="url(#hp${styleSampleSVG._n})"/>`;
+      if (h.cross) {
+        defs += `<pattern id="hp${styleSampleSVG._n}b" patternUnits="userSpaceOnUse" width="${gap}" height="${gap}" patternTransform="rotate(${135})"><line x1="0" y1="0" x2="0" y2="${gap}" stroke="${col}" stroke-width="0.8"/></pattern>`;
+        bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="url(#hp${styleSampleSVG._n}b)"/>`;
+      }
+    }
+    bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="none" stroke="${stroke}" stroke-width="1"/>`;
+    // знак-зона может нести засечки по контуру (напр. ПК-18: штриховка + красные
+    // треугольники) — показываем их поверх, иначе превью «теряет» половину знака
+    const zmk = st.line_marker;
+    if (zmk && zmk.shape) bg += _markerGlyphsSVG(zmk, x0, x1, midY, stroke);
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">${defs}${bg}</svg>`;
+  }
+  // линия: штрих + засечки
+  const lw = Math.max(0.8, Math.min(3, (st.width || 1) * 1.2));
+  const da = (st.dash && st.dash.length) ? st.dash.map(n => (n * 1.4).toFixed(1)).join(",") : "";
+  let parts = `<line x1="${x0}" y1="${midY}" x2="${x1}" y2="${midY}" stroke="${stroke}" stroke-width="${lw}" stroke-linecap="butt"${da ? ` stroke-dasharray="${da}"` : ""}/>`;
+  const mk = st.line_marker;
+  if (mk && mk.shape) parts += _markerGlyphsSVG(mk, x0, x1, midY, stroke);
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">${parts}</svg>`;
+}
+// Засечки знака вдоль образца линии — крупно и разборчиво (легенда).
+function _markerGlyphsSVG(mk, x0, x1, midY, stroke) {
+  const s = 7, w2 = 4, ow = Math.max(1, mk.ow ? mk.ow * 0.7 : 1.1);
+  const filled = mk.filled !== false;
+  const dirs = mk.dir === "both" ? [-1, 1] : [mk.dir === "out" ? -1 : -1];  // вверх (и вниз для both)
+  const step = 26, n = Math.floor((x1 - x0 - 12) / step);
+  let out = "";
+  for (let i = 1; i <= n; i++) {
+    const x = x0 + 8 + i * step;
+    for (const d of dirs) {
+      const ny = d * -1;                 // экранная нормаль (up при d=1)
+      const apexY = midY + ny * s;
+      const glyph = (fillMode) => {
+        switch (mk.shape) {
+          case "chevron": case "chevron_dot":
+            return `<path d="M ${x - w2} ${apexY} L ${x} ${midY} L ${x + w2} ${apexY}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`;
+          case "triangle": {
+            const base = 3;
+            const p = `M ${x - base} ${midY} L ${x + base} ${midY} L ${x} ${apexY} Z`;
+            return fillMode ? `<path d="${p}" fill="${stroke}"/>` : `<path d="${p}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`;
+          }
+          case "triangle2": {
+            const base = 2.4, g = 5;
+            const tri = (cx) => `M ${cx - base} ${midY} L ${cx + base} ${midY} L ${cx} ${apexY} Z`;
+            return [x - g, x + g].map(cx => fillMode
+              ? `<path d="${tri(cx)}" fill="${stroke}"/>`
+              : `<path d="${tri(cx)}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`).join("");
+          }
+          case "tick":
+            return `<line x1="${x}" y1="${midY}" x2="${x}" y2="${apexY}" stroke="${stroke}" stroke-width="${ow}"/>`;
+          case "tee":
+            return `<line x1="${x}" y1="${midY}" x2="${x}" y2="${apexY}" stroke="${stroke}" stroke-width="${ow}"/>` +
+                   `<line x1="${x - w2}" y1="${apexY}" x2="${x + w2}" y2="${apexY}" stroke="${stroke}" stroke-width="${ow}"/>`;
+          case "diamond": {
+            const p = `M ${x} ${midY - s / 2} L ${x + s / 2} ${midY} L ${x} ${midY + s / 2} L ${x - s / 2} ${midY} Z`;
+            return fillMode ? `<path d="${p}" fill="${stroke}"/>` : `<path d="${p}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`;
+          }
+          case "dot":
+            return `<circle cx="${x}" cy="${midY}" r="2" fill="${stroke}"/>`;
+          default:
+            return "";
+        }
+      };
+      out += glyph(filled);
+      if (mk.shape === "triangle" && !filled) continue;   // контурный уже нарисован
+    }
+  }
+  return out;
 }
 // ---------- инструменты: геометрия отдельно, слой отдельно (шаг 2) ----------
 // Инструмент создаёт только геометрию; слой и стиль назначает активный слой.
@@ -2155,6 +2249,7 @@ function lgrReadable() { return !!(state.view && state.lgrReadable); }
 // Только экран: печать берёт ширину из стиля как есть (Style.for_scale ширину
 // не трогает — Pixel не масштабируется).
 const LGR_READABLE_WIDTH_PX = 2;
+const LGR_READABLE_MARKER_PX = 7;
 function lgrWidth(st) {
   return (st && st.ground_units && lgrReadable())
     ? Math.max(st.width || 1, LGR_READABLE_WIDTH_PX)
@@ -2188,8 +2283,23 @@ function scaledDash(st) {
 // а за пределом 1:10000 не рисуется вовсе (lgrDetailVisible) — как в QGIS.
 function scaledMarker(st) {
   const mk = st.line_marker;
+  if (!mk) return mk;
   const f = groundFactor(st);
-  if (!mk || f === 1) return mk;
+  if (f === 1) {
+    // Читаемый режим: держим засечку разборчивой. По эталону размер маркера в
+    // метрах, и на опорном 1:2000 мелкие треугольники (ПК-18, ООПТ-8, ландшафт-11)
+    // — всего ~3.8 px, вырождаются в точку. Поднимаем размер до читаемого пола,
+    // толщину штриха масштабируем тем же коэффициентом (сохраняя пропорцию
+    // контура). ТОЛЬКО экран — печать/выпуск всегда по эталону (scaledMarker в
+    // scene.py про режим не знает).
+    if (st.ground_units && lgrReadable() && (mk.size || 0) < LGR_READABLE_MARKER_PX) {
+      const g = LGR_READABLE_MARKER_PX / (mk.size || LGR_READABLE_MARKER_PX);
+      const out = { ...mk, size: LGR_READABLE_MARKER_PX };
+      if (mk.ow) out.ow = mk.ow * g;
+      return out;
+    }
+    return mk;
+  }
   // ow (толщина штриха засечки) в QML тоже MapUnit (outline_width_unit) — метры.
   // Без масштабирования глиф ужимался, а штрих оставался прежним: на 1:4451
   // засечка 3 px со штрихом 2.34 px вырождалась в кляксу. Масштабируем ВСЁ
@@ -3925,21 +4035,10 @@ function renderLayers() {
   for (const layer of layerRowsTopFirst()) {
     const count = featuresOnLayer(layer.id).length;
     const st = layerStyle(layer);
-    // свотч: заливка, а для стилей ЛГР — мини-штриховка цветом зоны
-    let swBg = st.fill || "transparent";
-    const _filled = st.fill != null && st.fill !== "transparent";
-    const _hatched = !_filled && st.hatch && st.hatch.color;
-    if (_hatched) {
-      const a = st.hatch.cross ? 45 : (st.hatch.angle ?? 45);
-      swBg = `repeating-linear-gradient(${90 - a}deg, ${st.hatch.color} 0 1px, transparent 1px 4px)`;
-    }
-    // значок наглядно показывает геометрию: линия или полигон БЕЗ заливки →
-    // полоска (класс sw-line), заливка/штриховка → квадрат
-    const _lineLike = !_filled && !_hatched;
-    const swCls = _lineLike ? "sw sw-line" : "sw";
-    const swStyle = _lineLike
-      ? `--c:${st.stroke || "#999"};background:transparent;border-color:${st.stroke || "#999"}`
-      : `background:${swBg};border-color:${st.stroke || "#999"}`;
+    // Свотч в списке — ПОЛНЫЙ образец знака (штрих + засечки для линий, заливка +
+    // штриховка + рамка для зон), а не просто цветной квадрат: правка юзера
+    // «превью должны полностью отображать стиль». styleSampleSVG — из app.js.
+    const swSvg = styleSampleSVG(st, { w: 40, h: 16 });
     const row = document.createElement("div");
     const isActive = layer.id === state.activeLayerId;
     row.className = "layer-row" + (isActive ? " active" : "") +
@@ -3960,7 +4059,7 @@ function renderLayers() {
       <button type="button" class="layer-select" aria-pressed="${isActive}"
         aria-label="Выбрать слой «${layerTitle}» для рисования"
         title="${layerTitle} — сделать активным слоем для рисования">
-        <span class="${swCls}" style="${swStyle}" aria-hidden="true"></span>
+        <span class="sw-svg" aria-hidden="true">${swSvg}</span>
         <span class="nm">${layerTitle}</span><span class="cnt">${count || ""}</span>
         ${badges}
       </button>
@@ -6462,7 +6561,7 @@ function signOverridePatch(st) {
 function canvasStyleExport() {
   const styles = {}, cache = new Map();
   let n = 0;
-  const features = state.features.map(f => {
+  const features = catVisibleFeatures().map(f => {
     const js = JSON.stringify(canvasStyleToBackend(styleOf(f)));
     let sid = cache.get(js);
     if (!sid) { sid = "canvas." + (n++); cache.set(js, sid); styles[sid] = JSON.parse(js); }
@@ -6527,7 +6626,11 @@ async function download(url, suffix) {
   // не знают наши инлайн-стили)
   const canvasMode = exportStyleMode() === "canvas" &&
                      (url === "/api/print" || url === "/api/album");
-  let features = state.features, canvasStyles = null;
+  // выпуск (печать/DXF/альбом) уважает скрытые категории — как холст и ТЭП
+  // (правка юзера); .grado — это ДАННЫЕ проекта, сохраняется полным (cats_off
+  // в fmt восстановит скрытое состояние при открытии)
+  let features = url === "/api/grado" ? state.features : catVisibleFeatures();
+  let canvasStyles = null;
   if (canvasMode) { const ex = canvasStyleExport(); features = ex.features; canvasStyles = ex.styles; }
   const payload = { features, params: params(),
                     basemap: basemap.on,  // подложка включена → ортофото в альбоме и на печити

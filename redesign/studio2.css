@@ -140,10 +140,11 @@
 .panel-head .phbtn{width:34px;height:34px}
 .panel-head .phbtn .ic{width:20px!important;height:20px!important}
 
-/* значок слоя: линия / полигон без заливки → полоска (класс sw-line из renderLayers) */
-.layer-row .sw.sw-line{background:transparent!important;box-shadow:none!important;border:none!important;position:relative}
-.layer-row .sw.sw-line::before{content:"";position:absolute;left:0;right:0;top:50%;height:3px;
-  transform:translateY(-50%);background:var(--c);border-radius:2px}
+/* значок слоя — ПОЛНЫЙ образец знака (SVG из styleSampleSVG): штрих + засечки
+   для линий, заливка/штриховка/рамка для зон. Заменил цветной квадрат/полоску. */
+.layer-row .sw-svg{width:40px;height:16px;flex:0 0 auto;display:block;border-radius:3px;overflow:hidden}
+.layer-row .sw-svg svg{display:block;width:100%;height:100%}
+.layer.hidden-lyr .sw-svg{opacity:.45}
 
 /* ---- контекстное меню слоя (.ctx-menu / .ctx-item) ---- */
 .ctx-menu{position:fixed;z-index:var(--z-menu);min-width:230px;background:var(--glass-strong);
