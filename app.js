@@ -2098,7 +2098,13 @@ function scaledMarker(st) {
   const mk = st.line_marker;
   const f = groundFactor(st);
   if (!mk || f === 1) return mk;
-  return { ...mk, period: (mk.period || 40) * f, size: (mk.size || 4) * f };
+  // ow (толщина штриха засечки) в QML тоже MapUnit (outline_width_unit) — метры.
+  // Без масштабирования глиф ужимался, а штрих оставался прежним: на 1:4451
+  // засечка 3 px со штрихом 2.34 px вырождалась в кляксу. Масштабируем ВСЁ
+  // одним коэффициентом; нижняя отсечка 0.4 px — чтобы штрих не исчез совсем.
+  const out = { ...mk, period: (mk.period || 40) * f, size: (mk.size || 4) * f };
+  if (mk.ow) out.ow = Math.max(0.4, mk.ow * f);
+  return out;
 }
 
 // Засечки вдоль линии/контура. Размещение ПОСЕГМЕНТНОЕ: на каждом прямом
