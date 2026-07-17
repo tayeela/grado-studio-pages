@@ -423,6 +423,35 @@ async function initStyles() {
 
 function layerOf(f) { return LAYER_BY_ID[f.layer_id] || LAYER_BY_KIND[f.kind] || null; }
 
+// Категории ВНУТРИ слоя. Слой теперь повторяет слой-источник (требование юзера:
+// «Зоны береговых полос» портала → свой слой, а не общий ЗОУИТ), поэтому классы
+// объектов живут в ОДНОМ слое и различаются знаком: дороги OSM — по тегу highway
+// (osm.hw.*), ОГД — по LineCode/имени (lgr.*). Без переключателя категорий,
+// убрав слои-знаки, мы отняли бы возможность гасить отдельные классы — поэтому
+// выключенные категории храним в оформлении слоя (fmt.cats_off = [style_id]).
+function featCat(f) { return (f && f.style_id) || null; }
+function catOff(L, f) {
+  const off = L && L.fmt && L.fmt.cats_off;
+  if (!off || !off.length) return false;
+  const c = featCat(f);
+  return !!c && off.includes(c);
+}
+// Категории, реально присутствующие в слое → для списка галочек в «Оформлении
+// слоя». Считаем по объектам, а не по библиотеке: показывать 26 классов дорог,
+// когда выгружены три, — мусор.
+function layerCats(L) {
+  const seen = new Map();
+  for (const f of state.features) {
+    if (layerOf(f) !== L) continue;
+    const c = featCat(f);
+    if (!c || seen.has(c)) continue;
+    const st = STYLES_V2[c];
+    seen.set(c, (st && st.title) || c);
+  }
+  return [...seen].map(([id, title]) => ({ id, title }))
+                  .sort((a, b) => a.title.localeCompare(b.title, "ru"));
+}
+
 /*
  * === ЛОГИКА СЛОЁВ И ФОРМАТИРОВАНИЯ (цель: логично + гибко) ===
  *
@@ -2310,7 +2339,7 @@ function draw() {
   const _byLayer = new Map();
   for (const f of state.features) {
     const L = layerOf(f);
-    if (!L || !L.visible || _cull(f)) continue;
+    if (!L || !L.visible || _cull(f) || catOff(L, f)) continue;
     let arr = _byLayer.get(L); if (!arr) _byLayer.set(L, arr = []); arr.push(f);
   }
   // занятые экранные bbox уже отрисованных подписей этого слоя за проход —

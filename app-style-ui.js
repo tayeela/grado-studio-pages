@@ -260,6 +260,20 @@ function openLayerStyle(layer, opts = {}) {
   const origRules = clone(layer.rules);
   let mode = opts.mode || (origRules && origRules.length ? "rules" : "single");
   const cur = layerStyle(layer);
+  // Категории слоя: слой повторяет слой-источник, поэтому классы объектов
+  // (дороги OSM по тегу highway, знаки ОГД по LineCode/имени) живут ВНУТРИ него
+  // и гасятся здесь, а не отдельными слоями-знаками. Список — по РЕАЛЬНО
+  // выгруженным объектам (layerCats), а не по библиотеке: показывать 26 классов
+  // дорог, когда выгружено три, — мусор. Меньше двух категорий — секции нет.
+  const cats = typeof layerCats === "function" ? layerCats(layer) : [];
+  const catsOffSet = new Set((layer.fmt && layer.fmt.cats_off) || []);
+  const catsSection = cats.length < 2 ? "" : `
+      <section class="style-section">
+        <div class="style-section-head"><span><b>Категории слоя</b><small>Что показывать из выгруженного слоя (${cats.length})</small></span></div>
+        <div class="fmt-body" id="fmt-cats">${cats.map(c =>
+          `<label class="chk"><input type="checkbox" class="fmt-cat" value="${escHtml(c.id)}"${catsOffSet.has(c.id) ? "" : " checked"}> ${escHtml(c.title)}</label>`
+        ).join("")}</div>
+      </section>`;
   const hasFill = cur.fill != null && cur.fill !== "transparent";
   const opacity = boundedNumber(Math.round((cur.fillOpacity != null ? cur.fillOpacity : 1) * 100), 10, 100, 100);
   const dp = dashPresetOf(cur.dash);
@@ -295,6 +309,7 @@ function openLayerStyle(layer, opts = {}) {
     </div>
     <div id="ls-single" role="tabpanel" aria-labelledby="style-mode-single"${mode === "single" ? "" : " hidden"}>
       <label class="style-preset-label"><span>Базовый знак</span><select id="fmt-preset">${stylePickerOptions(layer.fmt && layer.fmt.style_ref)}</select></label>
+      ${catsSection}
       <div class="style-editor-grid">
         <div class="style-controls">
           <section class="style-section">
@@ -420,6 +435,11 @@ function openLayerStyle(layer, opts = {}) {
 
   // ----- режим «Единый стиль» -----
   let syncOpUI = () => {};
+  // живой отклик: галочка категории сразу гасит/возвращает объекты на холсте
+  overlay.querySelectorAll(".fmt-cat").forEach(cb => cb.addEventListener("change", () => {
+    layer.fmt = { ...(layer.fmt || {}), cats_off: catsOffNow() };
+    draw();
+  }));
   const onColor = () => { $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview(); syncOpUI(); };
   const fillCF = makeColorField($("fmt-fill"), toHexColor(cur.fill, "#faf0bf"), onColor);
   syncOpUI = () => syncOpacityRange($("fmt-opacity"), $("fmt-opacity-out"), fillCF.get());
@@ -476,8 +496,13 @@ function openLayerStyle(layer, opts = {}) {
   };
   $("fmt-hasfill").addEventListener("change", syncBodies);
   $("fmt-hatch").addEventListener("change", syncBodies);
+  // выключенные категории — часть оформления слоя, но собираются отдельно:
+  // они не зависят от режима «единый стиль / по значению поля»
+  const catsOffNow = () => [...overlay.querySelectorAll(".fmt-cat")]
+    .filter(cb => !cb.checked).map(cb => cb.value);
   const collect = () => {
     const fmt = {
+      cats_off: catsOffNow(),
       stroke: strokeCF.get(),
       width: boundedNumber($("fmt-width").value, 0.2, 8, 1),
       fill: $("fmt-hasfill").checked ? fillCF.get() : null,

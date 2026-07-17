@@ -468,13 +468,13 @@
   // [код, сторона] → [код, сторона, style_id, layer_id]; коды без знака в
   // библиотеке пропускаем (выдумывать знак нельзя)
   function lineCodeRoutes(props) {
+    // [code, side, style_id] — ЗНАК и сторона из LineCode; слой больше НЕ
+    // отсюда (слой = слой-источник, см. importGisogdExtent), как на сервере
     const out = [];
     for (const [code, side] of lineCodesOf(props)) {
       const sid = LGR_CODE_STYLE[code];
       if (!sid) continue;
-      out.push([code, side, sid,
-        REDLINE_CODES.has(code) ? "source.gisogd.red_lines"
-          : "source.gisogd.zouit." + sid.slice(4)]);
+      out.push([code, side, sid]);
     }
     return out;
   }
@@ -572,7 +572,14 @@
     const inputFeatures = payload.type === "FeatureCollection" ? payload.features
       : payload.type === "Feature" ? [payload] : null;
     if (!Array.isArray(inputFeatures)) throw new Error("Нужен GeoJSON FeatureCollection");
-    const member = safeStem(filename), [kind, layerId] = gisogdRoute(member);
+    // СЛОЙ = файл-источник (требование юзера), не слой-знак: имя файла даёт
+    // и id слоя, и его название; знак назначается объекту отдельно.
+    const member = safeStem(filename);
+    const [routedKind] = gisogdRoute(member);
+    const kind = routedKind || "generic";
+    const slug = member.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "other";
+    const layerId = `source.gisogd.member.${slug}`;
+    const layerTitle = `ГИС ОГД: ${member}`;
     const fields = {}, features = [], notes = [];
     let skipped = 0, geometryError = null;
     inputFeatures.forEach((feature, index) => {
@@ -598,17 +605,18 @@
       };
       if (routes.length) {
         parts.forEach((part, partIndex) => {
-          for (const [code, side, csid, clid] of routes) {
+          for (const [code, side, csid] of routes) {
             const ck = REDLINE_CODES.has(code) ? "redline" : "restrict";
             if (ck === "redline" && !part.line) continue;
             if (ck === "restrict" && !part.ring && !part.line) continue;
-            const out = { kind: ck, layer_id: clid, ...part, style_id: csid,
+            // слой — файла-источника (layerId); различаются ЗНАКОМ (csid)
+            const out = { kind: ck, layer_id: layerId, ...part, style_id: csid,
               props: ck === "redline"
                 ? { status: "существующая", ...props, line_code: code, line_side: side }
                 : { basis: "ГИС ОГД", ...props, line_code: code, line_side: side },
-              srcKey: `${clid}:${sourceKey}#${partIndex}` };
+              srcKey: `${layerId}:${code}:${sourceKey}#${partIndex}` };
             features.push(out);
-            pushField(clid);
+            pushField(layerId);
           }
         });
         return;
@@ -625,7 +633,8 @@
           const styleId = gisogdStyle(member);
           if (styleId) output.style_id = styleId;
         } else {
-          output = { kind: "generic", layer_id: "source.gisogd.other", ...part, props: { ...props } };
+          // слой = файл-источник даже без опознанного знака (не общая свалка)
+          output = { kind: "generic", layer_id: layerId, ...part, props: { ...props } };
         }
         output.srcKey = `${output.layer_id}:${sourceKey}#${partIndex}`;
         features.push(output);
@@ -643,15 +652,16 @@
     const manifest = snapshot("gisogd", sourceDoc, features, { filename, payload });
     const prov = provenance(manifest);
     features.forEach(feature => { feature.prov = { ...prov }; });
-    // слои-приёмники по знакам (source.gisogd.zouit.*): фронт их регистрирует,
-    // иначе объект молча уедет в общий слой по ВИДУ (правило 7)
+    // слой-источник (файл) регистрируется у фронта, иначе объект молча уедет
+    // в слой по ВИДУ (правило 7). Один файл — один слой с его именем; знаки
+    // внутри различаются style_id и переключаются категориями.
     const layers = [], seenLayer = new Set();
     for (const f of features) {
       if (!f.layer_id || seenLayer.has(f.layer_id)) continue;
       seenLayer.add(f.layer_id);
-      if (!f.layer_id.startsWith("source.gisogd.zouit.")) continue;
-      layers.push({ id: f.layer_id, title: `ГИС ОГД: ${LGR_STYLE_TITLE[f.style_id] || f.style_id}`,
-        code: "terr.restrict", kind: f.kind, style_id: f.style_id,
+      if (!f.layer_id.startsWith("source.gisogd.")) continue;
+      layers.push({ id: f.layer_id, title: layerTitle,
+        code: "generic.line", kind: f.kind, style_id: null,
         stage: "existing", source_kind: "gisogd" });
     }
     return { features, notes, fields, source_doc: sourceDoc, snapshot: manifest, diff: null, layers };
@@ -917,12 +927,16 @@
     if (!payload || !Array.isArray(payload.features))
       throw new Error(`ГИС ОГД: слой ${layer.code} — не FeatureCollection`);
     const name = layer.name || layer.code || "";
-    let kind = layer.kind, layerId = layer.layer_id;
-    if (!layerId) [kind, layerId] = gisogdRoute(name);
-    if (!layerId) { kind = "generic"; layerId = "source.gisogd.other"; }
+    // СЛОЙ = слой-источник (требование юзера), а не слой-знак. kind нужен для
+    // вида объекта; layer_id для динамических слоёв — source.gisogd.<code>,
+    // как на сервере. Кураторские наборы приносят свой layer_id.
+    let [kind] = gisogdRoute(name);
+    kind = layer.kind || kind || "generic";
+    const layerId = layer.layer_id || `source.gisogd.${layer.code}`;
     const styleId = gisogdStyle(name);
-    const group = { source: `gisogd:${layer.code}`, title: name, layer_id: layerId,
-                    kind, features: [], fields: [], count: 0 };
+    const group = { source: `gisogd:${layer.code}`,
+                    title: layer.layer_id ? name : `ГИС ОГД: ${name}`,
+                    layer_id: layerId, kind, features: [], fields: [], count: 0 };
     let skipped = 0;
     payload.features.forEach((f, i) => {
       const fb = geomBbox(f && f.geometry);
@@ -937,13 +951,15 @@
       const routes = lineCodeRoutes(f.properties || {});
       parts.forEach((part, pi) => {
         if (routes.length) {
-          for (const [code, side, csid, clid] of routes) {
+          for (const [code, side, csid] of routes) {
             group.features.push({
+              // слой — источника (layerId), различаются ЗНАКОМ (csid); раньше
+              // код уводил объект в чужой слой-знак
               kind: REDLINE_CODES.has(code) ? "redline" : "restrict",
-              layer_id: clid, ...part,
+              layer_id: layerId, ...part,
               props: { ...props, line_code: code, line_side: side },
               style_id: csid,
-              srcKey: `${clid}:${layer.code}:${key}#${pi}`,
+              srcKey: `${layerId}:${code}:${key}#${pi}`,
             });
           }
           addFields(group, props);
@@ -961,17 +977,17 @@
       group.features, { bbox, code: layer.code });
     const prov = provenance(manifest);
     group.features.forEach(f => { f.prov = { ...prov }; });
-    // Описания слоёв, в которые реально попали объекты. Без них фронт не заведёт
-    // source.gisogd.zouit.* (его LAYERS_V2 — статический список) и объект молча
-    // уедет в общий слой по ВИДУ (правило 7).
+    // Слой-источник регистрируется у фронта, иначе объект молча уедет в слой по
+    // ВИДУ (LAYERS_V2 — статический список, правило 7). Один выгруженный слой
+    // портала — один слой с его названием; знаки внутри — категориями.
     const layers = [];
     const seenL = new Set();
     for (const f of group.features) {
       if (!f.layer_id || seenL.has(f.layer_id)) continue;
       seenL.add(f.layer_id);
-      if (!f.layer_id.startsWith("source.gisogd.zouit.")) continue;
-      layers.push({ id: f.layer_id, title: `ГИС ОГД: ${LGR_STYLE_TITLE[f.style_id] || f.style_id}`,
-                    code: "terr.restrict", kind: f.kind, style_id: f.style_id,
+      if (!f.layer_id.startsWith("source.gisogd.")) continue;
+      layers.push({ id: f.layer_id, title: group.title,
+                    code: "generic.line", kind: f.kind, style_id: null,
                     stage: "existing", source_kind: "gisogd" });
     }
     return { groups: [group], notes: skipped ? [`пропущено повреждённых: ${skipped}`] : [],
