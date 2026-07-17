@@ -292,7 +292,9 @@
     }
     if (sources.includes("terrain.contours"))
       result.notes.push("Рельеф по области пока требует настольную версию");
-    if (!osmSources.length && !nspdSources.length && !sources.includes("terrain.contours"))
+    const gisogdPicked = sources.some(s => s.startsWith("gisogd"));
+    if (!osmSources.length && !nspdSources.length && !gisogdPicked
+        && !sources.includes("terrain.contours"))
       result.notes.push("Не выбраны поддерживаемые источники");
     return result;
   }

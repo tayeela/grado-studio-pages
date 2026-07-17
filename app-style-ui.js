@@ -438,6 +438,9 @@ function openLayerStyle(layer, opts = {}) {
   // живой отклик: галочка категории сразу гасит/возвращает объекты на холсте
   overlay.querySelectorAll(".fmt-cat").forEach(cb => cb.addEventListener("change", () => {
     layer.fmt = { ...(layer.fmt || {}), cats_off: catsOffNow() };
+    // снап-индекс запекает фильтр категорий при построении — сбрасываем,
+    // иначе привязки продолжат цепляться за только что скрытые объекты
+    state._snapIndex = null;
     draw();
   }));
   const onColor = () => { $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview(); syncOpUI(); };
@@ -726,6 +729,7 @@ function openLayerStyle(layer, opts = {}) {
       const original = targetOriginals.get(target);
       if (original) target.fmt = original; else delete target.fmt;
     }
+    state._snapIndex = null;   // cats_off могли меняться живым откликом
     closePopups(); renderLayers(); draw();
   };
   $("ls-apply").addEventListener("click", () => {
@@ -741,6 +745,7 @@ function openLayerStyle(layer, opts = {}) {
       delete layer.rules;
     }
     if (window.commitHistoryFrom) window.commitHistoryFrom(historyBefore);
+    state._snapIndex = null;   // cats_off входит в fmt — снап-индекс устарел
     closePopups(); renderLayers(); draw(); persist();
     toast(mode === "rules" && layer.rules ? `Оформление по значению поля: ${layer.rules.length} правил(о)` : "Оформление слоя применено");
   });
@@ -750,6 +755,7 @@ function openLayerStyle(layer, opts = {}) {
     closeColorFields();
     delete layer.fmt; delete layer.rules;
     if (window.commitHistoryFrom) window.commitHistoryFrom(historyBefore);
+    state._snapIndex = null;   // cats_off входит в fmt — снап-индекс устарел
     closePopups(); renderLayers(); draw(); persist();
     toast("Оформление сброшено к стандартному");
   });

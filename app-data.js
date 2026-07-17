@@ -206,14 +206,13 @@ async function openDataFetch() {
     const disabledTree = km2 > DATA_SOURCE_GROUPS[+gi].maxKm2;
     treeInput.addEventListener("input", () => {
       const low = treeInput.value.trim().toLowerCase();
-      // сохраняем текущие галочки, чтобы поиск их не сбрасывал
-      const on = {};
-      treeBox.querySelectorAll("input[data-src]:checked").forEach(b => { on[b.dataset.src] = true; });
       const hit = low ? ogdCatalog.filter(l =>
         (l.name || "").toLowerCase().includes(low) ||
         (l.path || "").toLowerCase().includes(low)) : ogdCatalog;
+      // галочки — из ogdSel (источник истины), а не из DOM: под фильтром
+      // отмеченные-скрытые листья в DOM отсутствуют и потерялись бы
       treeBox.innerHTML = hit.length
-        ? ogdTreeHtml(ogdBuildTree(hit), gi, on, disabledTree, !!low)
+        ? ogdTreeHtml(ogdBuildTree(hit), gi, ogdSel, disabledTree, !!low)
         : `<div class="fc-help">Ничего не найдено</div>`;
       refreshUI();
     });
@@ -223,8 +222,16 @@ async function openDataFetch() {
   const status = overlay.querySelector(".data-status");
   const allBoxes = () => [...overlay.querySelectorAll("input[data-src]")];
   // счётчик выбранного на кнопке + подпись «все/ничего» по каждой карточке
+  // Выбор в дереве ОГД живёт в ogdSel, а НЕ в DOM: под поисковым фильтром
+  // отмеченные, но не совпавшие с запросом листья выпадают из DOM, и сбор
+  // выбора по чекбоксам молча терял их (отметил 5 слоёв → поискал 6-й →
+  // «Загрузить» грузил только видимые). ogdSel — источник истины для gisogd:*.
+  const ogdSel = {};
+  Object.keys(saved).forEach(k => { if (k.startsWith("gisogd:") && saved[k]) ogdSel[k] = true; });
+  const ogdChecked = () => Object.keys(ogdSel).filter(k => ogdSel[k]);
   function refreshUI() {
-    const n = allBoxes().filter(b => b.checked).length;
+    const plain = allBoxes().filter(b => b.checked && !b.dataset.src.startsWith("gisogd:")).length;
+    const n = plain + ogdChecked().length;
     loadBtn.textContent = n ? `Загрузить (${n})` : "Загрузить";
     loadBtn.disabled = !n;
     overlay.querySelectorAll(".data-all").forEach(btn => {
@@ -232,7 +239,14 @@ async function openDataFetch() {
       btn.textContent = (boxes.length && boxes.every(b => b.checked)) ? "ничего" : "все";
     });
   }
-  overlay.addEventListener("change", ev => { if (ev.target.matches("input[data-src]")) refreshUI(); });
+  overlay.addEventListener("change", ev => {
+    if (!ev.target.matches("input[data-src]")) return;
+    const src = ev.target.dataset.src;
+    if (src.startsWith("gisogd:")) {
+      if (ev.target.checked) ogdSel[src] = true; else delete ogdSel[src];
+    }
+    refreshUI();
+  });
   overlay.querySelectorAll(".data-all").forEach(btn => btn.addEventListener("click", () => {
     const boxes = allBoxes().filter(b => b.dataset.gi === btn.dataset.gi && !b.disabled);
     const turnOn = !(boxes.length && boxes.every(b => b.checked));
@@ -244,7 +258,10 @@ async function openDataFetch() {
   overlay.querySelectorAll(".data-zoom").forEach(btn => btn.addEventListener("click", () => {
     const target = parseFloat(btn.dataset.target);
     const sel = {};
-    allBoxes().forEach(b => { if (!b.disabled) sel[b.dataset.src] = b.checked; });
+    allBoxes().forEach(b => {
+      if (!b.disabled && !b.dataset.src.startsWith("gisogd:")) sel[b.dataset.src] = b.checked;
+    });
+    ogdChecked().forEach(k => { sel[k] = true; });   // выбор дерева переживает фильтр
     try { localStorage.setItem("grado_data_sources", JSON.stringify(sel)); } catch (e) {}
     if (km2 > target) zoomBy(Math.sqrt(km2 / (target * 0.9)));   // с запасом под лимит
     close();
@@ -270,10 +287,16 @@ async function openDataFetch() {
 
   loadBtn.addEventListener("click", async () => {
     const boxes = allBoxes();
-    const sources = boxes.filter(b => b.checked).map(b => b.dataset.src);
+    // gisogd:* — из ogdSel (переживает поисковый фильтр), остальное — из DOM
+    const plain = boxes.filter(b => b.checked && !b.dataset.src.startsWith("gisogd:"))
+      .map(b => b.dataset.src);
+    const sources = plain.concat(ogdChecked());
     // выбор запоминается (и невыбор тоже) — в следующий раз диалог как оставили
     const sel = {};
-    boxes.forEach(b => { if (!b.disabled) sel[b.dataset.src] = b.checked; });
+    boxes.forEach(b => {
+      if (!b.disabled && !b.dataset.src.startsWith("gisogd:")) sel[b.dataset.src] = b.checked;
+    });
+    ogdChecked().forEach(k => { sel[k] = true; });
     try { localStorage.setItem("grado_data_sources", JSON.stringify(sel)); } catch (e) {}
     if (!sources.length) { status.textContent = "Выберите хотя бы один источник"; return; }
     loadBtn.disabled = true; loadBtn.classList.add("loading");

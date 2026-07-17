@@ -16,7 +16,13 @@
 // ============================================================================
 
 function featureChains(f) {
-  if (f.ring) return [[...f.ring, f.ring[0]]];
+  if (f.ring) {
+    // все кольца: внешнее + ДЫРЫ — иначе к границе выколотой части нельзя
+    // привязаться, а Trim/Extend не видят её рёбра как границы
+    const chains = [[...f.ring, f.ring[0]]];
+    for (const h of (f.holes || [])) if (h && h.length >= 3) chains.push([...h, h[0]]);
+    return chains;
+  }
   if (f.line) return [f.line];
   if (f.arc) {
     // approx for hit/snap: sample arc
@@ -53,7 +59,11 @@ function snapIndex() {
   let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
   const bump = (x, y) => { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; };
   for (const f of state.features) {
-    if (isHidden(f)) continue;
+    // catOff — из app.js (общий global-scope, зовётся в рантайме): скрытая
+    // категорией геометрия не должна давать привязок, как и скрытый слой.
+    // typeof-гейт — для node-тестов, гоняющих app-snap.js изолированно.
+    if (isHidden(f) ||
+        (typeof catOff === "function" && catOff(layerOf(f), f))) continue;
     const id = f.id;
     if (f.point) { pts.push({ p: f.point, kind: "вершина", id }); bump(f.point[0], f.point[1]); }
     if (f.circle) {

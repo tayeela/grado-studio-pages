@@ -430,6 +430,13 @@ function layerOf(f) { return LAYER_BY_ID[f.layer_id] || LAYER_BY_KIND[f.kind] ||
 // убрав слои-знаки, мы отняли бы возможность гасить отдельные классы — поэтому
 // выключенные категории храним в оформлении слоя (fmt.cats_off = [style_id]).
 function featCat(f) { return (f && f.style_id) || null; }
+// Объекты для РАСЧЁТОВ (ТЭП): скрытая категорией геометрия не считается —
+// пользователь её выключил, и цифры не должны расходиться с тем, что он видит.
+// Видимость СЛОЯ намеренно не фильтруем (историческое поведение: модель
+// считается целиком); сохранение (collectState) тоже всегда полное — это данные.
+function tepFeatures() {
+  return state.features.filter(f => !catOff(layerOf(f), f));
+}
 function catOff(L, f) {
   const off = L && L.fmt && L.fmt.cats_off;
   if (!off || !off.length) return false;
@@ -3355,7 +3362,7 @@ function refreshTep(force) {
     tepAbortController?.abort();
     const controller = new AbortController();
     tepAbortController = controller;
-    const requestBody = JSON.stringify({ features: state.features, params: params() });
+    const requestBody = JSON.stringify({ features: tepFeatures(), params: params() });
     try {
       const r = await fetch("/api/tep", { method: "POST", headers: { "Content-Type": "application/json" },
         body: requestBody, signal: controller.signal });
@@ -4742,7 +4749,7 @@ function openVariants() {
     if (!chosen.length) { toast("Отметьте вариант для сравнения", "warn"); return; }
     calculating = true; updateCompareButton();
     $("var-cmp-out").innerHTML = `<div class="var-calculating">Собираю подробное сравнение ТЭП…</div>`;
-    const cols = [{ name: "Текущее", features: state.features, params: params(), current: true },
+    const cols = [{ name: "Текущее", features: tepFeatures(), params: params(), current: true },
                   ...chosen.map(v => ({ name: v.name, features: v.features, params: v.params, baseline: v.baseline }))];
     const teps = await Promise.all(cols.map(c => tepForVariant(c.features, c.params)));
     const rowKeys = [];
@@ -5653,7 +5660,7 @@ function hitCandidates(wx, wy, tolW) {
         seen.add(it);
         if (it.x1 < wx - tolW || it.x0 > wx + tolW ||
             it.y1 < wy - tolW || it.y0 > wy + tolW) continue;
-        if (!it.L.visible || it.L.locked) continue;
+        if (!it.L.visible || it.L.locked || catOff(it.L, it.f)) continue;
         out.push(it);
       }
     }
@@ -5670,7 +5677,8 @@ function hitTest(wx, wy) {
   for (const { f } of cand) {
     if (f.point && Math.hypot(f.point[0] - wx, f.point[1] - wy) < tolW + 4 / state.view.k) return f;
     if (f.line && nearChain(wx, wy, f.line, tolW) !== null) return f;
-    if (f.ring && !isFilled(f) && nearRing(wx, wy, f.ring, tolW)) return f;
+    if (f.ring && !isFilled(f) && (nearRing(wx, wy, f.ring, tolW)
+        || (f.holes || []).some(h => nearRing(wx, wy, h, tolW)))) return f;
     if (f.arc) {
       const aa = f.arc; const dd = Math.hypot(aa.cx - wx, aa.cy - wy);
       if (Math.abs(dd - aa.r) < tolW) return f;
@@ -5712,8 +5720,9 @@ function marqueeHit(a, b) {
   const y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
   const ids = [];
   for (const f of state.features) {
-    if (isHidden(f) || isLocked(f)) continue;
-    if (featurePts(f).some(p => p && p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1))
+    if (isHidden(f) || isLocked(f) || catOff(layerOf(f), f)) continue;
+    // featureMovablePts: рамка ловит объект и за вершину ДЫРЫ (не только внешнего кольца)
+    if (featureMovablePts(f).some(p => p && p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1))
       ids.push(f.id);
   }
   return ids;

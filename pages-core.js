@@ -86,6 +86,14 @@
     }
     return Math.abs(area) / 2;
   };
+  // Площадь объекта С УЧЁТОМ дыр — как настольный _ring_area_ha: выколотая
+  // часть не принадлежит зоне. Прежде браузерный ТЭП считал по внешнему
+  // кольцу и расходился с настольным на полигонах с дырами.
+  const featureAreaM2 = feature => {
+    let area = ringArea(feature && feature.ring);
+    for (const hole of (feature && feature.holes) || []) area -= ringArea(hole);
+    return Math.max(0, area);
+  };
   const ringCentroid = ring => {
     if (!Array.isArray(ring) || !ring.length) return null;
     let twiceArea = 0, cx = 0, cy = 0;
@@ -143,10 +151,10 @@
     const features = clippedToTerritory(rawFeatures);
     const rawTerrArea = hasTerritory
       ? features.filter(feature => feature.kind === "boundary" && feature.ring)
-        .reduce((sum, feature) => sum + ringArea(feature.ring), 0) / 10000
+        .reduce((sum, feature) => sum + featureAreaM2(feature), 0) / 10000
       : 15;
     const rawRestrictArea = features.filter(feature => feature.kind === "restrict" && feature.ring)
-      .reduce((sum, feature) => sum + ringArea(feature.ring), 0) / 10000;
+      .reduce((sum, feature) => sum + featureAreaM2(feature), 0) / 10000;
     const terrArea = rounded(rawTerrArea, 4);
     const restrictArea = rounded(rawRestrictArea, 4);
     const calcArea = terrArea - restrictArea;
@@ -180,7 +188,7 @@
     const adultRecreation = rounded(territoryMode === 2 ? populationThs * 1000 * 0.1 : 0);
     const parking = rounded(populationThs * 257 * kRail * kBa);
     const factSpp = features.filter(feature => feature.kind === "building" && feature.ring)
-      .reduce((sum, feature) => sum + ringArea(feature.ring) * floorCount(feature.props && feature.props.floors) / 1000, 0);
+      .reduce((sum, feature) => sum + featureAreaM2(feature) * floorCount(feature.props && feature.props.floors) / 1000, 0);
     const factDensity = calcArea > 0 ? factSpp / calcArea : 0;
     const results = [
       result("calc_area", "Территория", "Расчётная площадь территории", calcArea, "га", 2),
@@ -430,6 +438,7 @@
   const LINE_CODE_KEYS = ["linelineco", "linecode", "line_code"];
   const REDLINE_CODES = new Set([1, 2, 3, 4]);
   let LGR_CODE_STYLE = Object.create(null);
+  let OSM_HW_STYLE = Object.create(null);   // тег OSM highway → знак дороги
 
   // код ЛГР → style_id; строится из загруженной библиотеки знаков (styles.json),
   // чтобы не дублировать таблицу: источник правды — moscow_lgr.json
@@ -437,12 +446,23 @@
   function setLgrCodeStyles(styles) {
     LGR_CODE_STYLE = Object.create(null);
     LGR_STYLE_TITLE = Object.create(null);
-    for (const [sid, s] of Object.entries(styles || {}))
+    OSM_HW_STYLE = Object.create(null);
+    for (const [sid, s] of Object.entries(styles || {})) {
       if (s && s.lgr_code != null) {
         LGR_CODE_STYLE[s.lgr_code] = sid;
         LGR_STYLE_TITLE[sid] = s.title || sid;
       }
+      // дороги OSM: карта «тег highway → знак» из тех же стилей — как на
+      // сервере osm_style_for_highway; иначе в вебе все дороги без знака,
+      // одинаковыми линиями (иерархия магистраль/улица/тротуар терялась)
+      if (s && Array.isArray(s.osm_highway))
+        for (const tag of s.osm_highway) OSM_HW_STYLE[String(tag).toLowerCase()] = sid;
+    }
     return Object.keys(LGR_CODE_STYLE).length;
+  }
+  function osmStyleForHighway(tag) {
+    if (!tag || !Object.keys(OSM_HW_STYLE).length) return null;
+    return OSM_HW_STYLE[String(tag).trim().toLowerCase()] || "osm.hw.other";
   }
 
   function parseLineCodes(value) {
@@ -794,6 +814,12 @@
       geometries.flatMap(geometryParts).forEach((part, index) => {
         const feature = { kind: spec.kind, layer_id: spec.layer_id, ...part, props: { ...props },
           srcKey: `${spec.layer_id}:${element.type}/${element.id}#${index}` };
+        if (source === "osm.roads") {
+          // класс дороги — из СЫРОГО тега highway, как на сервере: в наборе
+          // едут и магистрали, и тротуары; незнакомый тег → «прочие дороги»
+          const sid = osmStyleForHighway(tags.highway);
+          if (sid) feature.style_id = sid;
+        }
         if (source === "osm.buildings") {
           feature.props.purpose = tags.building === "yes" ? "здание" : tags.building;
           const floors = Number.parseInt(tags["building:levels"], 10);
@@ -965,8 +991,9 @@
           addFields(group, props);
           return;
         }
+        // формат как у сервера (layer_id:key#i): layerId уже содержит код слоя
         const out = { kind, layer_id: layerId, ...part, props: { ...props },
-                      srcKey: `${layerId}:${layer.code}:${key}#${pi}` };
+                      srcKey: `${layerId}:${key}#${pi}` };
         if (styleId) out.style_id = styleId;
         group.features.push(out);
         addFields(group, props);
