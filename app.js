@@ -2043,26 +2043,41 @@ function measureLabel(s, font) {
 // Штрих и маркер ОБЯЗАНЫ множиться на один и тот же коэффициент, иначе засечка
 // уедет с черты. Нижний предел — чтобы на обзорных масштабах не слиплось.
 // Пользовательских/проектных стилей не касается (у них нет ground_units).
-const LGR_MIN_FACTOR = 0.32;          // цикл 10 м остаётся не мельче ~6 px
+// QML: у spritlines minScale=10000 при hasScaleBasedVisibilityFlag=1 — детальный
+// знак ЛГР виден ТОЛЬКО до 1:10000, дальше QGIS показывает spritlines_uds, где
+// MarkerLine нет вовсе. Поэтому за этим пределом засечки не рисуем: иначе на
+// обзоре выходил «пунктир с узкими галками» (правка юзера).
+const LGR_DETAIL_MAX_DENOM = 10000;
+function lgrDenom() { return 3779.5 / state.view.k; }
 function groundFactor(st) {
   if (!st || !st.ground_units) return 1;
   const refK = 3779.5 / (st.ref_scale || 2000);
-  return Math.max(LGR_MIN_FACTOR, state.view.k / refK);
+  return state.view.k / refK;          // ровно по QML: без искусственного пола
+}
+function lgrDetailVisible(st) {
+  if (!st || !st.ground_units) return true;
+  return lgrDenom() <= LGR_DETAIL_MAX_DENOM;
 }
 function scaledDash(st) {
   const f = groundFactor(st);
-  return (st.dash && f !== 1) ? st.dash.map(d => d * f) : (st.dash || null);
+  if (!st.dash || f === 1) return st.dash || null;
+  const d = st.dash.map(x => x * f);
+  // суб-пиксельный штрих не рисуем пунктиром: он вырождается в смаз, а
+  // setLineDash с десятками тысяч сегментов на длинной линии роняет холст.
+  // QML на таких масштабах знак и так прячет (minScale=10000).
+  return d.reduce((a, b) => a + b, 0) < 1.5 ? null : d;
 }
-// Масштабируем ШАГ засечек (в QML interval=MapUnit), но НЕ их размер: size в
-// QML тоже MapUnit (3.5 м), однако на рабочих 1:4000+ это ~3 px — засечка
-// исчезает. Размер держим постоянным на экране (сознательное решение, как и
-// в beta.55), шаг — по местности. На фазу штриха размер не влияет: с чертой
-// засечку связывают только period и dash, а они множатся на один коэффициент.
+// Ровно по QML: и шаг (interval_unit=MapUnit), и РАЗМЕР (size_unit=MapUnit)
+// засечки заданы в метрах на местности → множим оба на один коэффициент.
+// Прежде размер держался постоянным на экране — из-за этого на отдалении
+// галки выходили крупными относительно ужавшегося штриха и стояли вплотную
+// («пунктир с узкими галками»). Теперь знак ужимается целиком, пропорционально,
+// а за пределом 1:10000 не рисуется вовсе (lgrDetailVisible) — как в QGIS.
 function scaledMarker(st) {
   const mk = st.line_marker;
   const f = groundFactor(st);
   if (!mk || f === 1) return mk;
-  return { ...mk, period: (mk.period || 40) * f };
+  return { ...mk, period: (mk.period || 40) * f, size: (mk.size || 4) * f };
 }
 
 // Засечки вдоль линии/контура. Размещение ПОСЕГМЕНТНОЕ: на каждом прямом
@@ -2348,7 +2363,7 @@ function draw() {
         ctx.stroke();
         if (st.hatch && f.ring) drawHatch(f.ring, st.hatch, st.stroke, f.holes);
         if (st.double) drawDoubleLine(f.ring || f.line, st.double, !!f.ring);
-        if (st.line_marker && (f.ring || f.line)) {
+        if (st.line_marker && (f.ring || f.line) && lgrDetailVisible(st)) {
           // направление засечки по знаку Эталона: по умолчанию остриём ВНУТРЬ
           // зоны, dir "out" — наружу (ООПТ/ландшафт ОКН/водоохранная/прибрежная),
           // dir "both" — по ОБЕ стороны линии (в QML это два под-маркера с
