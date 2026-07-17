@@ -519,8 +519,29 @@
   ];
   const GISOGD_RESTRICT_HINTS = ["зоуит", "zouit", "охран", "ohran", "sanit", "санит"];
   const zouitLayerId = sid => "source.gisogd.zouit." + sid.slice(4);  // "lgr.vodookhr" → …zouit.vodookhr
+  // Имя для сопоставления: регистр + «ё»→«е». Правила писаны через «е», а слои
+  // портала встречаются с «ё» («Жёсткая зона 2 пояса», «СЗЗ (расчётная)») — без
+  // нормализации своё правило не срабатывало и подхватывалось СЛЕДУЮЩЕЕ, более
+  // общее: объект уезжал в ЧУЖОЙ знак молча (хуже, чем «прочие»). На сервере это
+  // чинил _norm_ru ещё в beta.61, в браузер правка не доехала.
+  const normRu = s => String(s || "").toLowerCase().replace(/ё/g, "е");
+  // Правила из ОДНОГО источника: build_pages печёт их из studio_core в страницу.
+  // Своя копия ниже — только фолбэк (страница собрана старой сборкой): она
+  // неизбежно отстаёт, как отстала до beta.84.
+  const SRV = (typeof window !== "undefined" && window.__GRADO_GISOGD_RULES__) || null;
   const gisogdRoute = member => {
-    const lower = member.toLowerCase();
+    const lower = normRu(member);
+    if (SRV) {
+      // правовые акты — документ, а не геометрия зоны: знак им не положен
+      if (SRV.doc_markers.some(m => lower.includes(m))) return ["generic", SRV.other_layer_id];
+      for (const r of SRV.layer_rules)
+        if (r.keys.some(k => lower.includes(k))) return [r.kind, r.layer_id];
+      const hit = SRV.style_rules.find(r => r.keys.some(k => lower.includes(k)));
+      if (hit) return ["restrict", hit.layer_id];
+      if (SRV.restrict_hints.some(k => lower.includes(k)))
+        return ["restrict", SRV.restrict_layer_id];
+      return ["generic", SRV.other_layer_id];
+    }
     for (const [keys, kind, layerId] of GISOGD_LAYER_RULES)
       if (keys.some(key => lower.includes(key))) return [kind, layerId];
     // опознанный знак → СВОЙ слой (как в настольной версии): раньше всё
@@ -533,7 +554,12 @@
     return ["generic", "source.gisogd.other"];
   };
   const gisogdStyle = member => {
-    const lower = member.toLowerCase();
+    const lower = normRu(member);
+    if (SRV) {
+      if (SRV.doc_markers.some(m => lower.includes(m))) return null;   // акт ≠ зона
+      const hit = SRV.style_rules.find(r => r.keys.some(k => lower.includes(k)));
+      return hit ? hit.style_id : null;
+    }
     const rule = GISOGD_STYLE_RULES.find(([keys]) => keys.some(key => lower.includes(key)));
     return rule ? rule[1] : null;
   };
