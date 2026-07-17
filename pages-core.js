@@ -499,89 +499,43 @@
     return out;
   }
 
-  const GISOGD_LAYER_RULES = [
-    [["функционал", "funkcional"], "zone", "source.gisogd.func_zones"],
-    [["красн", "krasn"], "redline", "source.gisogd.red_lines"],
-  ];
-  const GISOGD_STYLE_RULES = [
-    [["1а пояса", "зона_1а", "zona_1a", "sanokhr_1a"], "lgr.sanokhr.1a"],
-    [["1б пояса", "зона_1б", "zona_1b", "sanokhr_1b"], "lgr.sanokhr.1b"],
-    [["жестк", "zhestk"], "lgr.sanokhr.2hard"],
-    [["1 пояса санитар", "зона_1_пояса", "zona_1_poyasa"], "lgr.sanokhr.1"],
-    [["2 пояса санитар", "зона_2_пояса", "zona_2_poyasa"], "lgr.sanokhr.2"],
-    [["3 пояса санитар", "зона_3_пояса", "zona_3_poyasa"], "lgr.sanokhr.3"],
-    [["водоохран", "vodoohran"], "lgr.vodookhr"],
-    [["прибрежн", "pribrezh"], "lgr.pribrezh"],
-    [["сзз_расчет", "szz_raschet", "расчетн"], "lgr.szz.calc"],
-    [["сзз_ориент", "szz_orient", "ориентировоч"], "lgr.szz.orient"],
-    [["санитарно-защит", "sanitarno_zash", "сзз"], "lgr.szz.set"],
-    [["подтоплен", "podtoplen"], "lgr.podtop.mid"],
-    [["затоплен", "zatoplen"], "lgr.zatop"],
-    [["защитная зона окн", "zashitnaya_zona_okn"], "lgr.okn.zashchit"],
-    [["охранная зона окн", "ohrannaya_zona_okn"], "lgr.okn.okhr"],
-    [["регулирования застройки", "regulirovaniya"], "lgr.okn.reg"],
-    [["охраняемого природного ландшафта", "landshaft"], "lgr.okn.landshaft"],
-    [["территория окн", "ter_okn", "territoriya_okn"], "lgr.okn.terr"],
-    [["охранная зона оопт", "ohrannaya_zona_oopt"], "lgr.oopt.okhr"],
-    [["оопт", "oopt"], "lgr.oopt"],
-    [["лесопарков", "lesopark"], "lgr.lesopark"],
-    [["электроэнерг", "лэп", "elektroenerg"], "lgr.energo"],
-    [["трубопровод", "truboprovod"], "lgr.truboprovod"],
-    [["теплосет", "teplosetey"], "lgr.teplo"],
-    [["связи", "svyazi"], "lgr.svyaz"],
-    [["метрополит", "metro"], "lgr.metro"],
-    [["железных дорог", "пожд", "zhd_"], "lgr.zhd"],
-    [["приаэродром", "priaerodrom"], "lgr.priaero"],
-    [["береговая полоса", "beregovaya"], "lgr.beregovaya"],
-    [["военного объекта", "military"], "lgr.military"],
-    [["радиотехническ", "radio"], "lgr.radio"],
-    [["технич", "инженерных коммуникаций", "tehnicheskaya_zona"], "lgr.tech.zone"],
-  ];
-  const GISOGD_RESTRICT_HINTS = ["зоуит", "zouit", "охран", "ohran", "sanit", "санит"];
-  const zouitLayerId = sid => "source.gisogd.zouit." + sid.slice(4);  // "lgr.vodookhr" → …zouit.vodookhr
-  // Имя для сопоставления: регистр + «ё»→«е». Правила писаны через «е», а слои
-  // портала встречаются с «ё» («Жёсткая зона 2 пояса», «СЗЗ (расчётная)») — без
-  // нормализации своё правило не срабатывало и подхватывалось СЛЕДУЮЩЕЕ, более
-  // общее: объект уезжал в ЧУЖОЙ знак молча (хуже, чем «прочие»). На сервере это
-  // чинил _norm_ru ещё в beta.61, в браузер правка не доехала.
+  // Имя для сопоставления: регистр + «ё»→«е». Слои портала встречаются с «ё»
+  // («Жёсткая зона 2 пояса», «СЗЗ (расчётная)») — без нормализации своё правило
+  // не срабатывало и объект уезжал в ЧУЖОЙ знак молча (совпадает с _norm_ru).
   const normRu = s => String(s || "").toLowerCase().replace(/ё/g, "е");
-  // Правила из ОДНОГО источника: build_pages печёт их из studio_core в страницу.
-  // Своя копия ниже — только фолбэк (страница собрана старой сборкой): она
-  // неизбежно отстаёт, как отстала до beta.84.
-  const SRV = (typeof window !== "undefined" && window.__GRADO_GISOGD_RULES__) || null;
+  // Правила маршрутизации ОГД — из ОДНОГО источника: build_pages печёт их из
+  // studio_core (gisogd_frontend_rules) в window.__GRADO_GISOGD_RULES__. Своей
+  // копии в JS больше НЕТ — рукописная копия неизбежно расходилась с сервером
+  // (уроки beta.65/67/68/84: одинарное «охран» ловило «здравоохранения», не было
+  // «ё»-нормализации и гейта правовых актов). Нет правил → сломанная сборка,
+  // падаем громко, а не тихо на стухшую копию. Читаем window ЛЕНИВО (в момент
+  // маршрутизации), чтобы страница/тест успели задать правила после загрузки.
+  function gisogdRules() {
+    const R = typeof window !== "undefined" && window.__GRADO_GISOGD_RULES__;
+    if (!R) throw new Error(
+      "ГИС ОГД: правила маршрутизации не впечены в сборку " +
+      "(window.__GRADO_GISOGD_RULES__). Пересоберите Pages: " +
+      "python3 packaging/build_pages.py");
+    return R;
+  }
   const gisogdRoute = member => {
-    const lower = normRu(member);
-    if (SRV) {
-      // правовые акты — документ, а не геометрия зоны: знак им не положен
-      if (SRV.doc_markers.some(m => lower.includes(m))) return ["generic", SRV.other_layer_id];
-      for (const r of SRV.layer_rules)
-        if (r.keys.some(k => lower.includes(k))) return [r.kind, r.layer_id];
-      const hit = SRV.style_rules.find(r => r.keys.some(k => lower.includes(k)));
-      if (hit) return ["restrict", hit.layer_id];
-      if (SRV.restrict_hints.some(k => lower.includes(k)))
-        return ["restrict", SRV.restrict_layer_id];
-      return ["generic", SRV.other_layer_id];
-    }
-    for (const [keys, kind, layerId] of GISOGD_LAYER_RULES)
-      if (keys.some(key => lower.includes(key))) return [kind, layerId];
-    // опознанный знак → СВОЙ слой (как в настольной версии): раньше всё
-    // распознанное сваливалось в общий source.gisogd.restrict, и водоохранные,
-    // СЗЗ, пояса санохраны нельзя было отключить или оформить по отдельности
-    const rule = GISOGD_STYLE_RULES.find(([keys]) => keys.some(key => lower.includes(key)));
-    if (rule) return ["restrict", zouitLayerId(rule[1])];
-    if (GISOGD_RESTRICT_HINTS.some(key => lower.includes(key)))
-      return ["restrict", "source.gisogd.restrict"];  // ЗОУИТ-термин без точного знака
-    return ["generic", "source.gisogd.other"];
+    const R = gisogdRules(), lower = normRu(member);
+    // правовые акты — документ, а не геометрия зоны: знак им не положен
+    if (R.doc_markers.some(m => lower.includes(m))) return ["generic", R.other_layer_id];
+    for (const r of R.layer_rules)
+      if (r.keys.some(k => lower.includes(k))) return [r.kind, r.layer_id];
+    // опознанный знак → СВОЙ слой ЗОУИТ (layer_id уже посчитан на сервере)
+    const hit = R.style_rules.find(r => r.keys.some(k => lower.includes(k)));
+    if (hit) return ["restrict", hit.layer_id];
+    if (R.restrict_hints.some(k => lower.includes(k)))
+      return ["restrict", R.restrict_layer_id];  // ЗОУИТ-термин без точного знака
+    return ["generic", R.other_layer_id];
   };
   const gisogdStyle = member => {
-    const lower = normRu(member);
-    if (SRV) {
-      if (SRV.doc_markers.some(m => lower.includes(m))) return null;   // акт ≠ зона
-      const hit = SRV.style_rules.find(r => r.keys.some(k => lower.includes(k)));
-      return hit ? hit.style_id : null;
-    }
-    const rule = GISOGD_STYLE_RULES.find(([keys]) => keys.some(key => lower.includes(key)));
-    return rule ? rule[1] : null;
+    const R = gisogdRules(), lower = normRu(member);
+    if (R.doc_markers.some(m => lower.includes(m))) return null;   // акт ≠ зона
+    const hit = R.style_rules.find(r => r.keys.some(k => lower.includes(k)));
+    return hit ? hit.style_id : null;
   };
   const safeStem = filename => String(filename || "layer").split(/[\\/]/).pop()
     .replace(/\.(geojson|json)$/i, "").replace(/[/:*?"<>|]/g, "").trim() || "layer";
@@ -895,7 +849,7 @@
   // Портал ИГНОРИРУЕТ bbox — слой всегда приходит целиком (функц. зоны Москвы
   // ≈14 МБ gzip). Поэтому слой качается один раз, кладётся в кэш (IndexedDB на
   // стороне адаптера), а по области режем сами. Маршрут и знак — по имени слоя
-  // (те же GISOGD_LAYER_RULES, что у ручного импорта GeoJSON).
+  // (gisogdRoute на впечённых правилах, как и ручной импорт GeoJSON).
   const GISOGD_BASE = "https://gisogd.mos.ru/gis/api/2.8/gisogd/isogd";
   const gisogdCatalogUrl = () => `${GISOGD_BASE}/layers/`;
   const gisogdLayerUrl = code => `${GISOGD_BASE}/layers/${encodeURIComponent(code)}/export/?format=geojson`;

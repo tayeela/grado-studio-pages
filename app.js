@@ -732,13 +732,6 @@ const HATCH_DENS = { sparse: 14, normal: 9, dense: 5 };
 function hatchDensOf(px) { return px <= 6 ? "dense" : px >= 13 ? "sparse" : "normal"; }
 // маленькое условное обозначение линии: как выглядит выбранный стиль (цвет,
 // толщина, пунктир) — образец рядом с выпадашкой стиля в форматировании слоя
-function lineSampleSVG(dash, color, width) {
-  const w = Math.max(0.8, Math.min(4, (width || 1) * 1.3));
-  const da = (dash && dash.length) ? dash.map(n => (n * 1.6).toFixed(1)).join(",") : "";
-  return `<svg viewBox="0 0 200 18" preserveAspectRatio="none" width="100%" height="18">` +
-    `<line x1="4" y1="9" x2="196" y2="9" stroke="${escHtml(color || "#888")}" ` +
-    `stroke-width="${w}" stroke-linecap="butt"${da ? ` stroke-dasharray="${da}"` : ""}/></svg>`;
-}
 
 // Полный образец ЗНАКА для превью (список слоёв, библиотека, диалог): линия со
 // штрихом + засечки всех форм + заливка/штриховка зоны. В превью размеры засечек
@@ -1010,9 +1003,6 @@ function vertexRef(f, vi) {
     vi -= r.length;
   }
   return null;
-}
-function vertexTotal(f) {
-  return featureRings(f).reduce((n, r) => n + r.length, 0);
 }
 // Все редактируемые точки объекта РЕФЕРЕНСАМИ плоским списком (внешний контур +
 // дыры). flat() поверхностный — элементы те же ссылки на точки, поэтому мутация
