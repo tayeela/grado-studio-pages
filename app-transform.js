@@ -40,6 +40,9 @@ function xfCaptureOrig() {
       point: f.point ? [f.point[0], f.point[1]] : null,
       line: f.line ? f.line.map(p => [p[0], p[1]]) : null,
       ring: f.ring ? f.ring.map(p => [p[0], p[1]]) : null,
+      // дыры полигона тоже преобразуются/восстанавливаются, иначе при повороте/
+      // масштабе/зеркале выколотые части остались бы на месте
+      holes: f.holes ? f.holes.map(h => h.map(p => [p[0], p[1]])) : null,
       arc: f.arc ? { cx: f.arc.cx, cy: f.arc.cy, r: f.arc.r, a0: f.arc.a0, sweep: f.arc.sweep } : null,
       circle: f.circle ? { cx: f.circle.cx, cy: f.circle.cy, r: f.circle.r } : null,
     };
@@ -81,7 +84,9 @@ function xfApplyFromOrig(x) {
     if (o.point) { const q = M.pt(o.point); f.point[0] = q[0]; f.point[1] = q[1]; }
     if (o.line)  { for (let i = 0; i < o.line.length; i++) { const q = M.pt(o.line[i]); f.line[i][0] = q[0]; f.line[i][1] = q[1]; } }
     if (o.ring)  { for (let i = 0; i < o.ring.length; i++) { const q = M.pt(o.ring[i]); f.ring[i][0] = q[0]; f.ring[i][1] = q[1]; } }
-    if (o.arc)   { const a = M.arc(o.arc); f.arc.cx = a.cx; f.arc.cy = a.cy; f.arc.r = a.r; f.arc.a0 = a.a0; f.arc.sweep = a.sweep; }
+    if (o.holes) { for (let h = 0; h < o.holes.length; h++) { const oh = o.holes[h], fh = f.holes[h];
+      for (let i = 0; i < oh.length; i++) { const q = M.pt(oh[i]); fh[i][0] = q[0]; fh[i][1] = q[1]; } } }
+if (o.arc)   { const a = M.arc(o.arc); f.arc.cx = a.cx; f.arc.cy = a.cy; f.arc.r = a.r; f.arc.a0 = a.a0; f.arc.sweep = a.sweep; }
     if (o.circle){ const c = M.circle(o.circle); f.circle.cx = c.cx; f.circle.cy = c.cy; f.circle.r = c.r; }
   }
 }
@@ -93,6 +98,8 @@ function xfRestore(x) {
     if (o.point) { f.point[0] = o.point[0]; f.point[1] = o.point[1]; }
     if (o.line)  { for (let i = 0; i < o.line.length; i++) { f.line[i][0] = o.line[i][0]; f.line[i][1] = o.line[i][1]; } }
     if (o.ring)  { for (let i = 0; i < o.ring.length; i++) { f.ring[i][0] = o.ring[i][0]; f.ring[i][1] = o.ring[i][1]; } }
+    if (o.holes) { for (let h = 0; h < o.holes.length; h++) { const oh = o.holes[h], fh = f.holes[h];
+      for (let i = 0; i < oh.length; i++) { fh[i][0] = oh[i][0]; fh[i][1] = oh[i][1]; } } }
     if (o.arc)   { f.arc.cx = o.arc.cx; f.arc.cy = o.arc.cy; f.arc.r = o.arc.r; f.arc.a0 = o.arc.a0; f.arc.sweep = o.arc.sweep; }
     if (o.circle){ f.circle.cx = o.circle.cx; f.circle.cy = o.circle.cy; f.circle.r = o.circle.r; }
   }

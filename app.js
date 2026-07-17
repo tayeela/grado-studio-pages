@@ -888,6 +888,35 @@ let shiftDown = false, spaceDown = false;
 // ---------- координаты ----------
 function w2s(x, y) { return [state.view.tx + x * state.view.k, state.view.ty - y * state.view.k]; }
 function s2w(sx, sy) { return [(sx - state.view.tx) / state.view.k, (state.view.ty - sy) / state.view.k]; }
+// Все кольца объекта РЕФЕРЕНСАМИ (мутация на месте работает): у полигона —
+// внешний контур + дыры, у линии — сама линия. Нужно, чтобы дыры участвовали
+// в редактировании (ручки, перетаскивание вершин, перемещение/трансформации):
+// раньше вся правка шла по featurePts = только внешнее кольцо, и у выколотого
+// полигона вершины дыр не выделялись, а при перемещении дыры оставались на месте.
+function featureRings(f) {
+  if (f.ring) return f.holes && f.holes.length ? [f.ring, ...f.holes] : [f.ring];
+  if (f.line) return [f.line];
+  return [];
+}
+// Адрес плоского индекса вершины (0..внешнее−1, дальше дыры) → {arr, i}.
+function vertexRef(f, vi) {
+  for (const r of featureRings(f)) {
+    if (vi < r.length) return { arr: r, i: vi };
+    vi -= r.length;
+  }
+  return null;
+}
+function vertexTotal(f) {
+  return featureRings(f).reduce((n, r) => n + r.length, 0);
+}
+// Все редактируемые точки объекта РЕФЕРЕНСАМИ плоским списком (внешний контур +
+// дыры). flat() поверхностный — элементы те же ссылки на точки, поэтому мутация
+// доходит до колец. Для дуги/окружности — featurePts (как было). Нужно, чтобы
+// перемещение/трансформации двигали и дыры, а не только внешний контур.
+function featureMovablePts(f) {
+  const rings = featureRings(f);
+  return rings.length ? rings.flat() : featurePts(f);
+}
 function featurePts(f) {
   if (f.ring || f.line) return f.ring || f.line;
   if (f.arc) {
@@ -959,9 +988,15 @@ function vertexAt(f, wx, wy) {
     if (Math.hypot(rp[0] - wx, rp[1] - wy) < tolW) return 1;
     return null;
   }
-  const pts = featurePts(f);
-  for (let i = 0; i < pts.length; i++)
-    if (Math.hypot(pts[i][0] - wx, pts[i][1] - wy) < tolW) return i;
+  // все кольца (внешний контур + дыры) плоским индексом: 0..внешнее−1, затем
+  // вершины дыр — так вершину дыры можно схватить и тянуть/удалить
+  let flat = 0;
+  for (const ring of featureRings(f)) {
+    for (let i = 0; i < ring.length; i++) {
+      if (Math.hypot(ring[i][0] - wx, ring[i][1] - wy) < tolW) return flat + i;
+    }
+    flat += ring.length;
+  }
   return null;
 }
 
@@ -975,7 +1010,10 @@ function isCoverageFeature(f) {
 }
 function sharedCompanions(f, vi) {
   if (!isCoverageFeature(f)) return [];
-  const [x, y] = featurePts(f)[vi];
+  // общие границы — только у ВНЕШНЕГО контура; вершина дыры компаньонов не имеет
+  const outer = featurePts(f);
+  if (!outer || vi >= outer.length) return [];
+  const [x, y] = outer[vi];
   const out = [];
   for (const other of state.features) {
     if (other.id === f.id || !isCoverageFeature(other) || isHidden(other)) continue;
@@ -2562,15 +2600,31 @@ function draw() {
         const shared = sharedVertexSet(f);
         const shFill = cvColor("shared", "#12a150"), vxStroke = cvColor("vertex", "#2f6fde");
         const handleBg = cvColor("bg", "#fff");
-        featurePts(f).forEach((p, i) => {
-          const [sx, sy] = w2s(...p);
-          const isShared = shared.has(i);
-          // зелёная ручка — вершина общая с соседней зоной, тянется совместно
-          ctx.fillStyle = isShared ? shFill : handleBg;
-          ctx.strokeStyle = isShared ? shFill : vxStroke;
-          ctx.lineWidth = 1.2;
-          ctx.fillRect(sx - 3, sy - 3, 6, 6); ctx.strokeRect(sx - 3, sy - 3, 6, 6);
-        });
+        // ручки по ВСЕМ кольцам (внешний контур + дыры): у выколотого полигона
+        // вершины дыр теперь тоже выделяются и редактируются. shared (общая
+        // граница coverage-зон) — только у внешнего кольца (ri===0).
+        const rings = featureRings(f);
+        if (rings.length) {
+          rings.forEach((ring, ri) => {
+            ring.forEach((p, li) => {
+              const [sx, sy] = w2s(...p);
+              const isShared = ri === 0 && shared.has(li);
+              ctx.fillStyle = isShared ? shFill : handleBg;
+              ctx.strokeStyle = isShared ? shFill : vxStroke;
+              ctx.lineWidth = 1.2;
+              ctx.fillRect(sx - 3, sy - 3, 6, 6); ctx.strokeRect(sx - 3, sy - 3, 6, 6);
+            });
+          });
+        } else {
+          featurePts(f).forEach((p, i) => {   // дуга/окружность — как было
+            const [sx, sy] = w2s(...p);
+            const isShared = shared.has(i);
+            ctx.fillStyle = isShared ? shFill : handleBg;
+            ctx.strokeStyle = isShared ? shFill : vxStroke;
+            ctx.lineWidth = 1.2;
+            ctx.fillRect(sx - 3, sy - 3, 6, 6); ctx.strokeRect(sx - 3, sy - 3, 6, 6);
+          });
+        }
       }
     }
   }
@@ -5375,7 +5429,7 @@ function transformSelection(pt, arcFn, circleFn) {
   for (const f of feats) {
     if (f.circle) circleFn(f.circle);
     else if (f.arc) arcFn(f.arc);
-    else for (const p of featurePts(f)) { const q = pt(p); p[0] = q[0]; p[1] = q[1]; }
+    else for (const p of featureMovablePts(f)) { const q = pt(p); p[0] = q[0]; p[1] = q[1]; }  // + дыры
   }
   afterChange();
   return true;
@@ -5435,7 +5489,7 @@ function duplicateSelected() {
   } else if (copy.arc) {
     copy.arc.cx += g; copy.arc.cy -= g;
   } else {
-    for (const p of featurePts(copy)) { p[0] += g; p[1] -= g; }
+    for (const p of featureMovablePts(copy)) { p[0] += g; p[1] -= g; }  // + дыры
   }
   snapshot();
   state.features.push(copy);
@@ -5680,11 +5734,18 @@ cv.addEventListener("mousedown", e => {
     if (cur) {
       const vi = vertexAt(cur, wxr, wyr);
       if (vi != null) {
-        if (e.altKey) {   // Alt+клик — удалить вершину
-          const pts = featurePts(cur);
-          const min = cur.ring ? 3 : 2;
-          if (!cur.point && pts.length > min) {
-            snapshot(); pts.splice(vi, 1); afterChange();
+        if (e.altKey) {   // Alt+клик — удалить вершину (в т.ч. дыры)
+          const ref = vertexRef(cur, vi);
+          if (cur.point || !ref) return;
+          const isHole = cur.holes && cur.holes.includes(ref.arr);
+          const min = cur.line ? 2 : 3;   // кольцо (внешнее/дыра) — минимум 3
+          if (ref.arr.length > min) {
+            snapshot(); ref.arr.splice(ref.i, 1); afterChange();
+          } else if (isHole) {            // дыра выродилась — убираем её целиком
+            snapshot();
+            cur.holes = cur.holes.filter(h => h !== ref.arr);
+            if (!cur.holes.length) delete cur.holes;
+            afterChange();
           }
           return;
         }
@@ -5729,7 +5790,7 @@ cv.addEventListener("mousedown", e => {
           if (d < bd) { bd = d; refOrig = [p[0], p[1]]; }
         }
       }
-      const orig = feats.map(ff => featurePts(ff).map(p => [p[0], p[1]]));
+      const orig = feats.map(ff => featureMovablePts(ff).map(p => [p[0], p[1]]));
       state.edit = { vi: "body", ids: movingIds, feats, orig, refOrig,
                      grab: [wxr, wyr], moved: false };
       draw(); renderProps();
@@ -5840,7 +5901,7 @@ cv.addEventListener("mousemove", e => {
       state.snapHit = snapped.kind ? snapped : null;
       const ox = snapped.p[0] - ed.refOrig[0], oy = snapped.p[1] - ed.refOrig[1];
       ed.feats.forEach((feat, fi) => {
-        const pts = featurePts(feat), o = ed.orig[fi];
+        const pts = featureMovablePts(feat), o = ed.orig[fi];  // с дырами
         for (let i = 0; i < pts.length; i++) { pts[i][0] = o[i][0] + ox; pts[i][1] = o[i][1] + oy; }
       });
       // joint edit for shared boundaries on coverage layers — one operation for common edge
@@ -5891,8 +5952,9 @@ cv.addEventListener("mousemove", e => {
           if (c.r < 0.1) c.r = 0.1;
         }
       } else {
-        const pts = featurePts(ed.f);
-        pts[ed.vi][0] = s.p[0]; pts[ed.vi][1] = s.p[1];
+        // адресуемся по кольцам: вершина дыры тянется как обычная
+        const ref = vertexRef(ed.f, ed.vi) || { arr: featurePts(ed.f), i: ed.vi };
+        ref.arr[ref.i][0] = s.p[0]; ref.arr[ref.i][1] = s.p[1];
         for (const c of (ed.companions || [])) {
           const cpts = featurePts(c.f);
           cpts[c.vi][0] = s.p[0]; cpts[c.vi][1] = s.p[1];
@@ -5993,13 +6055,19 @@ cv.addEventListener("dblclick", e => {
     const f = selectedFeature();
     if (!f || f.point || f.arc || f.circle) return;
     const [wx, wy] = s2w(e.offsetX, e.offsetY);
-    const chain = f.ring ? [...f.ring, f.ring[0]] : f.line;
-    const i = nearChain(wx, wy, chain, 7 / state.view.k);
-    if (i !== null) {
-      snapshot();
-      const q = nearestOnSeg([wx, wy], chain[i], chain[i + 1]);
-      featurePts(f).splice(i + 1, 0, q);
-      afterChange();
+    // ищем ближайшее ребро по ВСЕМ кольцам (внешний контур + дыры), вставляем
+    // вершину в то кольцо, чьё ребро задето — двойной клик по краю дыры работает
+    const tol = 7 / state.view.k;
+    for (const ring of featureRings(f)) {
+      const closed = f.ring ? [...ring, ring[0]] : ring;
+      const i = nearChain(wx, wy, closed, tol);
+      if (i !== null) {
+        snapshot();
+        const q = nearestOnSeg([wx, wy], closed[i], closed[i + 1]);
+        ring.splice(i + 1, 0, q);
+        afterChange();
+        return;
+      }
     }
   }
 });
