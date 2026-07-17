@@ -46,105 +46,46 @@ const DATA_SOURCE_GROUPS = [
     ]},
 ];
 
-// Слои портала ОГД, добавленные пользователем через каталог (кроме кураторских):
-// ключ «gisogd:{code}» — сервер сам определит маршрут и знак по имени слоя.
-const GISOGD_EXTRA_KEY = "grado_gisogd_extra";
-function gisogdExtras() {
-  try {
-    const arr = JSON.parse(localStorage.getItem(GISOGD_EXTRA_KEY) || "[]");
-    return arr.filter(x => x && x.code).map(x =>
-      ({ key: `gisogd:${x.code}`, label: x.name || x.code, def: false }));
-  } catch (e) { return []; }
-}
-function gisogdAddExtra(code, name) {
-  let arr = [];
-  try { arr = JSON.parse(localStorage.getItem(GISOGD_EXTRA_KEY) || "[]"); } catch (e) {}
-  if (!arr.some(x => x.code === code)) arr.push({ code, name });
-  localStorage.setItem(GISOGD_EXTRA_KEY, JSON.stringify(arr));
-}
+// Весь каталог ОГД теперь виден деревом прямо в окне выгрузки (см. ogdTreeHtml).
+// Прежний механизм «добавленных через каталог» слоёв (localStorage-extras +
+// модалка-picker) убран за ненадобностью.
 
-// Каталог слоёв портала (≈660): поиск по названию/пути, выбранный слой
-// добавляется в группу «ГИС ОГД Москвы» как обычный источник.
-async function openGisogdPicker(onPick) {
-  let layers = [];
-  try {
-    const r = await fetch("/api/gisogd-catalog");
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    layers = d.layers || [];
-  } catch (e) { toast(`Каталог ГИС ОГД недоступен: ${e.message}`, "warn"); return; }
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  // шапка и поля — как во всех окнах студии: kicker + название + X, поле во всю
-  // ширину (36px), пояснение под ним; иначе окно выглядит чужим
-  overlay.innerHTML = `<div class="modal fmt-modal" role="dialog" aria-modal="true" aria-labelledby="ogdc-title">
-    <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Каталог портала</span><span id="ogdc-title">Слои ГИС ОГД</span></span>
-      <button class="modal-x" aria-label="Закрыть каталог слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
-    <div class="modal-body compact">
-      <label class="ogdc-search"><span>Поиск слоя</span>
-        <input id="ogdc-q" type="search" placeholder="например, красные линии" autocomplete="off"></label>
-      <p class="ogdc-hint">Всего слоёв на портале — ${layers.length}. Объекты лягут в слой-приёмник
-        по названию слоя, атрибуты сохранятся целиком.</p>
-      <div id="ogdc-list" class="ogdc-list"></div>
-    </div>
-    <div class="modal-actions"><span class="spacer"></span>
-      <button class="ogdc-cancel">Закрыть</button></div></div>`;
-  document.body.appendChild(overlay);
-  const list = overlay.querySelector("#ogdc-list");
-  // Дерево папок как на портале: путь слоя («Слои / Генплан / …») — это и есть
-  // ветка каталога; последний сегмент — сам слой, его в заголовок папки не берём.
-  // Вложенное дерево, как на портале: путь «Слои / Генплан / 01. Функц. зоны»
-  // разворачивается в ветки. Плоский полный путь не годится — у всех папок
-  // одинаковый длинный префикс, и различить их нельзя.
-  const buildTree = items => {
-    const root = { kids: new Map(), layers: [] };
-    items.forEach(l => {
-      const parts = (l.path || "").split(" / ").filter(Boolean).slice(0, -1);
-      let node = root;
-      parts.forEach(p => {
-        if (!node.kids.has(p)) node.kids.set(p, { kids: new Map(), layers: [] });
-        node = node.kids.get(p);
-      });
-      node.layers.push(l);
+// Каталог слоёв портала (≈660) деревом ПРЯМО в окне выгрузки (не отдельной
+// модалкой): путь слоя («Слои / Генплан / …») — ветка дерева, последний сегмент
+// — сам слой. Лист = чекбокс-источник data-src="gisogd:<код>" (fetch_extent
+// резолвит его в свой слой source.gisogd.<код>). Прежняя кнопка «+ слой
+// портала…» и localStorage-extras убраны — весь каталог виден сразу.
+function ogdBuildTree(items) {
+  const root = { kids: new Map(), layers: [] };
+  items.forEach(l => {
+    const parts = (l.path || "").split(" / ").filter(Boolean).slice(0, -1);
+    let node = root;
+    parts.forEach(p => {
+      if (!node.kids.has(p)) node.kids.set(p, { kids: new Map(), layers: [] });
+      node = node.kids.get(p);
     });
-    return root;
-  };
-  const countOf = n => n.layers.length + [...n.kids.values()].reduce((s, k) => s + countOf(k), 0);
-  // Отступ — обычным padding'ом. Направляющие линии не рисуем: на стыках строк
-  // они рвутся и выглядят пунктиром; глубину и так держат отступ и вес шрифта.
-  const pad = d => 12 + d * 16;
-  const renderNode = (node, open, depth) => {
-    const folders = [...node.kids].map(([name, kid]) => `<details class="ogdc-folder"${open ? " open" : ""}>
-      <summary style="padding-left:${pad(depth)}px"><span class="ogdc-tw">▶</span><span class="ogdc-fname">${escHtml(name)}</span>
-        <span class="ogdc-fcount">${countOf(kid)}</span></summary>
-      ${renderNode(kid, open, depth + 1)}</details>`).join("");
-    // у слоя треугольника нет — его место держит отступ, имя идёт по той же линии
-    const rows = node.layers.map(l => `<button class="ogdc-row" style="padding-left:${pad(depth) + 19}px"
-      data-code="${escHtml(l.code)}" data-name="${escHtml(l.name || l.code)}"><span
-      class="ogdc-fname" style="white-space:normal">${escHtml(l.name || l.code)}</span></button>`).join("");
-    return folders + rows;
-  };
-  const render = q => {
-    const low = q.trim().toLowerCase();
-    const hit = low ? layers.filter(l =>
-      (l.name || "").toLowerCase().includes(low) ||
-      (l.path || "").toLowerCase().includes(low)) : layers;
-    if (!hit.length) { list.innerHTML = `<div class="fc-help">Ничего не найдено</div>`; return; }
-    // при поиске ветки раскрыты (видно, что нашлось), без поиска — свёрнуты
-    list.innerHTML = renderNode(buildTree(hit), !!low, 0);
-  };
-  render("");
-  overlay.querySelector("#ogdc-q").addEventListener("input", e => render(e.target.value));
-  const close = () => overlay.remove();
-  overlay.querySelector(".modal-x").addEventListener("click", close);
-  overlay.querySelector(".ogdc-cancel").addEventListener("click", close);
-  overlay.addEventListener("click", e => {
-    const row = e.target.closest(".ogdc-row");
-    if (!row) return;
-    gisogdAddExtra(row.dataset.code, row.dataset.name);
-    close();
-    onPick && onPick();
+    node.layers.push(l);
   });
+  return root;
+}
+function ogdCountOf(n) {
+  return n.layers.length + [...n.kids.values()].reduce((s, k) => s + ogdCountOf(k), 0);
+}
+// depth: отступ обычным padding'ом (направляющие линии рвутся на стыках строк).
+function ogdTreeHtml(node, gi, saved, disabled, open, depth = 0) {
+  const p = 12 + depth * 16;
+  const folders = [...node.kids].map(([name, kid]) => `<details class="ogdc-folder"${open ? " open" : ""}>
+    <summary style="padding-left:${p}px"><span class="ogdc-tw">▶</span><span class="ogdc-fname">${escHtml(name)}</span>
+      <span class="ogdc-fcount">${ogdCountOf(kid)}</span></summary>
+    ${ogdTreeHtml(kid, gi, saved, disabled, open, depth + 1)}</details>`).join("");
+  const rows = node.layers.map(l => {
+    const src = `gisogd:${l.code}`;
+    const on = !!saved[src] && !disabled;
+    return `<label class="data-src ogdc-leaf${disabled ? " disabled" : ""}" style="padding-left:${p + 19}px">
+      <input type="checkbox" data-src="${escHtml(src)}" data-gi="${gi}"${on ? " checked" : ""}${disabled ? " disabled" : ""}>
+      <span style="white-space:normal">${escHtml(l.name || l.code)}</span></label>`;
+  }).join("");
+  return folders + rows;
 }
 
 function viewExtentBbox() {
@@ -171,6 +112,16 @@ async function openDataFetch() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("grado_data_sources") || "{}"); } catch (e) {}
 
+  // Каталог портала (для группы ГИС ОГД — дерево прямо в окне). Тянем заранее;
+  // при ошибке группа покажет только сообщение, остальные источники работают.
+  let ogdCatalog = [], ogdError = null;
+  try {
+    const r = await fetch("/api/gisogd-catalog");
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    ogdCatalog = d.layers || [];
+  } catch (e) { ogdError = e.message; }
+
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   const areaTxt = km2 < 1 ? km2.toFixed(2) : km2.toFixed(1);
@@ -178,23 +129,38 @@ async function openDataFetch() {
     const unavailable = !!window.GRADO_STATIC && g.web === false;
     const over = km2 > g.maxKm2;
     const disabled = unavailable || over;
-    const items = g.picker ? g.items.concat(gisogdExtras()) : g.items;
-    const rows = items.map(it => {
-      const checked = (saved[it.key] ?? it.def) && !disabled;
-      return `<label class="data-src${disabled ? " disabled" : ""}">
-        <input type="checkbox" data-src="${it.key}" data-gi="${gi}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}>
-        <span>${escHtml(it.label)}</span></label>`;
-    }).join("");
-    return `<div class="data-card" data-gi="${gi}">
+    // Группа ГИС ОГД — весь каталог портала деревом (папки → слои-чекбоксы).
+    let body;
+    if (g.picker) {
+      body = unavailable
+        ? ""
+        : ogdError
+          ? `<div class="data-over">Каталог портала недоступен: ${escHtml(ogdError)}</div>`
+          : `<label class="ogdc-search" data-gi="${gi}"><span class="sr-only">Поиск слоя</span>
+               <input class="ogd-tree-q" type="search" placeholder="поиск слоя — например, красные линии" autocomplete="off"></label>
+             <div class="ogdc-list ogd-tree" data-gi="${gi}">${
+               ogdTreeHtml(ogdBuildTree(ogdCatalog), gi, saved, disabled, false)}</div>`;
+    } else {
+      const rows = g.items.map(it => {
+        const checked = (saved[it.key] ?? it.def) && !disabled;
+        return `<label class="data-src${disabled ? " disabled" : ""}">
+          <input type="checkbox" data-src="${it.key}" data-gi="${gi}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}>
+          <span>${escHtml(it.label)}</span></label>`;
+      }).join("");
+      body = `<div class="data-rows">${rows}</div>`;
+    }
+    const sub = g.picker && !ogdError && !unavailable
+      ? `${escHtml(g.hint)} · ${ogdCatalog.length} слоёв · до ${g.maxKm2} км²`
+      : `${escHtml(g.hint)} · до ${g.maxKm2} км²`;
+    return `<div class="data-card${g.picker ? " data-card-tree" : ""}" data-gi="${gi}">
       <div class="data-card-head">
         <div class="data-card-title">${escHtml(g.title)}
-          <span class="data-card-sub">${escHtml(g.hint)} · до ${g.maxKm2} км²</span></div>
-        ${g.picker && !unavailable ? `<button class="data-ogd-more" data-gi="${gi}">+ слой портала…</button>` : ""}
-        <button class="data-all" data-gi="${gi}"${disabled ? " disabled" : ""}>все</button>
+          <span class="data-card-sub">${sub}</span></div>
+        ${g.picker ? "" : `<button class="data-all" data-gi="${gi}"${disabled ? " disabled" : ""}>все</button>`}
       </div>
       ${unavailable ? `<div class="data-over">${escHtml(g.webNote || "В веб-версии источник недоступен")}</div>` : over ? `<div class="data-over">Область ${areaTxt} км² больше лимита ${g.maxKm2} км²
         <button class="data-zoom" data-target="${g.maxKm2}">Приблизить</button></div>` : ""}
-      <div class="data-rows">${rows}</div>
+      ${body}
     </div>`;
   }).join("");
   const ogdAction = window.GRADO_STATIC ? "Импортировать GeoJSON" : "Открыть портал";
@@ -230,15 +196,28 @@ async function openDataFetch() {
   overlay.querySelector(".data-cancel").addEventListener("click", close);
   overlay.addEventListener("click", ev => { if (ev.target === overlay) close(); });
   overlay.addEventListener("keydown", ev => { if (ev.key === "Escape") close(); });
-  // каталог портала: выбранный слой добавляется в группу — переоткрываем диалог,
-  // чтобы он появился обычным чекбоксом (галочки текущей сессии уже сохранены)
-  const moreBtn = overlay.querySelector(".data-ogd-more");
-  if (moreBtn) moreBtn.addEventListener("click", () => {
-    const sel = {};
-    allBoxes().forEach(b => { if (!b.disabled) sel[b.dataset.src] = b.checked; });
-    try { localStorage.setItem("grado_data_sources", JSON.stringify(sel)); } catch (e) {}
-    openGisogdPicker(() => { close(); openDataFetch(); });
-  });
+  // Поиск по дереву каталога ОГД: фильтруем по имени/пути, найденное — с
+  // раскрытыми ветками (видно, что нашлось), пустой запрос — свёрнутое дерево.
+  // Чек-состояния при перерисовке восстанавливаем из уже отмеченных чекбоксов.
+  const treeInput = overlay.querySelector(".ogd-tree-q");
+  const treeBox = overlay.querySelector(".ogd-tree");
+  if (treeInput && treeBox) {
+    const gi = treeBox.dataset.gi;
+    const disabledTree = km2 > DATA_SOURCE_GROUPS[+gi].maxKm2;
+    treeInput.addEventListener("input", () => {
+      const low = treeInput.value.trim().toLowerCase();
+      // сохраняем текущие галочки, чтобы поиск их не сбрасывал
+      const on = {};
+      treeBox.querySelectorAll("input[data-src]:checked").forEach(b => { on[b.dataset.src] = true; });
+      const hit = low ? ogdCatalog.filter(l =>
+        (l.name || "").toLowerCase().includes(low) ||
+        (l.path || "").toLowerCase().includes(low)) : ogdCatalog;
+      treeBox.innerHTML = hit.length
+        ? ogdTreeHtml(ogdBuildTree(hit), gi, on, disabledTree, !!low)
+        : `<div class="fc-help">Ничего не найдено</div>`;
+      refreshUI();
+    });
+  }
 
   const loadBtn = overlay.querySelector(".data-load");
   const status = overlay.querySelector(".data-status");
