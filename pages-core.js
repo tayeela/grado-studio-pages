@@ -323,8 +323,19 @@
     const polygons = geometry.type === "Polygon" ? [coordinates]
       : geometry.type === "MultiPolygon" ? coordinates : [];
     if (!Array.isArray(polygons)) return [];
-    return polygons.map(polygon => Array.isArray(polygon) && Array.isArray(polygon[0])
-      ? closeRing(polygon[0]) : null).filter(Boolean).map(ring => ({ ring }));
+    // polygon[0] — внешний контур, polygon[1:] — ДЫРЫ. Прежде дыры молча
+    // отбрасывались и выколотый полигон грузился сплошным (как и на сервере).
+    return polygons.map(polygon => {
+      if (!Array.isArray(polygon) || !Array.isArray(polygon[0])) return null;
+      const ring = closeRing(polygon[0]);
+      if (!ring) return null;
+      const part = { ring };
+      const holes = polygon.slice(1)
+        .map(h => (Array.isArray(h) ? closeRing(h) : null))
+        .filter(h => h && h.length >= 3);
+      if (holes.length) part.holes = holes;
+      return part;
+    }).filter(Boolean);
   };
   const stableHash = value => {
     const text = typeof value === "string" ? value : JSON.stringify(value);

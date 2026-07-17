@@ -1131,6 +1131,17 @@ function ringArea(ring) {
   }
   return Math.abs(s) / 2;
 }
+// Площадь полигона С УЧЁТОМ дыр: выколотая часть не принадлежит объекту, иначе
+// ТЭП считал бы её как зону (выколотые полигоны ОГД). Знак обхода колец в
+// данных портала не гарантирован, поэтому вычитаем модуль площади каждой дыры.
+function featureArea(f) {
+  if (!f || !f.ring) return 0;
+  let a = ringArea(f.ring);
+  for (const h of f.holes || []) {
+    if (h && h.length >= 3) a -= ringArea(h);
+  }
+  return Math.max(0, a);
+}
 function lineLen(line) {
   let s = 0;
   for (let i = 0; i + 1 < line.length; i++)
@@ -1143,6 +1154,16 @@ function lineLen(line) {
 function fmtLen(m) { return (+m).toFixed(1) + " м"; }
 function fmtCoord(m) { return (+m).toFixed(1); }
 function fmtAreaHa(m2) { return (m2 / 10000).toFixed(2) + " га"; }
+// Точка внутри полигона С УЧЁТОМ дыр: в выколотой части объекта нет, поэтому
+// клик там не должен его выбирать (и «Данные по области» не должны считать её
+// своей). Границу дыры ловит отдельно nearRing — за контур схватить можно.
+function pointInPolygon(x, y, f) {
+  if (!f.ring || !pointInRing(x, y, f.ring)) return false;
+  for (const h of f.holes || []) {
+    if (h && h.length >= 3 && pointInRing(x, y, h)) return false;
+  }
+  return true;
+}
 function pointInRing(x, y, ring) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -1766,6 +1787,24 @@ function drawChain(chain, close) {
   if (close) ctx.closePath();
 }
 
+// Дыры полигона (выколотые полигоны ОГД). Внутренние кольца добавляются
+// ПОДПУТЯМИ в уже начатый путь (beginPath сделал drawChain) — заливка по
+// "evenodd" тогда оставляет дыру дырой независимо от направления обхода
+// кольца (в данных портала оно не гарантировано, на nonzero дыра пропала бы).
+// Обводка идёт по всем кольцам — контур дыры виден, как и должен.
+function addHoleSubpaths(holes) {
+  if (!holes || !holes.length) return false;
+  let added = false;
+  for (const h of holes) {
+    if (!h || h.length < 3) continue;
+    ctx.moveTo(...w2s(...h[0]));
+    for (let i = 1; i < h.length; i++) ctx.lineTo(...w2s(...h[i]));
+    ctx.closePath();
+    added = true;
+  }
+  return added;
+}
+
 function drawGrid(w, h) {
   if (!state.gridShow) return;
   const g = gridStep();
@@ -1798,13 +1837,16 @@ function drawGrid(w, h) {
 
 // Штриховка зоны по Эталону ЛГР: hatch = true (легаси 45° цветом обводки)
 // или {angle: 0|45|90|135, cross, spacing_px, color}. Рисуется в клипе контура.
-function drawHatch(ring, hatch, strokeColor) {
+function drawHatch(ring, hatch, strokeColor, holes) {
   const spec = hatch === true
     ? { angle: 45, spacing_px: 9, color: strokeColor }
     : hatch;
   ctx.save();
   drawChain(ring, true);
-  ctx.clip();
+  // дыры исключаются и из штриховки: клип по even-odd (иначе штрих зашёл бы
+  // внутрь выколотой части и дыра читалась бы как обычная зона)
+  const hasHoles = addHoleSubpaths(holes);
+  ctx.clip(hasHoles ? "evenodd" : "nonzero");
   const ss = ring.map(p => w2s(...p));
   // экранный bbox кольца ОДНИМ проходом (без Math.min(...spread) — медленно/краш
   // на больших кольцах), ЗАЖАТЫЙ по видимому холсту: штрих-линии за экраном
@@ -2294,14 +2336,17 @@ function draw() {
         } else {
           drawChain(f.ring || f.line, !!f.ring);
         }
+        // дыры — подпути в том же пути (см. addHoleSubpaths)
+        const hasHoles = f.ring ? addHoleSubpaths(f.holes) : false;
         if (st.fill && f.ring) {
           ctx.save();
           if (st.fillOpacity != null) ctx.globalAlpha = st.fillOpacity;
-          ctx.fillStyle = st.fill; ctx.fill();
+          ctx.fillStyle = st.fill;
+          ctx.fill(hasHoles ? "evenodd" : "nonzero");
           ctx.restore();
         }
         ctx.stroke();
-        if (st.hatch && f.ring) drawHatch(f.ring, st.hatch, st.stroke);
+        if (st.hatch && f.ring) drawHatch(f.ring, st.hatch, st.stroke, f.holes);
         if (st.double) drawDoubleLine(f.ring || f.line, st.double, !!f.ring);
         if (st.line_marker && (f.ring || f.line)) {
           // направление засечки по знаку Эталона: по умолчанию остриём ВНУТРЬ
@@ -3271,7 +3316,7 @@ const ATTR_FIELDS = {
     { key: "floors", title: "Этажность", type: "number", min: 1, max: 75,
       cast: v => Math.min(75, Math.max(1, parseInt(v) || 9)) },
     { type: "computed",
-      compute: f => `СПП: ${(ringArea(f.ring) * (f.props.floors || 1) / 1000).toFixed(1)} тыс. м²` },
+      compute: f => `СПП: ${(featureArea(f) * (f.props.floors || 1) / 1000).toFixed(1)} тыс. м²` },
   ],
   "pp.red_line": [
     { key: "radius", title: "Радиус сопряжения, м", type: "number", min: 0, max: 500, step: 5,
@@ -3547,7 +3592,7 @@ function renderProps() {
     ];
   }
   let metric = "";
-  if (f.ring) metric = `площадь: ${fmtAreaHa(ringArea(f.ring))}`;
+  if (f.ring) metric = `площадь: ${fmtAreaHa(featureArea(f))}`;
   if (f.line) metric = `длина: ${fmtLen(lineLen(f.line))}`;
   if (f.arc) metric = `дуга: R ${fmtLen(f.arc.r)}, длина ${fmtLen(Math.abs(f.arc.sweep) * f.arc.r)}`;
   if (f.circle) metric = `окружность: R ${fmtLen(f.circle.r)}`;
@@ -5495,7 +5540,10 @@ function hitTest(wx, wy) {
   // контуру даёт клик по самой границе (pointInRing ровно на грани неустойчив),
   // но порядок «сверху вниз» защищает от выбора скрытого под заливкой контура.
   for (const { f } of cand) {
-    if (f.ring && (pointInRing(wx, wy, f.ring) || nearRing(wx, wy, f.ring, tolW))) return f;
+    // тело считается БЕЗ выколотых частей (pointInPolygon), но за контур —
+    // и внешний, и контур дыры — схватить можно
+    if (f.ring && (pointInPolygon(wx, wy, f) || nearRing(wx, wy, f.ring, tolW)
+                   || (f.holes || []).some(h => nearRing(wx, wy, h, tolW)))) return f;
   }
   return null;
 }
