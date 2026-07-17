@@ -1992,6 +1992,37 @@ function measureLabel(s, font) {
   return w;
 }
 
+// Знаки ЛГР: в рабочих QML Москвы штрих (customdash_unit=MapUnit) и маркеры
+// (interval_unit/size_unit=MapUnit) заданы в МЕТРАХ НА МЕСТНОСТИ, а не в мм
+// листа. В библиотеке они записаны в px для опорного 1:2000, поэтому на холсте
+// домножаем на зум относительно опорного — тогда плотность рисунка совпадает с
+// эталоном на ЛЮБОМ масштабе, а не только на 1:2000 (прежде всё было
+// фиксировано в экранных px: на 1:4451 рисунок выходил вдвое реже эталона).
+// Штрих и маркер ОБЯЗАНЫ множиться на один и тот же коэффициент, иначе засечка
+// уедет с черты. Нижний предел — чтобы на обзорных масштабах не слиплось.
+// Пользовательских/проектных стилей не касается (у них нет ground_units).
+const LGR_MIN_FACTOR = 0.32;          // цикл 10 м остаётся не мельче ~6 px
+function groundFactor(st) {
+  if (!st || !st.ground_units) return 1;
+  const refK = 3779.5 / (st.ref_scale || 2000);
+  return Math.max(LGR_MIN_FACTOR, state.view.k / refK);
+}
+function scaledDash(st) {
+  const f = groundFactor(st);
+  return (st.dash && f !== 1) ? st.dash.map(d => d * f) : (st.dash || null);
+}
+// Масштабируем ШАГ засечек (в QML interval=MapUnit), но НЕ их размер: size в
+// QML тоже MapUnit (3.5 м), однако на рабочих 1:4000+ это ~3 px — засечка
+// исчезает. Размер держим постоянным на экране (сознательное решение, как и
+// в beta.55), шаг — по местности. На фазу штриха размер не влияет: с чертой
+// засечку связывают только period и dash, а они множатся на один коэффициент.
+function scaledMarker(st) {
+  const mk = st.line_marker;
+  const f = groundFactor(st);
+  if (!mk || f === 1) return mk;
+  return { ...mk, period: (mk.period || 40) * f };
+}
+
 // Засечки вдоль линии/контура. Размещение ПОСЕГМЕНТНОЕ: на каждом прямом
 // ребре засечки распределяются равномерно с отступом от вершин, а не
 // непрерывно по периметру — иначе на углах засечки соседних рёбер
@@ -2188,7 +2219,11 @@ function draw() {
     const _feats = _byLayer.get(layer); if (!_feats) continue;
     for (const f of _feats) {
       const st = styleOf(f);
-      ctx.setLineDash(st.dash || []);
+      // ЛГР: штрих в метрах местности → px по текущему зуму (см. groundFactor).
+      // Этот же массив уходит в drawLineMarkers — фаза засечки обязана
+      // считаться по ТОМУ ЖЕ штриху, которым рисуется линия.
+      const stDash = scaledDash(st);
+      ctx.setLineDash(stDash || []);
       ctx.lineWidth = st.width; ctx.strokeStyle = canvasStrokeOf(f, st);
       if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
@@ -2283,9 +2318,9 @@ function draw() {
           const sides = st.line_marker.dir === "both" ? [inw, -inw]
                       : (!side0 && st.line_marker.dir === "out") ? [-inw] : [inw];
           for (const side of sides)
-            drawLineMarkers(f.ring || f.line, st.line_marker,
+            drawLineMarkers(f.ring || f.line, scaledMarker(st),
                             st.stroke || cvColor("redline", "#df0024"), !!f.ring, side,
-                            st.width, st.dash);
+                            st.width, stDash);
         }
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
