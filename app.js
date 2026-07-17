@@ -134,7 +134,13 @@ const LAYERS_V2 = [
     semantic_class: "generic.line", geometry_type: "polyline",
     style_id: "boundary.line", stage: "existing", source_kind: "osm",
     import_only: true, generic: true, fields: [],
-    fmt: { stroke: "#9a938a", width: 1, dash: null },
+    // Оформления слоя тут НЕТ намеренно: класс дороги приходит из самих данных
+    // OSM (тег highway) и несёт СВОЙ знак (osm.hw.* по рабочим QML юзера:
+    // магистраль 1.6 мм … тротуар 0.26 мм). Прежнее зашитое
+    // fmt {stroke:"#9a938a", width:1} перекрывало знак (порядок: знак →
+    // оформление слоя → оформление объекта) и делало все дороги одинаковыми
+    // серыми волосками. Цвет по-прежнему переключается через «Оформление
+    // слоя» — оба варианта QML есть в палитре (песочный/серый).
     defaults: () => ({}) },
   { id: "source.osm.buildings", title: "Здания (OSM)", kind: "building",
     semantic_class: "oks.building", geometry_type: "polygon",
