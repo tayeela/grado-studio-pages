@@ -544,10 +544,33 @@ function gpZoneSid(f) {
   return sid;
 }
 
+// Знак СЛОЯ-источника ОГД по его названию (те же baked-правила, что импорт):
+// проект, загруженный старой веб-редакцией, мог не назначить знак объектам
+// слоя (напр. «Природные и озеленённые территории» = природный комплекс шёл
+// голым контуром). Знак слоя красит их при открытии БЕЗ переимпорта. На
+// десктопе правил в window нет → берётся L.style_id (сервер уже проставил).
+const _layerSignCache = new Map();   // layer.id → style_id | null
+function layerSignSid(L) {
+  if (!L || typeof L.id !== "string" || !L.id.startsWith("source.gisogd.")) return null;
+  if (_layerSignCache.has(L.id)) return _layerSignCache.get(L.id);
+  let sid = L.style_id || null;
+  const R = typeof window !== "undefined" && window.__GRADO_GISOGD_RULES__;
+  if (!sid && R && L.title) {
+    const low = String(L.title).toLowerCase().replace(/ё/g, "е");
+    if (!(R.doc_markers || []).some(m => low.includes(m))) {
+      const hit = (R.style_rules || []).find(r => r.keys.some(k => low.includes(k)));
+      if (hit) sid = hit.style_id;
+    }
+  }
+  _layerSignCache.set(L.id, sid);
+  return sid;
+}
+
 function styleOf(f) {
   const L = layerOf(f);
   const sid = f.style_id;
-  const gsid = sid ? null : gpZoneSid(f);   // цвет Генплана для зоны без знака
+  // знак для объекта без style_id: цвет зоны по типу ИЛИ знак слоя по имени
+  const gsid = sid ? null : (gpZoneSid(f) || layerSignSid(L));
   let base = (sid && (state.projectStyles[sid] || STYLES_V2[sid]))
     || (gsid && STYLES_V2[gsid]) || ruleStyleFor(L, f) || layerStyle(L) || {};
   // «Оформление слоя» действует и на объекты со СВОИМ знаком. Раньше явный
