@@ -2671,14 +2671,26 @@ function draw() {
           // точнее, чем наша догадка по центроиду. inwardSign остаётся для
           // объектов без LineCode (начерченных вручную).
           const side0 = f.props && f.props.line_side;
-          const inw = side0 ? side0
-                    : f.ring && f.ring.length > 2 ? inwardSign(f.ring) : 1;
-          const sides = st.line_marker.dir === "both" ? [inw, -inw]
-                      : (!side0 && st.line_marker.dir === "out") ? [-inw] : [inw];
-          for (const side of sides)
-            drawLineMarkers(f.ring || f.line, scaledMarker(st),
-                            st.stroke || cvColor("redline", "#df0024"), !!f.ring, side,
-                            stWidth, stDash);
+          const mkColor = st.stroke || cvColor("redline", "#df0024");
+          const mkScaled = scaledMarker(st), mkDir = st.line_marker.dir;
+          const ringMarkers = (ring, baseInw, closed) => {
+            const sides = mkDir === "both" ? [baseInw, -baseInw]
+                        : (!side0 && mkDir === "out") ? [-baseInw] : [baseInw];
+            for (const side of sides)
+              drawLineMarkers(ring, mkScaled, mkColor, closed, side, stWidth, stDash);
+          };
+          if (f.ring) {
+            const inw = side0 ? side0
+                      : f.ring.length > 2 ? inwardSign(f.ring) : 1;
+            ringMarkers(f.ring, inw, true);
+            // Дыры выколотого полигона: засечки смотрят В ПОЛИГОН = ИЗ дыры
+            // (инверсия относительно внешней границы, -inwardSign) — метки
+            // окантовывают материал полигона, а не пустоту (просьба юзера).
+            for (const hole of f.holes || [])
+              if (hole.length > 2) ringMarkers(hole, -inwardSign(hole), true);
+          } else if (f.line) {
+            ringMarkers(f.line, side0 || 1, false);
+          }
         }
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
