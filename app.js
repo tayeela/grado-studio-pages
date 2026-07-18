@@ -766,6 +766,7 @@ function styleSampleSVG(st, opts) {
     // треугольники) — показываем их поверх, иначе превью «теряет» половину знака
     const zmk = st.line_marker;
     if (zmk && zmk.shape) bg += _markerGlyphsSVG(zmk, x0, x1, midY, stroke);
+    bg += _sampleLabelSVG(st.line_label, W, midY, H, stroke);
     return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">${defs}${bg}</svg>`;
   }
   // линия: штрих + засечки
@@ -774,17 +775,35 @@ function styleSampleSVG(st, opts) {
   let parts = `<line x1="${x0}" y1="${midY}" x2="${x1}" y2="${midY}" stroke="${stroke}" stroke-width="${lw}" stroke-linecap="butt"${da ? ` stroke-dasharray="${da}"` : ""}/>`;
   const mk = st.line_marker;
   if (mk && mk.shape) parts += _markerGlyphsSVG(mk, x0, x1, midY, stroke);
+  parts += _sampleLabelSVG(st.line_label, W, midY, H, stroke);
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">${parts}</svg>`;
+}
+// Подпись знака в образце (как повторяющаяся подпись вдоль линии на карте):
+// малый текст по центру с фоном-гало под тему, чтобы читался поверх линии.
+// Пусто, если у стиля подписи нет (у слоёв-источников она по умолчанию выкл —
+// как и на холсте).
+function _sampleLabelSVG(label, W, midY, H, stroke) {
+  const t = String(label == null ? "" : label).trim();
+  if (!t) return "";
+  const txt = t.length > 6 ? t.slice(0, 5) + "…" : t;
+  const fs = Math.min(9, Math.round(H * 0.62));
+  const w = txt.length * fs * 0.62 + 4;
+  return `<rect x="${(W - w) / 2}" y="${midY - fs * 0.75}" width="${w}" height="${fs * 1.5}" rx="2" fill="var(--panel, #fff)" opacity="0.9"/>` +
+    `<text x="${W / 2}" y="${midY}" font-size="${fs}" fill="${stroke}" text-anchor="middle" dominant-baseline="central" font-family="var(--font-ui, sans-serif)">${escHtml(txt)}</text>`;
 }
 // Засечки знака вдоль образца линии — крупно и разборчиво (легенда).
 function _markerGlyphsSVG(mk, x0, x1, midY, stroke) {
   const s = 7, w2 = 4, ow = Math.max(1, mk.ow ? mk.ow * 0.7 : 1.1);
   const filled = mk.filled !== false;
   const dirs = mk.dir === "both" ? [-1, 1] : [mk.dir === "out" ? -1 : -1];  // вверх (и вниз для both)
-  const step = 26, n = Math.floor((x1 - x0 - 12) / step);
+  // Хотя бы ОДИН маркер даже в узком свотче (40px): раньше n=floor(28/26)=0 и
+  // засечки не рисовались вовсе — знак ООЗТ/ПК выглядел как голая линия.
+  const usable = x1 - x0, step = 26;
+  const n = Math.max(1, Math.round(usable / step));
+  const gap = usable / (n + 1);
   let out = "";
   for (let i = 1; i <= n; i++) {
-    const x = x0 + 8 + i * step;
+    const x = x0 + gap * i;
     for (const d of dirs) {
       const ny = d * -1;                 // экранная нормаль (up при d=1)
       const apexY = midY + ny * s;
@@ -4037,7 +4056,11 @@ function renderLayers() {
   const sampleByLayer = {};
   for (const f of state.features) {
     const lid = f.layer_id;
-    if (lid && !(lid in sampleByLayer)) sampleByLayer[lid] = f;
+    if (!lid) continue;
+    // предпочитаем объект СО знаком (style_id): в слое-источнике часть объектов
+    // может быть без знака, и первый попавшийся дал бы пустой свотч
+    const cur = sampleByLayer[lid];
+    if (!cur || (!cur.style_id && f.style_id)) sampleByLayer[lid] = f;
   }
   for (const layer of layerRowsTopFirst()) {
     const count = featuresOnLayer(layer.id).length;
