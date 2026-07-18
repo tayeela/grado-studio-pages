@@ -2349,20 +2349,25 @@ function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
       acc += d;
     }
   } else {
-    // сплошная линия — равномерно по period (углы свободны, как раньше)
+    // Сплошная линия — засечки НЕПРЕРЫВНО по длине всей цепочки единым шагом
+    // period (как MarkerLine в QGIS). Прежде каждое ребро делилось на метки
+    // ОТДЕЛЬНО: короткие рёбра (< period/2) пропускались, а шаг d/n у каждого
+    // сегмента свой — отсюда неравномерность (жалоба юзера). Теперь шаг один
+    // на весь контур, вершины его не сбивают.
+    let acc = 0, next = period * 0.5;
     for (let i = 1; i < scr.length; i++) {
       const [x1, y1] = scr[i - 1], [x2, y2] = scr[i];
       const d = Math.hypot(x2 - x1, y2 - y1);
-      if (d < period * 0.5) continue;
+      if (d < 1e-6) continue;
       const tx = (x2 - x1) / d, ty = (y2 - y1) / d;
       const nx = -ty * inward, ny = tx * inward;
-      const n = Math.max(1, Math.round(d / period));
-      const gap = d / n;
-      for (let k = 0; k < n; k++) {
-        const t = (gap * (k + 0.5)) / d;
+      while (next <= acc + d) {
+        const t = (next - acc) / d;
         drawMarkerGlyph(mk, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t,
                         tx, ty, nx, ny, s, period);
+        next += period;
       }
+      acc += d;
     }
   }
   ctx.restore();
