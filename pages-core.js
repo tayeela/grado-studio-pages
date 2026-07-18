@@ -546,7 +546,8 @@
     const R = typeof window !== "undefined" && window.__GRADO_GP_ZONE_RULES__;
     if (!R || !props) return null;
     const norm = s => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
-    const name = props.naimfunkzony || props.naimfunkzo || props.fz_name || props.name;
+    const name = props.naimfunkzony || props.naimfunkzo || props.fz_name
+      || props.funct_zon || props.class_name || props.name;
     const byName = R.name_to_style[norm(name)];
     if (byName) return byName;
     const code = String(props.fztip || props.fztype || props.fz_type || "").split(".")[0];

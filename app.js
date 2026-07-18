@@ -566,7 +566,8 @@ function gpZoneSid(f) {
   let sid = null;
   if (R && p) {
     const norm = s => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
-    sid = R.name_to_style[norm(p.naimfunkzony || p.naimfunkzo || p.fz_name || p.name)] || null;
+    sid = R.name_to_style[norm(p.naimfunkzony || p.naimfunkzo || p.fz_name
+      || p.funct_zon || p.class_name || p.name)] || null;
     if (!sid) {
       const c = String(p.fztip || p.fztype || p.fz_type || "").split(".")[0];
       const z = R.code_to_zone[c];
