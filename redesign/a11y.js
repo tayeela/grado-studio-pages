@@ -111,7 +111,7 @@
       tooltip.hidden = false;
       tooltipTarget.setAttribute('aria-describedby', tooltip.id);
       positionTooltip(tooltipTarget);
-    }, immediate ? 120 : 420);
+    }, immediate ? 0 : 250);
   }
 
   function prepareDialog(overlay) {
@@ -218,7 +218,9 @@
   prepareTooltips();
   document.addEventListener('pointerover', event => {
     const target = event.target.closest?.('[data-tooltip]');
-    if (target && target !== tooltipTarget) showTooltip(target);
+    // Первая подсказка — с задержкой; пока подсказка уже видна, соседние
+    // показываем мгновенно (emil: не ждать 250 мс на каждой кнопке подряд).
+    if (target && target !== tooltipTarget) showTooltip(target, !tooltip.hidden);
   });
   document.addEventListener('pointerout', event => {
     if (tooltipTarget && !tooltipTarget.contains(event.relatedTarget)) hideTooltip();

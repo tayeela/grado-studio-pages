@@ -5822,10 +5822,23 @@ function marqueeHit(a, b) {
 
 // ---------- события мыши ----------
 cv.addEventListener("contextmenu", e => e.preventDefault());
-cv.addEventListener("mousedown", e => {
-  const [wxr, wyr] = s2w(e.offsetX, e.offsetY);
+// Холст на Pointer Events с захватом указателя: при перетаскивании (вершина,
+// тело, рамка выделения, панорама) события продолжают приходить даже когда
+// курсор ушёл за пределы холста — на тулбар/панель/шапку. На mousemove@cv
+// трекинг рвался у кромки и объект замирал (apple §2/§3: 1:1 + capture).
+// touch-action:none — чтобы касание-перетаскивание не конфликтовало со скроллом.
+cv.style.touchAction = "none";
+// Локальные координаты указателя в холсте из clientX/clientY (а не offsetX):
+// у ЗАХВАЧЕННОГО указателя, ушедшего за пределы холста, offsetX в Chrome
+// ненадёжен (relative к элементу под курсором), из-за чего перетаскивание
+// «застревало» у кромки. clientX−rect надёжен всегда — так же считает ресайзер.
+function evXY(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+cv.addEventListener("pointerdown", e => {
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  const [ex, ey] = evXY(e);
+  const [wxr, wyr] = s2w(ex, ey);
   if (e.button === 2 || e.button === 1 || (e.button === 0 && spaceDown)) {
-    state.pan = { sx: e.offsetX, sy: e.offsetY, tx: state.view.tx, ty: state.view.ty };
+    state.pan = { sx: ex, sy: ey, tx: state.view.tx, ty: state.view.ty };
     return;
   }
   if (e.button !== 0) return;
@@ -5973,12 +5986,13 @@ cv.addEventListener("mousedown", e => {
     }
   }
 });
-cv.addEventListener("mousemove", e => {
-  const [wx, wy] = s2w(e.offsetX, e.offsetY);
+cv.addEventListener("pointermove", e => {
+  const [ex, ey] = evXY(e);
+  const [wx, wy] = s2w(ex, ey);
   document.getElementById("st-coords").textContent = `x: ${fmtCoord(wx)}  y: ${fmtCoord(wy)} м`;
   if (state.pan) {
-    state.view.tx = state.pan.tx + (e.offsetX - state.pan.sx);
-    state.view.ty = state.pan.ty + (e.offsetY - state.pan.sy);
+    state.view.tx = state.pan.tx + (ex - state.pan.sx);
+    state.view.ty = state.pan.ty + (ey - state.pan.sy);
     draw(); return;
   }
   if (state.drag && state.drag.marquee) {
@@ -6097,7 +6111,7 @@ cv.addEventListener("mousemove", e => {
 // не увидит — pan/edit/drag «залипнут», и вид будет произвольно
 // скакать при следующем движении мыши, создавая впечатление, что
 // холст не реагирует на клики.
-window.addEventListener("mouseup", e => {
+window.addEventListener("pointerup", e => {
   if (state.pan) { state.pan = null; return; }
   if (state.edit) {
     const moved = state.edit.moved;

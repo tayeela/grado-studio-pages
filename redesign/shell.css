@@ -301,7 +301,8 @@ span.chk .ic{width:12px;height:12px;stroke-width:2.6}
    стекла (90% плотности), иначе просвечивающие подписи панели рушат читаемость */
 .pop{position:absolute;z-index:var(--z-menu);width:262px;background:color-mix(in srgb,var(--panel) 90%,transparent);backdrop-filter:var(--glass-blur);
   border:1px solid var(--glass-border);border-radius:var(--r-md);box-shadow:var(--shadow-md),var(--glass-hi);
-  padding:13px;display:flex;flex-direction:column;gap:12px;animation:pop .16s var(--ease-out)}
+  padding:13px;display:flex;flex-direction:column;gap:12px;animation:pop .16s var(--ease-out);
+  transform-origin:top left}   /* растёт от кнопки-триггера, не из центра (apple §7) */
 .pop .ph{font-size:var(--fs-12);font-weight:600;color:var(--text)}
 .field{display:flex;flex-direction:column;gap:5px}
 .field label{font-size:11px;color:var(--muted)}
@@ -315,7 +316,8 @@ input[type=range]{-webkit-appearance:none;height:6px;border-radius:3px;backgroun
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);box-shadow:var(--shadow-sm);cursor:pointer}
 
 .menu{position:absolute;z-index:var(--z-menu);min-width:230px;background:var(--glass-strong);backdrop-filter:var(--glass-blur);
-  border:1px solid var(--glass-border);border-radius:var(--r-md);box-shadow:var(--shadow-md),var(--glass-hi);padding:6px;animation:pop .16s var(--ease-out)}
+  border:1px solid var(--glass-border);border-radius:var(--r-md);box-shadow:var(--shadow-md),var(--glass-hi);padding:6px;animation:pop .16s var(--ease-out);
+  transform-origin:top left}   /* меню растёт от кнопки-триггера, не из центра */
 .menu-row{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:var(--r-sm);font-size:var(--fs-13);color:var(--text);cursor:pointer}
 .menu-row:hover,.menu-row:focus{background:var(--accent-weak);color:var(--accent)}
 .menu-row .ic{width:16px;height:16px;color:var(--muted)}
@@ -350,7 +352,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes pop{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){*{animation:none!important}#panel{transition:none!important}}
+/* reduced-motion: гасим и анимации, и ДВИЖЕНИЕ переходов (слайд тумблера,
+   поворот каретки, scale при нажатии) — не только @keyframes. Мгновенные
+   переходы вестибулярно безопасны и остаются согласованными по цвету/фону. */
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.01ms!important}}
 
 /* Адаптив: шапка остаётся одной строкой, панель становится рабочим drawer. */
 @media (max-width:1120px){

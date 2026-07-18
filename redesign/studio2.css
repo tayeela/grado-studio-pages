@@ -125,6 +125,9 @@
 .layer-row:focus-within .lrow-menu,.layer-row.locked .lrow-lock{opacity:1}
 .layer-row .lrow-lock:hover,.layer-row .lrow-menu:hover{background:var(--glass);color:var(--text)}
 .layer-row .lrow-lock .ic,.layer-row .lrow-menu .ic{width:15px;height:15px}
+/* На тач/планшете hover нет — замок и меню слоя были бы невидимы (клик по
+   невидимому «работает», но найти нельзя). Показываем их всегда (apple §5). */
+@media (hover:none){.layer-row .lrow-lock,.layer-row .lrow-menu{opacity:1}}
 .layer-row.locked .nm{color:var(--muted)}
 .layer-row.dragging{opacity:.4}
 .layer-row.drop-before{box-shadow:inset 0 2px 0 var(--accent)}
