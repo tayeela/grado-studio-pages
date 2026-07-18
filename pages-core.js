@@ -537,6 +537,22 @@
     const hit = R.style_rules.find(r => r.keys.some(k => lower.includes(k)));
     return hit ? hit.style_id : null;
   };
+  // Цвет функц. зоны Генплана ПО ТИПУ зоны из атрибутов ОБЪЕКТА (а не по имени
+  // слоя): на десктопе это делает gp_style_for_zone на сервере, в браузерной
+  // редакции раньше не делалось вовсе — функц. зоны шли голым контуром. Карта
+  // впекается build_pages из studio_core.gp_zone_frontend_rules. Тип зоны в
+  // разных слоях назван по-разному (naimfunkzony/fz_name/name; код fztip/fz_type).
+  const gpZoneStyle = props => {
+    const R = typeof window !== "undefined" && window.__GRADO_GP_ZONE_RULES__;
+    if (!R || !props) return null;
+    const norm = s => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
+    const name = props.naimfunkzony || props.naimfunkzo || props.fz_name || props.name;
+    const byName = R.name_to_style[norm(name)];
+    if (byName) return byName;
+    const code = String(props.fztip || props.fztype || props.fz_type || "").split(".")[0];
+    const zone = R.code_to_zone[code];
+    return zone ? R.name_to_style[zone] || null : null;
+  };
   const safeStem = filename => String(filename || "layer").split(/[\\/]/).pop()
     .replace(/\.(geojson|json)$/i, "").replace(/[/:*?"<>|]/g, "").trim() || "layer";
 
@@ -604,7 +620,8 @@
           output = { kind, layer_id: layerId, ring: part.ring,
             props: kind === "zone" ? { zone_title: name || "ГИС ОГД", ...props }
               : { kind: name || "ЗОУИТ", basis: "ГИС ОГД", ...props } };
-          const styleId = gisogdStyle(member);
+          const styleId = gisogdStyle(member) ||
+            (kind === "zone" ? gpZoneStyle(props) : null);
           if (styleId) output.style_id = styleId;
         } else {
           // слой = файл-источник даже без опознанного знака (не общая свалка)
@@ -948,7 +965,8 @@
         // формат как у сервера (layer_id:key#i): layerId уже содержит код слоя
         const out = { kind, layer_id: layerId, ...part, props: { ...props },
                       srcKey: `${layerId}:${key}#${pi}` };
-        if (styleId) out.style_id = styleId;
+        const objStyle = styleId || (kind === "zone" ? gpZoneStyle(props) : null);
+        if (objStyle) out.style_id = objStyle;
         group.features.push(out);
         addFields(group, props);
       });

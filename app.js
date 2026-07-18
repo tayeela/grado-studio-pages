@@ -519,16 +519,43 @@ function ruleStyleFor(L, f) {
   }
   return null;
 }
+// Функц. зона БЕЗ назначенного знака (проект загружен старой веб-редакцией,
+// которая не красила зоны): подбираем цвет Генплана по ТИПУ зоны из атрибутов
+// объекта — те же baked-правила (window.__GRADO_GP_ZONE_RULES__), что у импорта.
+// На десктопе правил нет (там цвет ставит сервер при импорте) → null, no-op.
+// Мемоизация в WeakMap — не пишется в объект, не попадает в .grado/автосейв.
+const _gpSidCache = new WeakMap();
+function gpZoneSid(f) {
+  if (!f || f.kind !== "zone" || f.style_id) return null;
+  if (_gpSidCache.has(f)) return _gpSidCache.get(f);
+  const R = typeof window !== "undefined" && window.__GRADO_GP_ZONE_RULES__;
+  const p = f.props;
+  let sid = null;
+  if (R && p) {
+    const norm = s => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
+    sid = R.name_to_style[norm(p.naimfunkzony || p.naimfunkzo || p.fz_name || p.name)] || null;
+    if (!sid) {
+      const c = String(p.fztip || p.fztype || p.fz_type || "").split(".")[0];
+      const z = R.code_to_zone[c];
+      if (z) sid = R.name_to_style[z] || null;
+    }
+  }
+  _gpSidCache.set(f, sid);
+  return sid;
+}
+
 function styleOf(f) {
   const L = layerOf(f);
   const sid = f.style_id;
-  let base = (sid && (state.projectStyles[sid] || STYLES_V2[sid])) || ruleStyleFor(L, f) || layerStyle(L) || {};
+  const gsid = sid ? null : gpZoneSid(f);   // цвет Генплана для зоны без знака
+  let base = (sid && (state.projectStyles[sid] || STYLES_V2[sid]))
+    || (gsid && STYLES_V2[gsid]) || ruleStyleFor(L, f) || layerStyle(L) || {};
   // «Оформление слоя» действует и на объекты со СВОИМ знаком. Раньше явный
   // f.style_id забирал стиль прямо из библиотеки, минуя L.fmt: правки слоя
   // (напр. выключить штриховку/подпись у импортированных зон ОГД) просто не
   // применялись — объект молча оставался с библиотечным знаком.
   // Порядок остаётся: знак → оформление слоя → оформление объекта.
-  if (sid && L && L.fmt) base = { ...base, ...L.fmt };
+  if ((sid || gsid) && L && L.fmt) base = { ...base, ...L.fmt };
   return f.fmt ? { ...base, ...f.fmt } : base;   // f.fmt — оформление отдельного объекта
 }
 
