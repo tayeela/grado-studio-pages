@@ -4030,9 +4030,19 @@ function renderLayers() {
   const el = document.getElementById("layers-body");
   if (!el) return;
   el.innerHTML = "";
+  // Знак-образец для свотча берём у ПЕРВОГО объекта слоя, а не из стиля слоя:
+  // у слоёв-источников (ГИС ОГД) объекты несут свой знак (style_id), а стиль
+  // слоя — общий контур, и превью рисовалось чёрной линией вместо знака (ООЗТ,
+  // функц. зоны и т.п.). styleOf(объект) = ровно то, что нарисовано на холсте.
+  const sampleByLayer = {};
+  for (const f of state.features) {
+    const lid = f.layer_id;
+    if (lid && !(lid in sampleByLayer)) sampleByLayer[lid] = f;
+  }
   for (const layer of layerRowsTopFirst()) {
     const count = featuresOnLayer(layer.id).length;
-    const st = layerStyle(layer);
+    const sample = sampleByLayer[layer.id];
+    const st = sample ? styleOf(sample) : layerStyle(layer);
     // Свотч в списке — ПОЛНЫЙ образец знака (штрих + засечки для линий, заливка +
     // штриховка + рамка для зон), а не просто цветной квадрат: правка юзера
     // «превью должны полностью отображать стиль». styleSampleSVG — из app.js.
