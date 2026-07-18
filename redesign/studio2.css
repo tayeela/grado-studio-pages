@@ -97,6 +97,30 @@
 .layer-row{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-sm);
   position:relative;transition:background .12s}
 .layer-row:hover{background:var(--field-bg)}
+/* QGIS-легенда: треугольник раскрытия знаков слоя + выравнивающий спейсер */
+.layer-row .layer-disc{width:14px;height:18px;flex:0 0 auto;display:grid;place-items:center;
+  color:var(--muted);font-size:10px;line-height:1;cursor:pointer;border-radius:4px;
+  transition:transform .12s,color .12s,background .12s}
+.layer-row .layer-disc:hover{color:var(--text);background:var(--glass)}
+.layer-row .layer-disc.open{transform:rotate(90deg)}
+.layer-row .layer-disc-sp{width:14px;flex:0 0 auto}
+/* подпункт-категория (знак внутри слоя) — с отступом под треугольник слоя */
+.layer-cat-row{display:flex;align-items:center;gap:8px;padding:4px 8px 4px 26px;
+  border-radius:var(--r-sm);transition:background .12s}
+.layer-cat-row:hover{background:var(--field-bg)}
+.layer-cat-row.cat-off .nm{color:var(--faint);text-decoration:line-through}
+.layer-cat-row.cat-off .sw-svg{opacity:.4}
+.layer-cat-row input[type=checkbox]{appearance:none;-webkit-appearance:none;width:15px;height:15px;
+  border-radius:4px;border:1.5px solid var(--field-border);background:var(--field-bg);flex:0 0 auto;
+  cursor:pointer;position:relative;transition:background .12s,border-color .12s}
+.layer-cat-row input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+.layer-cat-row input[type=checkbox]:checked::after{content:"";position:absolute;left:4px;top:1px;
+  width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.layer-cat-row .sw-svg{width:34px;height:14px;flex:0 0 auto;display:block;border-radius:3px;overflow:hidden}
+.layer-cat-row .sw-svg svg{display:block;width:100%;height:100%}
+.layer-cat-row .nm{flex:1;min-width:0;font-size:var(--fs-11);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;color:var(--text-2)}
+.layer-cat-row .cnt{font-size:10px;color:var(--muted);font-family:var(--font-mono);flex:0 0 auto}
 .layer-row.active{background:var(--accent-weak);box-shadow:inset 0 0 0 1px var(--accent-line)}
 .layer-row .grip{display:grid;place-items:center;width:13px;color:var(--faint);cursor:grab;
   opacity:0;transition:opacity .12s;flex:0 0 auto}

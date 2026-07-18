@@ -459,6 +459,39 @@ function layerCats(L) {
   return [...seen].map(([id, title]) => ({ id, title }))
                   .sort((a, b) => a.title.localeCompare(b.title, "ru"));
 }
+// QGIS-подобная легенда: категории слоя со счётчиком и представителем. sample —
+// первый объект категории; styleOf(sample) = ровно то, что нарисовано на холсте
+// (с учётом оформления слоя), поэтому образец в подпункте совпадает с картой.
+function layerCatStats(L) {
+  const m = new Map();
+  for (const f of state.features) {
+    if (layerOf(f) !== L) continue;
+    const c = featCat(f);
+    if (!c) continue;
+    let e = m.get(c);
+    if (!e) { e = { id: c, title: (STYLES_V2[c] && STYLES_V2[c].title) || c, count: 0, sample: f }; m.set(c, e); }
+    e.count++;
+  }
+  return [...m.values()].sort((a, b) => a.title.localeCompare(b.title, "ru"));
+}
+// раскрытые слои (показ подпунктов-категорий) — по id, переживает reload
+const _catOpen = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem("grado_cat_open") || "[]")); }
+  catch (e) { return new Set(); }
+})();
+function saveCatOpen() {
+  try { localStorage.setItem("grado_cat_open", JSON.stringify([..._catOpen])); } catch (e) {}
+}
+// Видимость категории слоя (галка подпункта) — через тот же fmt.cats_off, что и
+// секция «Категории слоя» в оформлении. afterChange = холст+ТЭП+привязки+сохран.
+function toggleCategoryVisible(layer, catId, visible) {
+  snapshot();
+  const off = new Set((layer.fmt && layer.fmt.cats_off) || []);
+  if (visible) off.delete(catId); else off.add(catId);
+  layer.fmt = { ...(layer.fmt || {}) };
+  if (off.size) layer.fmt.cats_off = [...off]; else delete layer.fmt.cats_off;
+  afterChange();
+}
 
 /*
  * === ЛОГИКА СЛОЁВ И ФОРМАТИРОВАНИЯ (цель: логично + гибко) ===
@@ -4129,6 +4162,11 @@ function renderLayers() {
   }
   for (const layer of layerRowsTopFirst()) {
     const count = featuresOnLayer(layer.id).length;
+    // QGIS-логика: если в слое объекты с РАЗНЫМИ знаками — показываем подпункты
+    // по каждому форматированию (функц. зоны → производственные/многофункц./…).
+    const cats = layerCatStats(layer);
+    const multiCat = cats.length > 1;
+    const catOpen = multiCat && _catOpen.has(layer.id);
     const sample = sampleByLayer[layer.id];
     const st = sample ? styleOf(sample) : layerStyle(layer);
     // Свотч в списке — ПОЛНЫЙ образец знака (штрих + засечки для линий, заливка +
@@ -4150,7 +4188,10 @@ function renderLayers() {
       badges += `<span class="lrow-badge" title="есть переопределения оформления слоя">fmt</span>`;
     }
     const layerTitle = escHtml(layer.title);
-    row.innerHTML = `<span class="grip" aria-hidden="true" title="перетащить — порядок отрисовки"><svg class="ic"><use href="#ic-grip"/></svg></span>
+    const discHtml = multiCat
+      ? `<button type="button" class="layer-disc${catOpen ? " open" : ""}" aria-expanded="${catOpen}" aria-label="Показать знаки слоя «${layerTitle}» (${cats.length})" title="знаки слоя (${cats.length}) — раскрыть/свернуть">▸</button>`
+      : `<span class="layer-disc-sp" aria-hidden="true"></span>`;
+    row.innerHTML = `${discHtml}<span class="grip" aria-hidden="true" title="перетащить — порядок отрисовки"><svg class="ic"><use href="#ic-grip"/></svg></span>
       <input type="checkbox" aria-label="Показывать слой «${layerTitle}»" title="видимость слоя «${layerTitle}»" ${layer.visible ? "checked" : ""}>
       <button type="button" class="layer-select" aria-pressed="${isActive}"
         aria-label="Выбрать слой «${layerTitle}» для рисования"
@@ -4237,7 +4278,29 @@ function renderLayers() {
       const before = (ev.clientY - rect.top) < rect.height / 2;
       reorderLayer(src, layer.id, before);
     });
+    const discBtn = row.querySelector(".layer-disc");
+    if (discBtn) discBtn.addEventListener("click", ev => {
+      ev.stopPropagation();
+      if (_catOpen.has(layer.id)) _catOpen.delete(layer.id); else _catOpen.add(layer.id);
+      saveCatOpen();
+      renderLayers();
+    });
     el.appendChild(row);
+    // подпункты-категории (QGIS-легенда): образец знака + название + счётчик +
+    // галка видимости (тот же fmt.cats_off). Скрытая категория — приглушена.
+    if (catOpen) for (const cat of cats) {
+      const visible = !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id);
+      const cst = styleOf(cat.sample);
+      const crow = document.createElement("div");
+      crow.className = "layer-cat-row" + (visible ? "" : " cat-off");
+      const catTitle = escHtml(cat.title);
+      crow.innerHTML = `<input type="checkbox" ${visible ? "checked" : ""} aria-label="Показывать знак «${catTitle}» в слое «${layerTitle}»" title="видимость знака «${catTitle}»">
+        <span class="sw-svg" aria-hidden="true">${styleSampleSVG(cst, { w: 34, h: 14 })}</span>
+        <span class="nm" title="${catTitle}">${catTitle}</span><span class="cnt">${cat.count}</span>`;
+      crow.querySelector("input").addEventListener("change", ev =>
+        toggleCategoryVisible(layer, cat.id, ev.target.checked));
+      el.appendChild(crow);
+    }
   }
   updateLayerStatus();   // чип «куда я черчу» — синхрон с активным слоем
   updateStartExperience();
