@@ -862,8 +862,9 @@ function _markerGlyphsSVG(mk, x0, x1, midY, stroke) {
           case "chevron": case "chevron_dot":
             return `<path d="M ${x - w2} ${apexY} L ${x} ${midY} L ${x + w2} ${apexY}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`;
           case "triangle": {
+            // вершина НА линии (midY), основание смещено по нормали (apexY)
             const base = 3;
-            const p = `M ${x - base} ${midY} L ${x + base} ${midY} L ${x} ${apexY} Z`;
+            const p = `M ${x} ${midY} L ${x - base} ${apexY} L ${x + base} ${apexY} Z`;
             return fillMode ? `<path d="${p}" fill="${stroke}"/>` : `<path d="${p}" fill="none" stroke="${stroke}" stroke-width="${ow}"/>`;
           }
           case "triangle2": {
@@ -2177,13 +2178,15 @@ function drawMarkerGlyph(mk, px, py, tx, ty, nx, ny, s, period) {
       break;
     }
     case "triangle": {
-      // «▼» остриём внутрь зоны, основание на линии. filled===false → КОНТУРНЫЙ
-      // (в QML fill alpha=0, рисуется только обводка: коды 11/18/50). Прежде
-      // заливали сплошняком — отсюда «ПК (18) неправильно».
+      // ВЕРШИНА (остриё) НА линии, ОСНОВАНИЕ смещено по нормали внутрь зоны —
+      // ровно как на кадре портала gisogd.mos.ru «Границы территорий ПК»
+      // (правка юзера: «вершина обращена к линии, а не основание»). Прежде было
+      // наоборот (основание на линии, вершина внутрь) — это была ошибка.
+      // filled===false → КОНТУРНЫЙ (в QML fill alpha=0: коды 11/18/50).
       const b = s * 0.5;
-      ctx.moveTo(px - tx * b, py - ty * b);
-      ctx.lineTo(px + tx * b, py + ty * b);
-      ctx.lineTo(px + nx * s, py + ny * s);
+      ctx.moveTo(px, py);                                    // остриё на линии
+      ctx.lineTo(px + nx * s - tx * b, py + ny * s - ty * b);  // угол основания
+      ctx.lineTo(px + nx * s + tx * b, py + ny * s + ty * b);  // угол основания
       ctx.closePath();
       if (mk.filled === false) ctx.stroke(); else ctx.fill();
       break;
