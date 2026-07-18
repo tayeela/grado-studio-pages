@@ -828,9 +828,10 @@ function styleSampleSVG(st, opts) {
   const stroke = escHtml(st.stroke || "#888");
   const filled = st.fill && st.fill !== "transparent";
   const hatched = st.hatch;
+  const dotted = st.dots && st.dots.color;
   let defs = "", bg = "";
-  if (filled || hatched) {
-    // зона: заливка + штриховка + рамка
+  if (filled || hatched || dotted) {
+    // зона: заливка + штриховка + точки + рамка
     if (filled) bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="${escHtml(st.fill)}"/>`;
     if (hatched) {
       const h = (st.hatch === true) ? { angle: 45, spacing_px: 6, color: st.stroke } : st.hatch;
@@ -843,6 +844,14 @@ function styleSampleSVG(st, opts) {
         defs += `<pattern id="hp${styleSampleSVG._n}b" patternUnits="userSpaceOnUse" width="${gap}" height="${gap}" patternTransform="rotate(${135})"><line x1="0" y1="0" x2="0" y2="${gap}" stroke="${col}" stroke-width="0.8"/></pattern>`;
         bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="url(#hp${styleSampleSVG._n}b)"/>`;
       }
+    }
+    if (dotted) {
+      const dcol = escHtml(st.dots.color);
+      const dgap = Math.max(4, Math.min(9, st.dots.spacing_px || 8));
+      const dr = Math.max(0.8, Math.min(2, (st.dots.size_px || 2) / 2));
+      const idn = `dp${styleSampleSVG._n = (styleSampleSVG._n || 0) + 1}`;
+      defs += `<pattern id="${idn}" patternUnits="userSpaceOnUse" width="${dgap}" height="${dgap}"><circle cx="${dgap / 2}" cy="${dgap / 2}" r="${dr}" fill="${dcol}"/></pattern>`;
+      bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="url(#${idn})"/>`;
     }
     bg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="none" stroke="${stroke}" stroke-width="1"/>`;
     // знак-зона может нести засечки по контуру (напр. ПК-18: штриховка + красные
@@ -2167,6 +2176,32 @@ function drawHatch(ring, hatch, strokeColor, holes) {
   ctx.restore();
 }
 
+// Точечный узор ПОВЕРХ заливки (PointPatternFill эталона): сетка кружков внутри
+// полигона. Зоны «в составе ООПТ» отличаются от базовых именно точками. Клип по
+// even-odd (дыры исключены), шаг/размер — экранные px (как штриховка), стабильны
+// при зуме — texture, а не геометрия местности.
+function drawDots(ring, dots, holes) {
+  ctx.save();
+  drawChain(ring, true);
+  const hasHoles = addHoleSubpaths(holes);
+  ctx.clip(hasHoles ? "evenodd" : "nonzero");
+  const ss = ring.map(p => w2s(...p));
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const p of ss) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+  const step = Math.max(4, dots.spacing_px || 8);
+  const r = Math.max(0.6, (dots.size_px || 2) / 2);
+  x0 = Math.max(x0, -step); x1 = Math.min(x1, cv.clientWidth + step);
+  y0 = Math.max(y0, -step); y1 = Math.min(y1, cv.clientHeight + step);
+  if (x1 <= x0 || y1 <= y0) { ctx.restore(); return; }
+  ctx.fillStyle = dots.color;
+  const sx = Math.floor(x0 / step) * step, sy = Math.floor(y0 / step) * step;
+  ctx.beginPath();
+  for (let y = sy; y <= y1; y += step)
+    for (let x = sx; x <= x1; x += step) { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 7); }
+  ctx.fill();
+  ctx.restore();
+}
+
 // Штрих засечки-маркера чуть тоньше самой линии (см. drawLineMarkers).
 // Единая величина с scene.py MARKER_WIDTH_RATIO — холст и печать не должны
 // расходиться по толщине галок.
@@ -2696,6 +2731,7 @@ function draw() {
         }
         ctx.stroke();
         if (st.hatch && f.ring) drawHatch(f.ring, st.hatch, st.stroke, f.holes);
+        if (st.dots && f.ring) drawDots(f.ring, st.dots, f.holes);
         if (st.double) drawDoubleLine(f.ring || f.line, st.double, !!f.ring);
         if (st.line_marker && (f.ring || f.line) && lgrDetailVisible(st)) {
           // направление засечки по знаку Эталона: по умолчанию остриём ВНУТРЬ
