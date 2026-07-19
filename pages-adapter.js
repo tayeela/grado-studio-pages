@@ -554,6 +554,10 @@
     if (gisogdInput) gisogdInput.accept = ".geojson,.json,application/geo+json,application/json";
     const gisogdRow = document.querySelector('[data-click="btn-gisogd"]');
     if (gisogdRow) gisogdRow.textContent = "ГИС ОГД — GeoJSON";
+    // ФГИС ТП — только через сервер (портал Минэка не отдаёт CORS): в
+    // браузерной редакции пункт скрываем честно, а не оставляем сломанным
+    const fgistpRow = document.querySelector('[data-click="btn-fgistp"]');
+    if (fgistpRow) fgistpRow.remove();
     addMenuNote("menu-data", "В веб-версии доступны OSM и НСПД по видимой области, а также файлы НСПД и GeoJSON. ZIP и прямые ссылки требуют настольную версию.");
     addMenuNote("menu-out", "DXF и печать в масштабе доступны в настольной версии.");
     const style = document.createElement("style");

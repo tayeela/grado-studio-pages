@@ -121,6 +121,22 @@
 .layer-cat-row .nm{flex:1;min-width:0;font-size:var(--fs-11);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;color:var(--text-2)}
 .layer-cat-row .cnt{font-size:10px;color:var(--muted);font-family:var(--font-mono);flex:0 0 auto}
+
+/* ---- ФГИС ТП: строки документов и слоёв (диалог openFgistpDialog) ---- */
+.fg-group{padding:10px 12px 4px;font-size:11px;color:var(--text-2)}
+.ogdc-list .fg-row{display:flex!important;flex-direction:row!important;
+  align-items:center!important;gap:9px;width:100%;
+  padding:6px 12px;cursor:pointer;text-align:left!important;border:0!important;
+  background:transparent!important;border-radius:0!important}
+.ogdc-list .fg-row:hover{background:var(--field-bg)!important}
+.fg-row input[type=checkbox]{flex:0 0 auto;margin:0}
+.fg-row .fg-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-size:var(--fs-12);color:var(--text)}
+.ogdc-list .fg-doc{display:block!important;width:100%;padding:7px 12px;cursor:pointer;
+  text-align:left!important;border:0!important;background:transparent!important;
+  border-radius:0!important;font-size:var(--fs-12);color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:auto!important}
+.ogdc-list .fg-doc:hover{background:var(--field-bg)!important}
 .layer-row.active{background:var(--accent-weak);box-shadow:inset 0 0 0 1px var(--accent-line)}
 .layer-row .grip{display:grid;place-items:center;width:13px;color:var(--faint);cursor:grab;
   opacity:0;transition:opacity .12s;flex:0 0 auto}

@@ -60,6 +60,8 @@ document.getElementById("st-core").onclick = () => {
 
 // импорт захвата НСПД (JSON браузерного моста GRADO)
 on("btn-nspd", "click", () => document.getElementById("nspd-file").click());
+// ФГИС ТП — прямой импорт векторных слоёв документа по УИН (диалог в app-data.js)
+on("btn-fgistp", "click", () => openFgistpDialog());
 let nspdImportBusy = false;
 on("nspd-file", "change", async e => {
   const file = e.target.files[0];
@@ -144,7 +146,8 @@ async function applyGisogdData(data, askText) {
   for (const lid of new Set(data.features.map(f => f.layer_id).filter(Boolean))) {
     const L = LAYER_BY_ID[lid]; if (!L) continue;
     L.visible = true;
-    if (lid.startsWith("source.gisogd.") && !L._fmtInit) {
+    if ((lid.startsWith("source.gisogd.") || lid.startsWith("source.fgistp."))
+        && !L._fmtInit) {
       L._fmtInit = true;
       L.fmt = { hatch: false, line_label: null, ...(L.fmt || {}) };
     }

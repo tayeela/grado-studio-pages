@@ -393,3 +393,154 @@ async function openDataFetch() {
     }
   });
 }
+
+// ---------- ФГИС ТП: прямой импорт векторных слоёв документа ----------
+// Портал Минэка (mnp.economy.gov.ru) отдаёт документы терпланирования всей РФ
+// БЕЗ авторизации (протокол v2, JSP; прежний WFS мёртв). CORS портал не даёт,
+// поэтому путь только серверный (desktop) — в браузерной редакции пункт скрыт.
+// Два шага в одном окне: поиск документа по названию (кэш каталога ~27 000
+// записей на сервере) → чекбоксы слоёв документа → «Загрузить (N)».
+let _fgCatalog = null;              // каталог документов [{uin, name}] (на сессию)
+async function openFgistpDialog() {
+  if (typeof closePopups === "function") closePopups();
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal fmt-modal" role="dialog" aria-modal="true" aria-labelledby="fg-title">
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy">
+      <span class="modal-kicker">ФГИС ТП</span>
+      <span id="fg-title">Документы терпланирования</span></div>
+      <button class="modal-x" aria-label="Закрыть ФГИС ТП"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body compact">
+      <div id="fg-step-doc">
+        <input id="fg-search" class="ogdc-search" type="search"
+          placeholder="Название документа: Химки, генеральный план…" autocomplete="off">
+        <div class="ogdc-hint">Вся Россия. Генпланы, СТП и их изменения — данные официального портала Минэкономразвития.</div>
+        <div id="fg-docs" class="ogdc-list" aria-label="Найденные документы"></div>
+      </div>
+      <div id="fg-step-layers" hidden>
+        <button id="fg-back" class="fmt-copy-btn">← К поиску документа</button>
+        <div id="fg-doc-name" class="ogdc-hint"></div>
+        <div id="fg-layers" class="ogdc-list" aria-label="Слои документа"></div>
+      </div>
+    </div>
+    <div class="modal-actions"><span id="fg-status" class="muted"></span><span class="spacer"></span>
+      <button id="fg-cancel">Отмена</button>
+      <button id="fg-load" class="primary" disabled>Загрузить</button></div></div>`;
+  document.body.appendChild(overlay);
+  const $ = id => overlay.querySelector("#" + id);
+  overlay.addEventListener("click", ev => ev.stopPropagation());
+  const close = () => overlay.remove();
+  overlay.querySelector(".modal-x").addEventListener("click", close);
+  $("fg-cancel").addEventListener("click", close);
+  overlay.addEventListener("click", ev => { if (ev.target === overlay) close(); });
+  overlay.addEventListener("keydown", ev => { if (ev.key === "Escape") close(); });
+
+  const status = $("fg-status");
+  let currentDoc = null;            // {uin, name}
+
+  // --- шаг 1: поиск документа ---
+  const renderDocs = q => {
+    const box = $("fg-docs");
+    if (!_fgCatalog) { box.innerHTML = ""; return; }
+    const norm = s => String(s || "").toLowerCase().replace(/ё/g, "е");
+    const words = norm(q).split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      box.innerHTML = `<div class="ogdc-hint" style="padding:10px 12px">Введите название муниципалитета или документа — например «Химки».</div>`;
+      return;
+    }
+    const hits = [];
+    for (const d of _fgCatalog) {
+      const n = norm(d.name);
+      if (words.every(w => n.includes(w))) {
+        hits.push(d);
+        if (hits.length >= 50) break;
+      }
+    }
+    box.innerHTML = hits.map(d =>
+      `<button type="button" class="ogdc-row fg-doc" data-uin="${escHtml(d.uin)}" title="${escHtml(d.name)}">${escHtml(d.name)}</button>`
+    ).join("") || `<div class="ogdc-hint" style="padding:10px 12px">Ничего не найдено.</div>`;
+    box.querySelectorAll(".fg-doc").forEach(b => b.addEventListener("click", () =>
+      pickDoc({ uin: b.dataset.uin, name: b.title })));
+  };
+  $("fg-search").addEventListener("input", () => renderDocs($("fg-search").value));
+
+  // --- шаг 2: слои документа ---
+  const GEOM_GROUPS = [["100", "Зоны и территории (полигоны)"],
+                       ["010", "Линейные объекты"], ["001", "Точечные объекты"]];
+  const refreshCount = () => {
+    const n = overlay.querySelectorAll(".fg-cls:checked").length;
+    $("fg-load").textContent = n ? `Загрузить (${n})` : "Загрузить";
+    $("fg-load").disabled = !n;
+  };
+  async function pickDoc(doc) {
+    currentDoc = doc;
+    status.textContent = "Состав документа…";
+    try {
+      const r = await fetch(`/api/fgistp-layers?uin=${encodeURIComponent(doc.uin)}`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+      const layers = (await r.json()).layers || [];
+      status.textContent = "";
+      $("fg-step-doc").hidden = true;
+      $("fg-step-layers").hidden = false;
+      $("fg-doc-name").textContent = doc.name;
+      $("fg-layers").innerHTML = GEOM_GROUPS.map(([gt, label]) => {
+        const rows = layers.filter(l => l.geom_type === gt);
+        if (!rows.length) return "";
+        return `<div class="fg-group"><b>${escHtml(label)}</b> (${rows.length})</div>` +
+          rows.map(l =>
+            `<label class="fg-row" title="${escHtml(l.name || l.classid)}">
+               <input type="checkbox" class="fg-cls" value="${escHtml(l.classid)}" data-gt="${gt}">
+               <span class="fg-name">${escHtml(l.name || l.classid)}</span>
+             </label>`).join("");
+      }).join("");
+      overlay.querySelectorAll(".fg-cls").forEach(cb =>
+        cb.addEventListener("change", refreshCount));
+      refreshCount();
+    } catch (err) {
+      status.textContent = "";
+      toast("Состав документа недоступен: " + String(err.message || err).slice(0, 140), "error");
+    }
+  }
+  $("fg-back").addEventListener("click", () => {
+    $("fg-step-layers").hidden = true;
+    $("fg-step-doc").hidden = false;
+    $("fg-load").disabled = true;
+    $("fg-load").textContent = "Загрузить";
+  });
+
+  // --- загрузка выбранных слоёв ---
+  $("fg-load").addEventListener("click", async () => {
+    if (!currentDoc) return;
+    const classids = [...overlay.querySelectorAll(".fg-cls:checked")].map(c => c.value);
+    if (!classids.length) return;
+    $("fg-load").disabled = true;
+    status.textContent = "Загрузка слоёв с портала…";
+    const ok = await importGisogd(
+      ["/api/import-fgistp-doc", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uin: currentDoc.uin, classids }),
+      }],
+      `ФГИС ТП: «${currentDoc.name.slice(0, 80)}»`,
+      "Импорт из ФГИС ТП не удался");
+    status.textContent = "";
+    if (ok) close(); else refreshCount();
+  });
+
+  // каталог: грузим один раз на сессию (на сервере — кэш 7 суток)
+  if (!_fgCatalog) {
+    status.textContent = "Каталог документов…";
+    try {
+      const r = await fetch("/api/fgistp-catalog");
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+      _fgCatalog = (await r.json()).docs || [];
+      status.textContent = "";
+    } catch (err) {
+      status.textContent = "";
+      toast("Каталог ФГИС ТП недоступен: " + String(err.message || err).slice(0, 140), "error");
+      close();
+      return;
+    }
+  }
+  renderDocs("");
+  $("fg-search").focus();
+}
