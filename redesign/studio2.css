@@ -849,3 +849,33 @@ input[type=range].range-op:focus-visible{outline:2px solid var(--accent);outline
 .preflight-item b{font-size:var(--fs-13)}
 .preflight-item p{margin:3px 0 0;color:var(--muted);line-height:1.4;font-size:var(--fs-12)}
 .preflight-ids{margin-top:8px;color:var(--text);font-size:var(--fs-11);overflow-wrap:anywhere}
+
+/* ---- глобальный индикатор занятости (загрузка данных) ---- */
+#global-busy{position:fixed;top:0;left:0;right:0;z-index:9000;pointer-events:none;
+  opacity:0;transition:opacity .18s ease}
+#global-busy.on{opacity:1}
+#global-busy .gb-track{position:absolute;top:0;left:0;right:0;height:3px;overflow:hidden;
+  background:color-mix(in srgb,var(--accent) 20%,transparent)}
+#global-busy .gb-fill{position:absolute;top:0;bottom:0;left:0;width:35%;border-radius:0 2px 2px 0;
+  background:var(--accent);box-shadow:0 0 8px color-mix(in srgb,var(--accent) 60%,transparent)}
+/* бегущая полоса, пока размер неизвестен */
+#global-busy:not(.determinate) .gb-fill{animation:gb-indet 1.15s ease-in-out infinite}
+/* реальный процент: ширину ставит setBusyProgress, добавляем плавность */
+#global-busy.determinate .gb-fill{animation:none;transition:width .2s ease}
+#global-busy .gb-label{position:absolute;top:8px;left:50%;transform:translateX(-50%);
+  max-width:80vw;padding:4px 12px;border-radius:0 0 8px 8px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;font-size:11px;font-weight:600;color:var(--on-accent);background:var(--accent);
+  box-shadow:0 4px 14px rgba(0,0,0,.18)}
+@keyframes gb-indet{0%{left:-40%;width:40%}50%{width:55%}100%{left:100%;width:40%}}
+@media (prefers-reduced-motion:reduce){
+  #global-busy:not(.determinate) .gb-fill{animation:none;left:0;width:100%;opacity:.55}
+  #global-busy .gb-fill{transition:none}
+}
+
+/* строка ФГИС ТП «идёт загрузка»: маленький бегунок рядом со статус-текстом */
+.fg-loading{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:11px}
+.fg-loading::before{content:"";width:13px;height:13px;flex:0 0 auto;border-radius:50%;
+  border:2px solid color-mix(in srgb,var(--accent) 30%,transparent);border-top-color:var(--accent);
+  animation:fg-spin .7s linear infinite}
+@keyframes fg-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.fg-loading::before{animation-duration:1.6s}}

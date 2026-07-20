@@ -115,12 +115,13 @@ async function openDataFetch() {
   // Каталог портала (для группы ГИС ОГД — дерево прямо в окне). Тянем заранее;
   // при ошибке группа покажет только сообщение, остальные источники работают.
   let ogdCatalog = [], ogdError = null;
+  const catBusy = beginBusy("Каталог слоёв ГИС ОГД…");
   try {
     const r = await fetch("/api/gisogd-catalog");
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     ogdCatalog = d.layers || [];
-  } catch (e) { ogdError = e.message; }
+  } catch (e) { ogdError = e.message; } finally { catBusy(); }
 
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -302,6 +303,7 @@ async function openDataFetch() {
     loadBtn.disabled = true; loadBtn.classList.add("loading");
     boxes.forEach(b => b.disabled = true);
     status.textContent = "Загрузка… НСПД может занять ~10 с";
+    const busyDone = beginBusy("Загрузка данных по области…");
     try {
       const r = await fetch("/api/fetch-extent", { method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -390,6 +392,8 @@ async function openDataFetch() {
       boxes.forEach(b => b.disabled = false);
       refreshUI();
       toast("Не удалось загрузить: " + String(err.message || err).slice(0, 180), "error");
+    } finally {
+      busyDone();          // гасим глобальный индикатор на любом исходе
     }
   });
 }
@@ -474,12 +478,13 @@ async function openFgistpDialog() {
   };
   async function pickDoc(doc) {
     currentDoc = doc;
-    status.textContent = "Состав документа…";
+    status.className = "fg-loading"; status.textContent = "Состав документа…";
+    const done = beginBusy("Состав документа…");
     try {
       const r = await fetch(`/api/fgistp-layers?uin=${encodeURIComponent(doc.uin)}`);
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
       const layers = (await r.json()).layers || [];
-      status.textContent = "";
+      status.className = "muted"; status.textContent = "";
       $("fg-step-doc").hidden = true;
       $("fg-step-layers").hidden = false;
       $("fg-doc-name").textContent = doc.name;
@@ -497,8 +502,10 @@ async function openFgistpDialog() {
         cb.addEventListener("change", refreshCount));
       refreshCount();
     } catch (err) {
-      status.textContent = "";
+      status.className = "muted"; status.textContent = "";
       toast("Состав документа недоступен: " + String(err.message || err).slice(0, 140), "error");
+    } finally {
+      done();
     }
   }
   $("fg-back").addEventListener("click", () => {
@@ -514,6 +521,7 @@ async function openFgistpDialog() {
     const classids = [...overlay.querySelectorAll(".fg-cls:checked")].map(c => c.value);
     if (!classids.length) return;
     $("fg-load").disabled = true;
+    status.className = "fg-loading";
     status.textContent = "Загрузка слоёв с портала…";
     const ok = await importGisogd(
       ["/api/import-fgistp-doc", {
@@ -522,23 +530,34 @@ async function openFgistpDialog() {
       }],
       `ФГИС ТП: «${currentDoc.name.slice(0, 80)}»`,
       "Импорт из ФГИС ТП не удался");
-    status.textContent = "";
+    status.className = "muted"; status.textContent = "";
     if (ok) close(); else refreshCount();
   });
 
-  // каталог: грузим один раз на сессию (на сервере — кэш 7 суток)
+  // каталог: грузим один раз на сессию (на сервере — кэш 7 суток). Каталог
+  // большой (~10 МБ), поэтому показываем реальный процент загрузки байтов
+  // (fetchJsonProgress читает поток и делит на Content-Length).
   if (!_fgCatalog) {
-    status.textContent = "Каталог документов…";
+    const done = beginBusy("Каталог документов ФГИС ТП…");
+    $("fg-docs").innerHTML =
+      `<div class="fg-loading" style="padding:14px 12px">Загрузка каталога документов (вся Россия)…</div>`;
+    const setPct = frac => {
+      if (frac == null) { status.className = "fg-loading"; status.textContent = "Каталог документов…"; return; }
+      const pct = Math.round(frac * 100);
+      status.className = "muted"; status.textContent = `Каталог документов… ${pct}%`;
+      setBusyProgress(frac, `Каталог документов ФГИС ТП… ${pct}%`);
+    };
     try {
-      const r = await fetch("/api/fgistp-catalog");
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
-      _fgCatalog = (await r.json()).docs || [];
-      status.textContent = "";
+      const data = await fetchJsonProgress("/api/fgistp-catalog", undefined, setPct);
+      _fgCatalog = data.docs || [];
+      status.className = "muted"; status.textContent = "";
     } catch (err) {
-      status.textContent = "";
+      status.className = "muted"; status.textContent = "";
       toast("Каталог ФГИС ТП недоступен: " + String(err.message || err).slice(0, 140), "error");
       close();
       return;
+    } finally {
+      done();
     }
   }
   renderDocs("");

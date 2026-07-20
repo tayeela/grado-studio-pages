@@ -73,6 +73,7 @@ on("nspd-file", "change", async e => {
     return;
   }
   nspdImportBusy = true;
+  const nspdBusy = beginBusy("Импорт НСПД…");
   try {
     const payload = JSON.parse(await file.text());
     const r = await fetch("/api/import-nspd", { method: "POST",
@@ -94,6 +95,7 @@ on("nspd-file", "change", async e => {
     toast("Не удалось импортировать захват: " + String(err).slice(0, 200), "error");
   } finally {
     nspdImportBusy = false;
+    nspdBusy();
   }
 });
 
@@ -163,6 +165,7 @@ async function applyGisogdData(data, askText) {
   return true;
 }
 async function importGisogd(fetchArgs, askText, errText) {
+  const done = beginBusy("Загрузка данных…");
   try {
     const r = await fetch(...fetchArgs);
     if (!r.ok) {
@@ -174,6 +177,8 @@ async function importGisogd(fetchArgs, askText, errText) {
   } catch (err) {
     toast(errText + ": " + String(err.message || err).slice(0, 200), "error");
     return false;
+  } finally {
+    done();
   }
 }
 on("btn-gisogd", "click", async () => {

@@ -7013,6 +7013,77 @@ function toast(msg, kind = "ok") {
   toastTimer = setTimeout(() => { el.textContent = ""; el.className = ""; },
                           kind === "error" ? 8000 : 5000);
 }
+// ---------- глобальный индикатор занятости (загрузки данных) ----------
+// Тонкая полоса сверху окна + подпись: показывается на ЛЮБОЙ сетевой загрузке,
+// чтобы всегда было видно «процесс идёт» (правка юзера). Счётчик ссылок —
+// параллельные загрузки не гасят полосу раньше времени. По умолчанию полоса
+// «бегущая» (indeterminate); при известном размере (setBusyProgress) — реальный %.
+let _busyCount = 0, _busyBar = null;
+function _ensureBusyBar() {
+  if (_busyBar) return _busyBar;
+  const bar = document.createElement("div");
+  bar.id = "global-busy";
+  bar.setAttribute("role", "status");
+  bar.setAttribute("aria-live", "polite");
+  bar.innerHTML = `<div class="gb-track"><div class="gb-fill"></div></div><div class="gb-label"></div>`;
+  document.body.appendChild(bar);
+  _busyBar = bar;
+  return bar;
+}
+function beginBusy(label) {
+  _busyCount++;
+  const bar = _ensureBusyBar();
+  if (label) bar.querySelector(".gb-label").textContent = label;
+  bar.classList.remove("determinate");
+  bar.classList.add("on");
+  bar.querySelector(".gb-fill").style.width = "";
+  let ended = false;
+  return function done() {
+    if (ended) return;
+    ended = true;
+    _busyCount = Math.max(0, _busyCount - 1);
+    if (_busyCount === 0 && _busyBar) {
+      _busyBar.classList.remove("on", "determinate");
+      _busyBar.querySelector(".gb-label").textContent = "";
+      _busyBar.querySelector(".gb-fill").style.width = "";
+    }
+  };
+}
+// перевод полосы в режим реального прогресса 0..1 (когда известен размер)
+function setBusyProgress(frac, label) {
+  const bar = _ensureBusyBar();
+  bar.classList.add("determinate");
+  bar.querySelector(".gb-fill").style.width =
+    Math.max(2, Math.min(100, Math.round(frac * 100))) + "%";
+  if (label != null) bar.querySelector(".gb-label").textContent = label;
+}
+// fetch JSON с реальным прогрессом байтов (если сервер отдал Content-Length),
+// иначе просто indeterminate — onProgress(frac|null). Возвращает разобранный JSON.
+async function fetchJsonProgress(url, opts, onProgress) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    let msg = await r.text();
+    try { msg = JSON.parse(msg).error || msg; } catch (e) {}
+    const e = new Error(msg || r.status); e.status = r.status; throw e;
+  }
+  const total = +(r.headers.get("Content-Length") || 0);
+  if (!r.body || !total) {           // нет потока/размера — без процентов
+    if (onProgress) onProgress(null);
+    return await r.json();
+  }
+  const reader = r.body.getReader();
+  const chunks = []; let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); received += value.length;
+    if (onProgress) onProgress(received / total);
+  }
+  let at = 0; const merged = new Uint8Array(received);
+  for (const c of chunks) { merged.set(c, at); at += c.length; }
+  return JSON.parse(new TextDecoder("utf-8").decode(merged));
+}
+
 on("btn-data", "click", openDataFetch);
 
 // ---------- демо-наполнение ----------
