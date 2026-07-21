@@ -4,7 +4,6 @@
   const legendTab = document.getElementById('layers-view-legend');
   const stackView = document.getElementById('layers-stack-view');
   const legendView = document.getElementById('layers-legend-view');
-  const search = document.getElementById('layer-search-input');
   const createButton = document.getElementById('btn-layer-create-menu');
 
   const setLayerView = view => {
@@ -63,14 +62,6 @@
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeCreateMenu(); });
 
-  // Поиск в представлении слоёв также скрывает пустые семантические группы.
-  search?.addEventListener('input', () => requestAnimationFrame(() => {
-    document.querySelectorAll('.layer-stack-group').forEach(group => {
-      const rows = [...group.querySelectorAll('.layer-row')];
-      group.hidden = rows.length > 0 && rows.every(row => row.hidden);
-    });
-  }));
-
   const styleBucket = (group, scope) => {
     if (scope === 'project') return 'project';
     const value = String(group || '').toLocaleLowerCase('ru');
@@ -79,10 +70,16 @@
     if (/красн|лгр|линейн/.test(value)) return 'lgr';
     return 'base';
   };
-  const bucketLabel = { all: 'Все', base: 'Базовые', lgr: 'ЛГР', zouit: 'ЗОУИТ', general: 'Генплан', project: 'Пользовательские' };
+  const bucketLabel = { all: 'Все', favorites: 'Избранное', base: 'Базовые', lgr: 'ЛГР', zouit: 'ЗОУИТ', general: 'Генплан', project: 'Пользовательские' };
   const geometryLabel = style => {
     if (style?.line_marker || (!style?.fill && !style?.hatch)) return 'Линия';
     return 'Полигон';
+  };
+  const styleCountLabel = count => {
+    const mod100 = count % 100;
+    const mod10 = count % 10;
+    const noun = mod100 >= 11 && mod100 <= 14 ? 'знаков' : mod10 === 1 ? 'знак' : mod10 >= 2 && mod10 <= 4 ? 'знака' : 'знаков';
+    return `${count} ${noun}`;
   };
 
   window.enhanceLayerStyleStudio = (overlay, layer) => {
@@ -98,7 +95,7 @@
     const panel = document.createElement('aside');
     panel.className = 'style-library-panel';
     panel.setAttribute('aria-label', 'Каталог знаков');
-    panel.innerHTML = `<div class="style-library-head"><span><b>Стандарт и библиотека</b><small>Выберите знак для слоя</small></span>
+    panel.innerHTML = `<div class="style-library-head"><span><b>Стандарт и библиотека</b><small class="style-library-status">Выберите знак для слоя</small></span>
         <button type="button" class="style-library-expand" title="Открыть редактор эталонных знаков" aria-label="Открыть библиотеку знаков"><svg class="ic"><use href="#ic-format"/></svg></button></div>
       <label class="style-library-search"><svg class="ic"><use href="#i-search"/></svg><input type="search" placeholder="Поиск по названию или ID" autocomplete="off"></label>
       <div class="style-library-tabs" role="tablist" aria-label="Стандарты знаков"></div>
@@ -130,19 +127,28 @@
       tabs.appendChild(button);
     });
     const list = panel.querySelector('.style-library-list');
+    const status = panel.querySelector('.style-library-status');
     const render = () => {
       tabs.querySelectorAll('button').forEach(button => button.setAttribute('aria-selected', String(button.dataset.bucket === bucket)));
       const low = query.trim().toLocaleLowerCase('ru');
       const selected = preset.value;
       const filtered = allStyles().filter(item => {
         const itemBucket = styleBucket(item.style.group, item.scope);
-        const hitBucket = bucket === 'all' || itemBucket === bucket;
+        const hitBucket = bucket === 'all' || (bucket === 'favorites' && favoriteSet.has(item.id)) || itemBucket === bucket;
         const haystack = `${item.style.title || ''} ${item.id} ${item.style.group || ''}`.toLocaleLowerCase('ru');
         return hitBucket && (!low || haystack.includes(low));
+      }).sort((a, b) => {
+        if (a.id === selected) return -1;
+        if (b.id === selected) return 1;
+        if (favoriteSet.has(a.id) !== favoriteSet.has(b.id)) return favoriteSet.has(a.id) ? -1 : 1;
+        return 0;
       });
+      if (status) status.textContent = `${styleCountLabel(filtered.length)}${selected ? ' · текущий знак сверху' : ''}`;
       list.innerHTML = '';
       if (!filtered.length) {
-        list.innerHTML = '<div class="style-library-empty">Знаки не найдены. Измените запрос или выберите другой стандарт.</div>';
+        list.innerHTML = `<div class="style-library-empty">${bucket === 'favorites' && favoriteSet.size === 0
+          ? 'Избранных знаков пока нет. Добавьте знак кнопкой-меткой в каталоге.'
+          : 'Знаки не найдены. Измените запрос или выберите другой стандарт.'}</div>`;
         return;
       }
       filtered.forEach(item => {
@@ -152,7 +158,7 @@
         row.setAttribute('aria-selected', String(item.id === selected));
         row.innerHTML = `<button type="button" class="style-library-choice">
             <span class="style-library-sample" aria-hidden="true">${styleSampleSVG(item.style, { w: 66, h: 24 })}</span>
-            <span class="style-library-copy"><b>${escHtml(item.style.title || item.id)}</b><small>${escHtml(item.style.group || (item.scope === 'project' ? 'Этот проект' : 'Базовые'))} · ${geometryLabel(item.style)}</small></span>
+            <span class="style-library-copy"><span class="style-library-title-line"><b>${escHtml(item.style.title || item.id)}</b>${item.id === selected ? '<em>текущий</em>' : ''}</span><small>${escHtml(item.style.group || (item.scope === 'project' ? 'Этот проект' : 'Базовые'))} · ${geometryLabel(item.style)}</small></span>
           </button><button type="button" class="style-favorite${favoriteSet.has(item.id) ? ' on' : ''}" aria-label="${favoriteSet.has(item.id) ? 'Убрать из избранного' : 'Добавить в избранное'}" title="Избранное"><svg class="ic"><use href="#ic-label"/></svg></button>`;
         row.querySelector('.style-library-choice').addEventListener('click', () => {
           preset.value = item.id;

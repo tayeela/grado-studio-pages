@@ -5,6 +5,10 @@
   const layerToggle = document.getElementById('btn-layers-visibility');
   const layerSearch = document.getElementById('layer-search-input');
   const layersBody = document.getElementById('layers-body');
+  const layerFilterButtons = [...document.querySelectorAll('[data-layer-filter]')];
+  const layerSearchEmpty = document.getElementById('layer-search-empty');
+  const layerSearchReset = document.getElementById('layer-search-reset');
+  const layersCard = document.getElementById('card-layers');
   const compactLayers = matchMedia('(max-width: 980px)');
 
   const setMode = mode => {
@@ -32,13 +36,50 @@
   setLayersHidden(savedLayers === null ? compactLayers.matches : savedLayers === '1');
   layerToggle?.addEventListener('click', () => setLayersHidden(!root.classList.contains('layers-panel-hidden')));
 
+  let layerFilter = 'all';
+  try {
+    const saved = localStorage.getItem('grado_layer_filter');
+    if (['all', 'visible', 'hidden', 'modified'].includes(saved)) layerFilter = saved;
+  } catch (_) {}
+
   const filterLayers = () => {
     if (!layersBody) return;
     const query = (layerSearch?.value || '').trim().toLocaleLowerCase('ru');
-    layersBody.querySelectorAll('.layer-row').forEach(row => {
-      row.hidden = !!query && !row.textContent.toLocaleLowerCase('ru').includes(query);
+    const rows = [...layersBody.querySelectorAll('.layer-row')];
+    const counts = {
+      all: rows.length,
+      visible: rows.filter(row => row.dataset.visible === 'true').length,
+      hidden: rows.filter(row => row.dataset.visible === 'false').length,
+      modified: rows.filter(row => row.dataset.modified === 'true').length,
+    };
+    rows.forEach(row => {
+      const hitQuery = !query || row.textContent.toLocaleLowerCase('ru').includes(query);
+      const hitFilter = layerFilter === 'all'
+        || (layerFilter === 'visible' && row.dataset.visible === 'true')
+        || (layerFilter === 'hidden' && row.dataset.visible === 'false')
+        || (layerFilter === 'modified' && row.dataset.modified === 'true');
+      row.hidden = !(hitQuery && hitFilter);
+    });
+    let shown = 0;
+    layersBody.querySelectorAll('.layer-stack-group').forEach(group => {
+      const groupRows = [...group.querySelectorAll('.layer-row')];
+      const visibleRows = groupRows.filter(row => !row.hidden).length;
+      shown += visibleRows;
+      group.hidden = visibleRows === 0;
+      const count = group.querySelector('.layer-group-count');
+      if (count) count.textContent = query || layerFilter !== 'all'
+        ? `${visibleRows}/${groupRows.length}` : String(groupRows.length);
+    });
+    if (layerSearchEmpty) layerSearchEmpty.hidden = shown > 0;
+    if (layersCard) layersCard.hidden = shown === 0;
+    layerFilterButtons.forEach(button => {
+      const active = button.dataset.layerFilter === layerFilter;
+      button.setAttribute('aria-pressed', String(active));
+      const count = button.querySelector('[data-layer-filter-count]');
+      if (count) count.textContent = String(counts[button.dataset.layerFilter] || 0);
     });
   };
+  window.refreshLayerFilters = filterLayers;
   layerSearch?.addEventListener('input', filterLayers);
   layerSearch?.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
@@ -50,7 +91,20 @@
       layerSearch.blur();
     }
   });
+  layerFilterButtons.forEach(button => button.addEventListener('click', () => {
+    layerFilter = button.dataset.layerFilter || 'all';
+    try { localStorage.setItem('grado_layer_filter', layerFilter); } catch (_) {}
+    filterLayers();
+  }));
+  layerSearchReset?.addEventListener('click', () => {
+    if (layerSearch) layerSearch.value = '';
+    layerFilter = 'all';
+    try { localStorage.setItem('grado_layer_filter', layerFilter); } catch (_) {}
+    filterLayers();
+    layerSearch?.focus();
+  });
   if (layersBody) new MutationObserver(filterLayers).observe(layersBody, { childList: true });
+  filterLayers();
 
   document.addEventListener('keydown', event => {
     if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
