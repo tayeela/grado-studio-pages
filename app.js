@@ -636,31 +636,119 @@ function canvasStrokeOf(f, st) {
 }
 
 async function createProjectStyle() {
-  const id = await uiPrompt("ID нового стиля проекта (латиница, уникальный, напр. my_fence):", "", { placeholder: "my_custom" });
-  if (!id) return null;
-  const cleanId = id.trim();
-  if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(cleanId)) {
-    toast("ID должен начинаться с латинской буквы и содержать только латиницу, цифры, точку, дефис или подчёркивание", "warn");
-    return null;
-  }
-  if (state.projectStyles[cleanId] || STYLES_V2[cleanId]) {
-    toast("Такой ID уже занят в библиотеке или проекте", "warn");
-    return null;
-  }
-  const title = await uiPrompt("Название (для выбора и легенды):", cleanId) || cleanId;
-  // Базовый стиль по умолчанию (пользователь может сразу использовать и править через слой/объект)
-  snapshot();
-  state.projectStyles[cleanId] = {
-    title: title,
-    fill: "#f0e8d8",
-    stroke: "#5c4630",
-    width: 1.5
+  const translit = { а:"a", б:"b", в:"v", г:"g", д:"d", е:"e", ё:"e", ж:"zh", з:"z",
+    и:"i", й:"y", к:"k", л:"l", м:"m", н:"n", о:"o", п:"p", р:"r", с:"s", т:"t",
+    у:"u", ф:"f", х:"h", ц:"c", ч:"ch", ш:"sh", щ:"sch", ъ:"", ы:"y", ь:"",
+    э:"e", ю:"yu", я:"ya" };
+  const slugOf = value => {
+    const latin = String(value || "").toLowerCase().replace(/[а-яё]/g, char => translit[char] ?? char);
+    const slug = latin.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 56);
+    return `project.${slug || "custom_sign"}`;
   };
+  const created = await new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay project-style-create-overlay";
+    overlay.innerHTML = `<div class="modal project-style-create" role="dialog" aria-modal="true" aria-labelledby="project-style-create-title">
+      <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Знак проекта</span><span id="project-style-create-title">Новый пользовательский знак</span></span>
+        <button class="modal-x" aria-label="Закрыть создание знака"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <div class="modal-body project-style-create-body">
+        <section class="project-style-create-preview" aria-label="Предпросмотр знака">
+          <div class="project-style-preview-kicker">Предпросмотр</div>
+          <div id="psc-preview" class="project-style-preview-canvas"></div>
+          <p>Знак сохранится только в этом проекте и появится в библиотеке оформления.</p>
+        </section>
+        <form id="psc-form" class="project-style-create-form" novalidate>
+          <label class="project-style-field project-style-field-wide"><span>Название знака</span>
+            <input id="psc-title" autocomplete="off" maxlength="120" placeholder="Например, Проектируемая велодорожка" required></label>
+          <label class="project-style-field"><span>Тип геометрии</span>
+            <select id="psc-geometry"><option value="polygon">Полигон</option><option value="polyline">Линия</option><option value="point">Точка</option><option value="all">Любая геометрия</option></select></label>
+          <label class="project-style-field"><span>Идентификатор</span>
+            <input id="psc-id" autocomplete="off" maxlength="64" placeholder="project.custom_sign" required pattern="[A-Za-z][A-Za-z0-9_.-]{0,63}"></label>
+          <label class="project-style-color"><span>Заливка</span><input type="color" id="psc-fill" value="#dbe8ff"></label>
+          <label class="project-style-color"><span>Обводка</span><input type="color" id="psc-stroke" value="#2358c9"></label>
+          <label class="project-style-field"><span>Толщина линии</span><input type="number" id="psc-width" value="1.5" step="0.1" min="0.2" max="8" required></label>
+          <div class="project-style-id-hint">ID формируется автоматически, но его можно уточнить до создания.</div>
+          <div class="form-error" id="psc-error" role="alert" hidden></div>
+        </form>
+      </div>
+      <div class="modal-actions"><button type="button" id="psc-cancel">Отмена</button><span class="spacer"></span><button type="submit" form="psc-form" id="psc-create" class="primary">Создать знак</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const $c = id => overlay.querySelector("#" + id);
+    let idTouched = false;
+    let settled = false;
+    const close = value => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener("keydown", onKeyDown);
+      overlay.remove();
+      resolve(value);
+    };
+    const styleFromForm = () => ({
+      title: $c("psc-title").value.trim() || "Новый знак",
+      geometry_type: $c("psc-geometry").value,
+      fill: $c("psc-fill").value,
+      stroke: $c("psc-stroke").value,
+      width: boundedNumber($c("psc-width").value, 0.2, 8, 1.5)
+    });
+    const updatePreview = () => {
+      const geometry = $c("psc-geometry").value;
+      const style = styleFromForm();
+      if (geometry === "point") style.marker = { shape: "circle", size: 7, fill: style.fill, stroke: style.stroke };
+      $c("psc-preview").innerHTML = styleSampleSVG(style, { w: 190, h: 74 });
+    };
+    const clearError = () => {
+      $c("psc-error").hidden = true;
+      $c("psc-error").textContent = "";
+      overlay.querySelectorAll('[aria-invalid="true"]').forEach(input => input.removeAttribute("aria-invalid"));
+    };
+    $c("psc-title").addEventListener("input", () => {
+      clearError();
+      if (!idTouched) $c("psc-id").value = slugOf($c("psc-title").value);
+    });
+    $c("psc-id").addEventListener("input", () => { idTouched = true; clearError(); });
+    ["psc-geometry", "psc-fill", "psc-stroke", "psc-width"].forEach(id =>
+      $c(id).addEventListener("input", () => { clearError(); updatePreview(); }));
+    $c("psc-form").addEventListener("submit", event => {
+      event.preventDefault();
+      clearError();
+      const title = $c("psc-title").value.trim();
+      const id = $c("psc-id").value.trim();
+      let invalid = null, message = "";
+      if (!title) { invalid = $c("psc-title"); message = "Введите понятное название знака."; }
+      else if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(id)) {
+        invalid = $c("psc-id"); message = "ID должен начинаться с латинской буквы и содержать только латиницу, цифры, точку, дефис или подчёркивание.";
+      } else if (state.projectStyles[id] || STYLES_V2[id]) {
+        invalid = $c("psc-id"); message = "Такой ID уже занят. Измените идентификатор знака.";
+      } else if (!$c("psc-width").checkValidity()) {
+        invalid = $c("psc-width"); message = "Укажите толщину линии от 0,2 до 8 px.";
+      }
+      if (invalid) {
+        invalid.setAttribute("aria-invalid", "true");
+        $c("psc-error").textContent = message;
+        $c("psc-error").hidden = false;
+        invalid.focus({ preventScroll: true });
+        return;
+      }
+      close({ id, style: { ...styleFromForm(), title } });
+    });
+    const onKeyDown = event => { if (event.key === "Escape") close(null); };
+    document.addEventListener("keydown", onKeyDown);
+    overlay.querySelector(".modal-x").onclick = () => close(null);
+    $c("psc-cancel").onclick = () => close(null);
+    overlay.onclick = event => { if (event.target === overlay) close(null); };
+    $c("psc-id").value = slugOf("");
+    updatePreview();
+    requestAnimationFrame(() => $c("psc-title").focus());
+  });
+  if (!created) return null;
+  snapshot();
+  state.projectStyles[created.id] = created.style;
   persist();
   draw();
   renderLayers();
-  toast(`Создан проектный стиль «${title}» (${cleanId}). Теперь доступен в списках стилей.`);
-  return cleanId;
+  toast(`Создан проектный знак «${created.style.title}». Он уже доступен в библиотеке.`);
+  return created.id;
 }
 
 // менеджер своих стилей проекта (по плану: "свои стили в проекте")
@@ -696,11 +784,13 @@ function openProjectStyles() {
       row.className = "ps-row";
       const sw = document.createElement("span");
       sw.className = "ps-swatch";
-      sw.style.background = toHexColor(st.fill, "#f0e8d8");
-      sw.style.borderColor = toHexColor(st.stroke, "#5c4630");
+      sw.innerHTML = styleSampleSVG(st, { w: 60, h: 24 });
       const nm = document.createElement("span");
-      nm.textContent = `${st.title || id} (${id})`;
+      nm.innerHTML = `<strong>${escHtml(st.title || id)}</strong><small>${escHtml(id)}</small>`;
       nm.className = "ps-name";
+      const geometry = document.createElement("span");
+      geometry.className = "ps-geometry";
+      geometry.textContent = ({ polygon:"Полигон", polyline:"Линия", point:"Точка", all:"Любая" })[st.geometry_type] || "Любая";
       const ed = document.createElement("button");
       ed.className = "ps-icon";
       ed.innerHTML = '<svg class="ic"><use href="#ic-format"/></svg>';
@@ -718,7 +808,7 @@ function openProjectStyles() {
           afterChange();
         }
       };
-      row.append(sw, nm, ed, dl);
+      row.append(sw, nm, geometry, ed, dl);
       cont.append(row);
     });
   }
@@ -4410,6 +4500,69 @@ function reorderLayer(srcId, targetId, before) {
   renderLayers(); draw(); persist();
 }
 
+const LAYER_GROUPS = {
+  project: { title: "Проектирование", icon: "i-poly" },
+  constraints: { title: "Ограничения", icon: "i-layers" },
+  sources: { title: "Подложки и данные", icon: "i-map" },
+};
+
+function layerGroupKey(layer) {
+  const title = String(layer.title || "").toLocaleLowerCase("ru");
+  if (layer.import_only || layer.source_kind || layer.id.startsWith("source.")) return "sources";
+  if (["restrict", "redline", "boundary"].includes(layer.kind)
+      || /огранич|зоуит|охран|красн|границ|санитар|затоп/.test(title)) return "constraints";
+  return "project";
+}
+
+function layerGeometryMeta(layer) {
+  const type = layer.geometry_type || "polygon";
+  if (type === "point") return { icon: "i-dot", label: "Точки" };
+  if (type === "polyline" || type === "line") return { icon: "i-line", label: "Линии" };
+  return { icon: "i-poly", label: "Полигоны" };
+}
+
+function renderLayerLegend(sampleByLayer = {}) {
+  const host = document.getElementById("layers-legend-body");
+  if (!host) return;
+  host.innerHTML = "";
+  const visibleLayers = layerRowsTopFirst().filter(layer => layer.visible);
+  if (!visibleLayers.length) {
+    host.innerHTML = '<div class="legend-empty">Включите видимость слоя — его знак появится здесь.</div>';
+    return;
+  }
+  const groupHosts = new Map();
+  const groupForKey = key => {
+    if (groupHosts.has(key)) return groupHosts.get(key);
+    const section = document.createElement("section");
+    section.className = "legend-group";
+    section.innerHTML = `<h3>${escHtml(LAYER_GROUPS[key].title)}</h3><div></div>`;
+    host.appendChild(section);
+    const body = section.lastElementChild;
+    groupHosts.set(key, body);
+    return body;
+  };
+  const presentGroups = new Set(visibleLayers.map(layerGroupKey));
+  Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupForKey);
+  visibleLayers.forEach(layer => {
+    const group = groupForKey(layerGroupKey(layer));
+    const cats = layerCatStats(layer).filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
+    const items = cats.length > 1 ? cats : [{
+      title: layer.title,
+      count: featuresOnLayer(layer.id).length,
+      sample: sampleByLayer[layer.id],
+    }];
+    items.forEach(item => {
+      const style = item.sample ? styleOf(item.sample) : layerStyle(layer);
+      const row = document.createElement("div");
+      row.className = "legend-row";
+      row.innerHTML = `<span class="legend-sample" aria-hidden="true">${styleSampleSVG(style, { w: 54, h: 20 })}</span>
+        <span class="legend-name">${escHtml(item.title || layer.title)}</span>
+        <span class="legend-count">${item.count || ""}</span>`;
+      group.appendChild(row);
+    });
+  });
+}
+
 function renderLayers() {
   const el = document.getElementById("layers-body");
   if (!el) return;
@@ -4427,7 +4580,37 @@ function renderLayers() {
     const cur = sampleByLayer[lid];
     if (!cur || (!cur.style_id && f.style_id)) sampleByLayer[lid] = f;
   }
-  for (const layer of layerRowsTopFirst()) {
+  const groupHosts = new Map();
+  let groupState = {};
+  try { groupState = JSON.parse(localStorage.getItem("grado_layer_groups") || "{}"); } catch (_) {}
+  const groupHostForKey = key => {
+    if (groupHosts.has(key)) return groupHosts.get(key);
+    const meta = LAYER_GROUPS[key];
+    const section = document.createElement("section");
+    section.className = "layer-stack-group";
+    section.dataset.group = key;
+    const open = groupState[key] !== false;
+    section.classList.toggle("collapsed", !open);
+    section.innerHTML = `<button type="button" class="layer-group-head" aria-expanded="${open}">
+      <svg class="ic"><use href="#ic-chevron"/></svg><span>${escHtml(meta.title)}</span><span class="layer-group-count"></span></button>
+      <div class="layer-group-body"></div>`;
+    const head = section.querySelector(".layer-group-head");
+    head.addEventListener("click", () => {
+      const collapsed = section.classList.toggle("collapsed");
+      head.setAttribute("aria-expanded", String(!collapsed));
+      groupState[key] = !collapsed;
+      try { localStorage.setItem("grado_layer_groups", JSON.stringify(groupState)); } catch (_) {}
+    });
+    el.appendChild(section);
+    const body = section.querySelector(".layer-group-body");
+    groupHosts.set(key, body);
+    return body;
+  };
+  const displayedLayers = layerRowsTopFirst();
+  const presentGroups = new Set(displayedLayers.map(layerGroupKey));
+  Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupHostForKey);
+  for (const layer of displayedLayers) {
+    const groupHost = groupHostForKey(layerGroupKey(layer));
     const count = featuresOnLayer(layer.id).length;
     // QGIS-логика: если в слое объекты с РАЗНЫМИ знаками — показываем подпункты
     // по каждому форматированию (функц. зоны → производственные/многофункц./…).
@@ -4439,7 +4622,7 @@ function renderLayers() {
     // Свотч в списке — ПОЛНЫЙ образец знака (штрих + засечки для линий, заливка +
     // штриховка + рамка для зон), а не просто цветной квадрат: правка юзера
     // «превью должны полностью отображать стиль». styleSampleSVG — из app.js.
-    const swSvg = styleSampleSVG(st, { w: 40, h: 16 });
+    const swSvg = styleSampleSVG(st, { w: 54, h: 20 });
     const row = document.createElement("div");
     const isActive = layer.id === state.activeLayerId;
     row.className = "layer-row" + (isActive ? " active" : "") +
@@ -4455,27 +4638,31 @@ function renderLayers() {
       badges += `<span class="lrow-badge" title="есть переопределения оформления слоя">fmt</span>`;
     }
     const layerTitle = escHtml(layer.title);
+    const geometry = layerGeometryMeta(layer);
+    const sourceLabel = layer.source_kind ? String(layer.source_kind).toUpperCase()
+      : (layer.import_only ? "Данные" : "Проект");
     const discHtml = multiCat
       ? `<button type="button" class="layer-disc${catOpen ? " open" : ""}" aria-expanded="${catOpen}" aria-label="Показать знаки слоя «${layerTitle}» (${cats.length})" title="знаки слоя (${cats.length}) — раскрыть/свернуть">▸</button>`
       : `<span class="layer-disc-sp" aria-hidden="true"></span>`;
     row.innerHTML = `${discHtml}<span class="grip" aria-hidden="true" title="перетащить — порядок отрисовки"><svg class="ic"><use href="#ic-grip"/></svg></span>
-      <input type="checkbox" aria-label="Показывать слой «${layerTitle}»" title="видимость слоя «${layerTitle}»" ${layer.visible ? "checked" : ""}>
+      <label class="layer-vis-toggle" title="видимость слоя «${layerTitle}»"><input type="checkbox" aria-label="Показывать слой «${layerTitle}»" ${layer.visible ? "checked" : ""}><svg class="ic" aria-hidden="true"><use href="#ic-eye"/></svg></label>
       <button type="button" class="layer-select" aria-pressed="${isActive}"
         aria-label="Выбрать слой «${layerTitle}» для рисования"
         title="${layerTitle} — сделать активным слоем для рисования">
         <span class="sw-svg" aria-hidden="true">${swSvg}</span>
-        <span class="nm">${layerTitle}</span><span class="cnt">${count || ""}</span>
-        ${badges}
+        <span class="layer-copy"><span class="layer-title-line"><span class="nm">${layerTitle}</span><span class="cnt">${count || ""}</span></span>
+          <span class="layer-meta"><span class="layer-geometry"><svg class="ic"><use href="#${geometry.icon}"/></svg>${geometry.label}</span><span>${escHtml(sourceLabel)}</span>${badges}</span></span>
       </button>
       <button class="lrow-lock" aria-label="${layer.locked ? "Разблокировать" : "Заблокировать"} слой «${layerTitle}»" title="${layer.locked ? "разблокировать" : "заблокировать"} слой «${layerTitle}»">
         <svg class="ic"><use href="#${layer.locked ? "ic-lock" : "ic-unlock"}"/></svg></button>
+      <button class="lrow-style" aria-label="Оформление слоя «${layerTitle}»" title="знак и оформление слоя «${layerTitle}»"><svg class="ic"><use href="#ic-format"/></svg></button>
       <button class="lrow-menu" aria-label="Действия со слоем «${layerTitle}»" title="действия со слоем «${layerTitle}»"><svg class="ic"><use href="#ic-menu-dots"/></svg></button>`;
     row.addEventListener("mouseenter", () => { state.hoverLayerId = layer.id; draw(); });
     row.addEventListener("mouseleave", () => { state.hoverLayerId = null; draw(); });
     row.querySelector(".lrow-lock").addEventListener("click", ev => {
       ev.stopPropagation(); toggleLayerLock(layer);
     });
-    row.querySelector("input").addEventListener("change", ev => {
+    row.querySelector(".layer-vis-toggle input").addEventListener("change", ev => {
       snapshot();
       layer.visible = ev.target.checked;
       const sel = selectedFeature();
@@ -4486,6 +4673,7 @@ function renderLayers() {
       state._ix = null; state._snapIndex = null;
       persist();
       draw();
+      renderLayerLegend(sampleByLayer);
     });
     // Отдельная кнопка делает выбор слоя доступным и мышью, и клавиатурой.
     // Чекбокс по-прежнему отвечает только за видимость.
@@ -4509,6 +4697,10 @@ function renderLayers() {
       activateLayer();
     });
     const menuBtn = row.querySelector(".lrow-menu");
+    row.querySelector(".lrow-style").addEventListener("click", ev => {
+      ev.stopPropagation();
+      openLayerStyle(layer);
+    });
     menuBtn.addEventListener("click", ev => {
       ev.stopPropagation();
       const r = menuBtn.getBoundingClientRect();
@@ -4552,7 +4744,7 @@ function renderLayers() {
       saveCatOpen();
       renderLayers();
     });
-    el.appendChild(row);
+    groupHost.appendChild(row);
     // подпункты-категории (QGIS-легенда): образец знака + название + счётчик +
     // галка видимости (тот же fmt.cats_off). Скрытая категория — приглушена.
     if (catOpen) for (const cat of cats) {
@@ -4566,9 +4758,14 @@ function renderLayers() {
         <span class="nm" title="${catTitle}">${catTitle}</span><span class="cnt">${cat.count}</span>`;
       crow.querySelector("input").addEventListener("change", ev =>
         toggleCategoryVisible(layer, cat.id, ev.target.checked));
-      el.appendChild(crow);
+      groupHost.appendChild(crow);
     }
   }
+  groupHosts.forEach(body => {
+    const section = body.closest(".layer-stack-group");
+    section.querySelector(".layer-group-count").textContent = body.querySelectorAll(":scope > .layer-row").length;
+  });
+  renderLayerLegend(sampleByLayer);
   updateLayerStatus();   // чип «куда я черчу» — синхрон с активным слоем
   updateStartExperience();
 }

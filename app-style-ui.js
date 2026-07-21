@@ -773,6 +773,7 @@ function openLayerStyle(layer, opts = {}) {
     toast("Оформление сброшено к стандартному");
   });
   overlay.addEventListener("click", ev => { if (ev.target === overlay) restore(); });
+  window.enhanceLayerStyleStudio?.(overlay, layer);
 }
 
 // ---------- библиотека знаков: редактор эталонных знаков ЛГР/базовых -------
@@ -846,8 +847,8 @@ function openStyleLibrary() {
       parts.push(`<div class="lib-group">
         <div class="lib-group-title">${escHtml(g)}</div>
         ${hit.map(sid => `<div class="lib-item" data-sid="${escHtml(sid)}" role="option" aria-selected="${sid === sel ? "true" : "false"}">
-          <span class="lib-sw" style="background:${swatchOf(sid)};border-color:${STYLES_V2[sid].stroke || "#999"}"></span>
-          <span class="lib-nm">${escHtml(STYLES_V2[sid].title)}</span>
+          <span class="lib-sw" aria-hidden="true">${styleSampleSVG(STYLES_V2[sid], { w: 54, h: 22 })}</span>
+          <span class="lib-copy"><span class="lib-nm">${escHtml(STYLES_V2[sid].title)}</span><span class="lib-meta">${escHtml(sid)}</span></span>
           <span class="lib-dot${overridden.has(sid) ? " on" : ""}" title="изменён"></span></div>`).join("")}
       </div>`);
     }
@@ -904,8 +905,11 @@ function openStyleLibrary() {
   const opt = (sel, v, lbl) => `<option value="${escHtml(v)}"${sel === v ? " selected" : ""}>${escHtml(lbl)}</option>`;
   function renderEditor(sid) {
     sel = sid;
-    overlay.querySelectorAll(".lib-item").forEach(el =>
-      el.classList.toggle("active", el.dataset.sid === sid));
+    overlay.querySelectorAll(".lib-item").forEach(el => {
+      const selected = el.dataset.sid === sid;
+      el.classList.toggle("active", selected);
+      el.setAttribute("aria-selected", String(selected));
+    });
     const st = edited[sid] || STYLES_V2[sid];
     const hasFill = st.fill != null && st.fill !== "transparent";
     const op = boundedNumber(Math.round((st.fillOpacity != null ? st.fillOpacity : 1) * 100), 10, 100, 100);
@@ -1005,7 +1009,7 @@ function openStyleLibrary() {
     const dot = overlay.querySelector(`.lib-item[data-sid="${CSS.escape(sel)}"] .lib-dot`);
     if (dot) dot.classList.add("on");
     const sw = overlay.querySelector(`.lib-item[data-sid="${CSS.escape(sel)}"] .lib-sw`);
-    if (sw) { sw.style.background = swatchOf(sel); sw.style.borderColor = STYLES_V2[sel].stroke || "#999"; }
+    if (sw) sw.innerHTML = styleSampleSVG(STYLES_V2[sel], { w: 54, h: 22 });
     const ed = $("lib-edit"); if (ed && ed._syncOp) ed._syncOp();
     updatePreview(); draw();
   }
