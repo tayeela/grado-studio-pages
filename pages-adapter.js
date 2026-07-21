@@ -34,6 +34,14 @@
     try { return JSON.parse(text); }
     catch (error) { return null; }
   };
+  const abortError = () => {
+    const error = new Error("Загрузка отменена");
+    error.name = "AbortError";
+    return error;
+  };
+  const throwIfAborted = signal => {
+    if (signal?.aborted) throw abortError();
+  };
   const requestHeader = (input, options, name) => {
     const headers = (options && options.headers) ||
       (input instanceof Request ? input.headers : null);
@@ -177,16 +185,20 @@
       if (!(target.layers || (target.layers = [])).some(x => x.id === L.id))
         target.layers.push(L);
   };
-  const fetchOverpass = async query => {
+  const fetchOverpass = async (query, signal) => {
     let lastError = null;
     for (const url of OVERPASS_URLS) {
+      throwIfAborted(signal);
       try {
         const response = await nativeFetch(url, { method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ data: query }).toString() });
+          body: new URLSearchParams({ data: query }).toString(), signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
-      } catch (error) { lastError = error; }
+      } catch (error) {
+        if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+        lastError = error;
+      }
     }
     throw new Error(`Overpass недоступен: ${lastError?.message || lastError || "нет ответа"}`);
   };
@@ -194,41 +206,49 @@
   // в IndexedDB; повторная выгрузка любой площадки берёт его из кэша.
   const GISOGD_TTL_MS = 7 * 24 * 3600 * 1000;
   const gisogdCacheKey = code => `gisogd_layer_${code}`;
-  async function gisogdLayerJson(code, notes) {
+  async function gisogdLayerJson(code, notes, signal) {
+    throwIfAborted(signal);
     try {
       const hit = await databaseGet(gisogdCacheKey(code));
+      throwIfAborted(signal);
       if (hit && hit.at && (Date.now() - hit.at) < GISOGD_TTL_MS) return hit.data;
     } catch (error) { /* кэш недоступен — тянем из сети */ }
-    const response = await nativeFetch(pagesCore.gisogdLayerUrl(code));
+    throwIfAborted(signal);
+    const response = await nativeFetch(pagesCore.gisogdLayerUrl(code), { signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
+    throwIfAborted(signal);
     notes.push(`слой ${code} загружен целиком (${(data.features || []).length} об.) — `
       + "портал не фильтрует по области; дальше берётся из кэша браузера");
     try { await databaseSet(gisogdCacheKey(code), { at: Date.now(), data }); }
     catch (error) { notes.push(`слой ${code} не поместился в кэш — будет качаться заново`); }
+    throwIfAborted(signal);
     return data;
   }
   let gisogdCatalogCache = null;
-  async function gisogdCatalog() {
+  async function gisogdCatalog(signal) {
+    throwIfAborted(signal);
     if (gisogdCatalogCache) return gisogdCatalogCache;
-    const response = await nativeFetch(pagesCore.gisogdCatalogUrl());
+    const response = await nativeFetch(pagesCore.gisogdCatalogUrl(), { signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     gisogdCatalogCache = pagesCore.buildGisogdCatalog(await response.json());
+    throwIfAborted(signal);
     return gisogdCatalogCache;
   }
   // ключ источника → {code, name}: кураторские (gisogd.func_zones…) и любой
   // слой портала (gisogd:{code}); имя берём из каталога — по нему идёт маршрут
-  async function gisogdLayersFor(key) {
+  async function gisogdLayersFor(key, signal) {
     const curated = pagesCore.GISOGD_WEB_LAYERS[key];
     if (curated) return curated;
     if (!key.startsWith("gisogd:")) return [];
     const code = key.slice("gisogd:".length);
     if (!/^[A-Za-z0-9_.-]{1,40}$/.test(code)) return [];
-    const row = (await gisogdCatalog()).find(l => l.code === code);
+    const row = (await gisogdCatalog(signal)).find(l => l.code === code);
     return row ? [{ code, name: row.name }] : [];
   }
 
-  async function browserFetchExtent(payload) {
+  async function browserFetchExtent(payload, signal) {
+    throwIfAborted(signal);
     const bbox = payload && payload.bbox;
     const sources = [...new Set(Array.isArray(payload && payload.sources) ? payload.sources : [])];
     if (!Array.isArray(bbox) || bbox.length !== 4 || !bbox.every(value => Number.isFinite(Number(value))))
@@ -242,8 +262,11 @@
       if (area > 60) throw new Error(`Область ${area.toFixed(1)} км² больше предела 60 км² для OSM — приблизьте вид`);
       try {
         const query = pagesCore.buildOsmExtentRequest(bbox, osmSources);
-        mergeExtent(result, pagesCore.importOsmExtent(await fetchOverpass(query), osmSources, bbox));
-      } catch (error) { failures.push(`OSM: ${error.message || error}`); }
+        mergeExtent(result, pagesCore.importOsmExtent(await fetchOverpass(query, signal), osmSources, bbox));
+      } catch (error) {
+        if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+        failures.push(`OSM: ${error.message || error}`);
+      }
     }
     if (nspdSources.length) {
       if (area > 12) throw new Error(`Область ${area.toFixed(1)} км² больше предела 12 км² для НСПД — приблизьте вид`);
@@ -251,10 +274,13 @@
         try {
           const response = await nativeFetch(NSPD_EXTENT_URL, { method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(pagesCore.buildNspdExtentRequest(bbox, source)) });
+            body: JSON.stringify(pagesCore.buildNspdExtentRequest(bbox, source)), signal });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           mergeExtent(result, pagesCore.importNspdExtent(await response.json(), source, bbox));
-        } catch (error) { failures.push(`${source}: ${error.message || error}`); }
+        } catch (error) {
+          if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+          failures.push(`${source}: ${error.message || error}`);
+        }
       }
     }
     // ГИС ОГД: кураторские наборы (gisogd.*) и любой слой портала (gisogd:{code}).
@@ -264,18 +290,22 @@
     if (ogdSources.length) {
       if (area > 80) throw new Error(`Область ${area.toFixed(1)} км² больше предела 80 км² для ГИС ОГД — приблизьте вид`);
       for (const source of ogdSources) {
-        const sourceLayers = await gisogdLayersFor(source);
+        throwIfAborted(signal);
+        const sourceLayers = await gisogdLayersFor(source, signal);
         if (!sourceLayers.length) {
           failures.push(`${source}: слой не найден в каталоге портала`);
           continue;
         }
         for (const layer of sourceLayers) {
           try {
-            const raw = await gisogdLayerJson(layer.code, result.notes);
+            const raw = await gisogdLayerJson(layer.code, result.notes, signal);
             const part = pagesCore.importGisogdExtent(raw, layer, bbox);
             for (const group of (part.groups || [])) group.request_source = source;
             mergeExtent(result, part);
-          } catch (error) { failures.push(`ГИС ОГД [${layer.code}]: ${error.message || error}`); }
+          } catch (error) {
+            if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+            failures.push(`ГИС ОГД [${layer.code}]: ${error.message || error}`);
+          }
         }
       }
     }
@@ -301,6 +331,8 @@
     const url = new URL(raw, window.location.href);
     const path = url.pathname;
     const method = String(options.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const signal = options.signal || (input instanceof Request ? input.signal : null);
+    throwIfAborted(signal);
 
     if (path === "/version.json" || path.endsWith("/version.json")) {
       const versionUrl = new URL("./version.json", window.location.href);
@@ -335,8 +367,11 @@
     });
     if (path === "/api/gisogd-catalog") {
       // портал отдаёт CORS (Access-Control-Allow-Origin) → браузеру можно
-      try { return json({ layers: await gisogdCatalog() }); }
-      catch (error) { return json({ error: `каталог ГИС ОГД недоступен: ${error.message || error}` }, 502); }
+      try { return json({ layers: await gisogdCatalog(signal) }); }
+      catch (error) {
+        if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+        return json({ error: `каталог ГИС ОГД недоступен: ${error.message || error}` }, 502);
+      }
     }
     if (path === "/api/initial-grado") return json(null);
     if (path === "/api/autosave/backups") {
@@ -431,8 +466,11 @@
       if (method !== "POST") return json({ error: "Метод не поддерживается" }, 405);
       const payload = await bodyJson(input, options);
       if (!isRecord(payload)) return json({ error: "Некорректный запрос области" }, 400);
-      try { return json(await browserFetchExtent(payload)); }
-      catch (error) { return json({ error: error.message || "Не удалось загрузить область" }, 400); }
+      try { return json(await browserFetchExtent(payload, signal)); }
+      catch (error) {
+        if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+        return json({ error: error.message || "Не удалось загрузить область" }, 400);
+      }
     }
     if (path === "/api/import-nspd") {
       if (method !== "POST") return json({ error: "Метод не поддерживается" }, 405);

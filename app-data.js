@@ -103,6 +103,58 @@ function bboxKm2([west, south, east, north]) {
   return (north - south) * 111.32 * (east - west) * 111.32 * Math.cos(latMid);
 }
 
+function dataFetchAbortError() {
+  const error = new Error("Загрузка отменена");
+  error.name = "AbortError";
+  return error;
+}
+
+// Источники запрашиваются отдельными пакетами: так интерфейс показывает
+// фактический прогресс, а AbortController останавливает текущий запрос. Ответы
+// остаются временными до единственного commitPreparedSourceImport ниже, поэтому
+// отмена или ошибка любого источника не меняет проект частично.
+async function fetchExtentSourceBatches(bbox, sources, options = {}) {
+  const request = options.request || fetch;
+  const signal = options.signal;
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : () => {};
+  const batches = [];
+  for (let index = 0; index < sources.length; index++) {
+    if (signal?.aborted) throw dataFetchAbortError();
+    const source = sources[index];
+    onProgress({ source, index, total: sources.length, state: "loading" });
+    try {
+      const response = await request("/api/fetch-extent", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bbox, sources: [source] }), signal });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || (`HTTP ${response.status}`));
+      const count = (data.groups || []).reduce((sum, group) => sum + (group.count || 0), 0);
+      batches.push({ source, data });
+      onProgress({ source, index, total: sources.length, state: "done", count });
+    } catch (error) {
+      if (signal?.aborted && error?.name !== "AbortError") error = dataFetchAbortError();
+      if (error?.name !== "AbortError") {
+        error.source = source;
+        onProgress({ source, index, total: sources.length, state: "failed", error });
+      }
+      throw error;
+    }
+  }
+  return batches;
+}
+
+function mergeExtentSourceBatches(batches) {
+  const merged = { groups: [], layers: [], snapshots: [], notes: [] };
+  for (const batch of batches) {
+    const data = batch.data || {};
+    merged.groups.push(...(data.groups || []));
+    merged.layers.push(...(data.layers || []));
+    merged.snapshots.push(...(data.snapshots || []));
+    merged.notes.push(...(data.notes || []));
+  }
+  return merged;
+}
+
 async function openDataFetch() {
   if (!basemap.originLon) { try { await initBasemap(); } catch (e) {} }
   if (!basemap.originLon) { toast("Нет системы координат — включите подложку", "warn"); return; }
@@ -136,6 +188,8 @@ async function openDataFetch() {
   if (![0, 1, 2, 3].includes(activeGroup)) activeGroup = 3;
   let query = "", activeTopic = "";
   let ogdCatalog = [], ogdError = null, ogdLoading = true, importing = false;
+  let catalogController = null, loadController = null, loadMessage = "";
+  const loadProgress = new Map();
   const groupUi = [
     { icon: "i-map", domain: "openstreetmap.org" },
     { icon: "i-poly", domain: "nspd.gov.ru" },
@@ -161,7 +215,11 @@ async function openDataFetch() {
   </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener("click", event => event.stopPropagation());
-  const close = () => overlay.remove();
+  const close = () => {
+    catalogController?.abort();
+    loadController?.abort();
+    overlay.remove();
+  };
   overlay.querySelector(".modal-x").addEventListener("click", close);
   overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
 
@@ -200,7 +258,7 @@ async function openDataFetch() {
     const labels = ["Область", "Источники", "Проверка"];
     overlay.querySelector(".data-steps").innerHTML = labels.map((label, index) => {
       const number = index + 1;
-      const reachable = number < 3 || selected.size > 0;
+      const reachable = !importing && (number < 3 || selected.size > 0);
       return `<button class="data-step${step === number ? " active" : ""}${step > number ? " complete" : ""}"
         data-step="${number}"${reachable ? "" : " disabled"} aria-label="Шаг ${number}: ${label}" aria-current="${step === number ? "step" : "false"}">
         <span>${step > number ? icon("ic-check") : number}</span><b>${label}</b></button>`;
@@ -317,26 +375,36 @@ async function openDataFetch() {
   function reviewStepHtml() {
     const rows = selectedRows();
     const groups = sourceOrder.map(gi => ({ gi, rows: rows.filter(row => row.gi === gi) })).filter(group => group.rows.length);
-    return `<section class="data-review-step"><div class="data-review-head"><div><h2>Проверьте состав загрузки</h2>
-      <p>Каждый источник создаст отдельные слои. Повторная загрузка не создаёт дубликатов.</p></div>
-      <button data-action="clear-selection"${rows.length ? "" : " disabled"}>Снять всё</button></div>
+    const stateLabel = progress => progress?.state === "loading" ? "Загружается"
+      : progress?.state === "done" ? `${progress.count || 0} объектов`
+      : progress?.state === "failed" ? "Ошибка"
+      : progress?.state === "cancelled" ? "Отменено" : "Ожидает";
+    return `<section class="data-review-step"><div class="data-review-head"><div><h2>${importing ? "Загружаем выбранные данные" : "Проверьте состав загрузки"}</h2>
+      <p>${importing ? "Проект изменится один раз — только после успешной загрузки всех источников." : "Каждый источник создаст отдельные слои. Повторная загрузка не создаёт дубликатов."}</p></div>
+      <button data-action="clear-selection"${rows.length && !importing ? "" : " disabled"}>Снять всё</button></div>
       <div class="data-review-grid"><div class="data-review-list">${groups.length ? groups.map(({ gi, rows: groupRows }) =>
         `<section><header>${icon(groupUi[gi].icon)}<b>${escHtml(DATA_SOURCE_GROUPS[gi].title)}</b><span>${groupRows.length}</span></header>
-          ${groupRows.map(row => `<div class="data-review-row"><span>${escHtml(row.label)}</span><button data-remove="${escHtml(row.key)}" aria-label="Убрать ${escHtml(row.label)}">${icon("ic-close")}</button></div>`).join("")}</section>`).join("")
+          ${groupRows.map(row => { const progress = loadProgress.get(row.key); return `<div class="data-review-row${progress ? ` is-${progress.state}` : ""}">
+            <span class="data-review-label">${escHtml(row.label)}</span>
+            ${importing || progress ? `<span class="data-load-state ${progress?.state || "pending"}" aria-label="${stateLabel(progress)}">${stateLabel(progress)}</span>` : ""}
+            <button data-remove="${escHtml(row.key)}" aria-label="Убрать ${escHtml(row.label)}"${importing ? " disabled" : ""}>${icon("ic-close")}</button></div>`; }).join("")}</section>`).join("")
         : `<div class="data-empty"><b>Нет выбранных слоёв</b><span>Вернитесь к источникам и отметьте нужные данные.</span></div>`}</div>
         <aside class="data-review-summary"><h3>Итого</h3><dl><div><dt>Слоёв</dt><dd>${rows.length}</dd></div><div><dt>Источников</dt><dd>${selectedSourceCount()}</dd></div>
           <div><dt>Область</dt><dd>${areaTxt} км²</dd></div><div><dt>Система координат</dt><dd>WGS 84</dd></div></dl>
-          <div class="data-review-ok">${icon("ic-check")}<span>Все выбранные источники доступны для этой области</span></div></aside></div></section>`;
+          <div class="data-review-ok">${icon("ic-check")}<span>${importing ? "Частичные результаты не попадут в проект" : "Все выбранные источники доступны для этой области"}</span></div></aside></div></section>`;
   }
 
   function renderActions() {
     const actions = overlay.querySelector(".data-wizard-actions");
     const count = selected.size;
-    if (step === 1) actions.innerHTML = `<span class="data-status muted"></span><span class="spacer"></span>
+    const resultClass = loadMessage ? " data-result-status" : "";
+    if (importing) actions.innerHTML = `<span class="data-status data-progress-status" role="status" aria-live="polite">${escHtml(loadMessage || "Подготавливаем загрузку…")}</span><span class="spacer"></span>
+      <button data-action="cancel-load">Отменить загрузку</button>`;
+    else if (step === 1) actions.innerHTML = `<span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
       <button data-action="cancel">Отмена</button><button class="primary" data-action="next-sources">Продолжить к источникам</button>`;
-    else if (step === 2) actions.innerHTML = `<button data-action="back-area">Назад</button><span class="data-status muted"></span><span class="spacer"></span>
+    else if (step === 2) actions.innerHTML = `<button data-action="back-area">Назад</button><span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
       <button class="primary" data-action="next-review"${count ? "" : " disabled"}>Продолжить к проверке</button>`;
-    else actions.innerHTML = `<button data-action="back-sources">Назад</button><span class="data-status muted"></span><span class="spacer"></span>
+    else actions.innerHTML = `<button data-action="back-sources">Назад</button><span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
       <button class="primary data-load" data-action="load"${count ? "" : " disabled"}>Загрузить ${count} ${layerNoun(count)}</button>`;
   }
 
@@ -365,39 +433,59 @@ async function openDataFetch() {
   };
 
   async function loadCatalog() {
+    catalogController?.abort();
+    const controller = new AbortController();
+    catalogController = controller;
     ogdLoading = true; ogdError = null; render();
     try {
-      const response = await fetch("/api/gisogd-catalog");
+      const response = await fetch("/api/gisogd-catalog", { signal: controller.signal });
       const data = await response.json();
       if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
       ogdCatalog = data.layers || [];
-    } catch (error) { ogdError = error.message || String(error); }
-    finally { ogdLoading = false; render(); }
+    } catch (error) {
+      if (error?.name !== "AbortError") ogdError = error.message || String(error);
+    } finally {
+      if (catalogController === controller) {
+        catalogController = null; ogdLoading = false; render();
+      }
+    }
   }
 
   async function performLoad() {
     if (importing || !selected.size) return;
-    importing = true; saveSelection();
-    const loadBtn = overlay.querySelector(".data-load");
-    const status = overlay.querySelector(".data-status");
-    if (loadBtn) { loadBtn.disabled = true; loadBtn.classList.add("loading"); }
-    overlay.querySelectorAll("button,input").forEach(control => control.disabled = true);
-    if (status) status.textContent = "Загрузка…";
+    importing = true; saveSelection(); loadMessage = "Подготавливаем загрузку…";
+    loadProgress.clear();
+    const sources = [...selected];
+    sources.forEach(source => loadProgress.set(source, { state: "pending", count: 0 }));
+    const controller = new AbortController();
+    loadController = controller;
+    render();
     const busyDone = beginBusy("Загрузка данных по области…");
     try {
-      const response = await fetch("/api/fetch-extent", { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bbox, sources: [...selected] }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || (`HTTP ${response.status}`));
+      const batches = await fetchExtentSourceBatches(bbox, sources, {
+        signal: controller.signal,
+        onProgress(progress) {
+          loadProgress.set(progress.source, progress);
+          const completed = [...loadProgress.values()].filter(item => item.state === "done").length;
+          const label = labelForKey(progress.source);
+          if (progress.state === "loading") loadMessage = `${progress.index + 1} из ${progress.total}: ${label}`;
+          else if (progress.state === "done") loadMessage = `Загружено ${completed} из ${progress.total} источников`;
+          else if (progress.state === "failed") loadMessage = `Ошибка: ${label}`;
+          setBusyProgress(completed / Math.max(1, progress.total), loadMessage);
+          render();
+        },
+      });
+      const data = mergeExtentSourceBatches(batches);
       const groups = (data.groups || []).filter(group => group.count > 0);
       const total = groups.reduce((sum, group) => sum + group.count, 0);
       if (!total) {
-        importing = false; render(); step = 2; render();
-        const nextStatus = overlay.querySelector(".data-status");
-        if (nextStatus) nextStatus.textContent = "В выбранной области данных не найдено";
+        importing = false; loadController = null; step = 2;
+        loadMessage = "В выбранной области данных не найдено"; render();
         if (data.notes?.length) toast(data.notes.join(" · "), "warn");
         return;
       }
+      loadMessage = "Проверяем данные перед добавлением в проект…";
+      setBusyProgress(1, loadMessage); render();
       const fieldsByLayer = {};
       for (const group of groups) {
         if (!group.layer_id || !Array.isArray(group.fields)) continue;
@@ -407,21 +495,31 @@ async function openDataFetch() {
         layers: data.layers || [], fieldsByLayer,
         snapshots: (data.snapshots || []).map(snapshot => ({ snapshot })) });
       if (!plan.added && plan.dup) {
-        close(); toast(`Данные: всё уже загружено (${plan.dup} объектов — без дубликатов)`); return;
+        importing = false; loadController = null; close();
+        toast(`Данные: всё уже загружено (${plan.dup} объектов — без дубликатов)`); return;
       }
       if (!plan.added) throw new Error("Нет корректных объектов для импорта");
       const { added, dup, invalid } = commitPreparedSourceImport(plan);
-      close();
+      importing = false; loadController = null; close();
       const duplicateNote = dup ? ` · ${dup} уже были` : "";
       const invalidNote = invalid ? ` · ${invalid} поврежд. пропущено` : "";
       const notes = (data.notes || []).filter(Boolean);
       toast(`Данные: +${plObjects(added)}${duplicateNote}${invalidNote}${notes.length ? ` · ${notes.join(" · ")}` : ""}`,
         invalid || notes.length ? "warn" : undefined);
     } catch (error) {
-      importing = false; render(); step = 3; render();
-      const nextStatus = overlay.querySelector(".data-status");
-      if (nextStatus) nextStatus.textContent = "Не удалось загрузить: " + String(error.message || error).slice(0, 150);
-      toast("Не удалось загрузить: " + String(error.message || error).slice(0, 180), "error");
+      importing = false; loadController = null; step = 3;
+      if (error?.name === "AbortError") {
+        for (const [source, progress] of loadProgress)
+          if (progress.state === "loading" || progress.state === "pending")
+            loadProgress.set(source, { ...progress, state: "cancelled" });
+        loadMessage = "Загрузка отменена — проект не изменён";
+        render();
+      } else {
+        const failedLabel = error.source ? `${labelForKey(error.source)}: ` : "";
+        loadMessage = "Не удалось загрузить: " + failedLabel + String(error.message || error).slice(0, 150);
+        render();
+        toast(loadMessage.slice(0, 180), "error");
+      }
     } finally { busyDone(); }
   }
 
@@ -436,6 +534,7 @@ async function openDataFetch() {
     query = event.target.value; render({ focusSearch: true });
   });
   overlay.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); close(); return; }
     if (event.key === "/" && step === 2 && !event.target.matches("input")) {
       event.preventDefault(); overlay.querySelector(".data-search input")?.focus();
     }
@@ -456,6 +555,9 @@ async function openDataFetch() {
     const action = button.dataset.action;
     if (!action) return;
     if (action === "cancel") close();
+    else if (action === "cancel-load") {
+      loadMessage = "Отменяем загрузку…"; render(); loadController?.abort();
+    }
     else if (action === "back-area") { step = 1; render(); }
     else if (action === "next-sources") { step = 2; render(); }
     else if (action === "back-sources") { step = 2; render(); }
