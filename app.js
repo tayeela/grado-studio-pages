@@ -326,7 +326,7 @@ function createGenericLayer({ title, geometry_type, styleId, id = null }) {
 // слои-приёмники с СВОИМИ полями (полная атрибуция НСПД из «Данных») тоже
 // идут в манифест — бэкенд мержит из него только fields, code/title builtin
 function userLayersManifest() {
-  return LAYERS_V2.filter(L => L.user_created || (L.fields && L.fields.length))
+  return LAYERS_V2.filter(L => L.user_created || L.import_only || (L.fields && L.fields.length))
     .map(L => ({
       layer_id: L.id,
       // custom.* не входит в классификатор GeoPackage: внутри .grado такой
@@ -337,7 +337,12 @@ function userLayersManifest() {
       studio_code: String(L.semantic_class || "").startsWith("custom.")
         ? L.semantic_class : undefined,
       title: L.title,
+      kind: L.kind, geometry_type: L.geometry_type,
       stage: L.stage, style_id: L.style_id,
+      import_only: !!L.import_only,
+      source_kind: L.source_kind || undefined,
+      source_code: L.source_code || undefined,
+      source_name: L.source_name || undefined,
       fields: L.fields || [],   // произвольные поля атрибутивной таблицы → колонки .grado
     }));
 }
@@ -1017,8 +1022,8 @@ function roundCoords(f) {
   if (f.circle) { f.circle.cx = r(f.circle.cx); f.circle.cy = r(f.circle.cy); f.circle.r = r(f.circle.r); }
   return f;
 }
-function upgradeFeature(f) {
-  const L = layerOf(f);
+function upgradeFeature(f, resolveLayer = layerOf) {
+  const L = resolveLayer(f);
   if (L) { f.layer_id = L.id; if (!f.kind) f.kind = L.kind; }
   if (!f.props || typeof f.props !== "object" || Array.isArray(f.props)) f.props = {};
   if (f.kind === "building") f.props.floors = normalizedFloorCount(f.props.floors);
@@ -1051,6 +1056,231 @@ function importSourceFeatures(features) {
     added++;
   }
   return { added, dup, invalid };
+}
+
+// ---------- транзакционный импорт источников --------------------------------
+// Разбор API/файла не имеет права менять живой проект. Сначала строим план:
+// проверяем идентичность слоёв, srcKey, геометрию и поля, присваиваем id во
+// временном массиве. Только полностью подготовленный план применяется одним
+// commit; при исключении состояние возвращается к исходному снимку.
+function importedLayerGeometry(spec) {
+  if (["point", "polyline", "polygon", "arc", "circle"].includes(spec.geometry_type))
+    return spec.geometry_type;
+  if (CODE_TO_GEOM[spec.code]) return CODE_TO_GEOM[spec.code];
+  if (spec.kind === "social") return "point";
+  if (spec.kind === "redline") return "polyline";
+  return "polygon";
+}
+function importedLayerFromSpec(spec) {
+  if (!spec || typeof spec.id !== "string" || !/^[a-z0-9._:-]{3,180}$/i.test(spec.id))
+    throw new Error("Импорт содержит некорректный layer_id");
+  const geometryType = importedLayerGeometry(spec);
+  const L = {
+    id: spec.id,
+    title: typeof spec.title === "string" && spec.title.trim() ? spec.title.trim() : spec.id,
+    kind: spec.kind || "generic",
+    semantic_class: spec.code || GENERIC_CODE[geometryType] || "generic.line",
+    geometry_type: geometryType,
+    style_id: spec.style_id || null,
+    stage: spec.stage || "existing",
+    source_kind: spec.source_kind || null,
+    source_code: spec.source_code || null,
+    source_name: spec.source_name || spec.title || null,
+    import_only: true,
+    visible: true,
+    defaults: () => ({}),
+  };
+  if (["boundary", "restrict", "zone"].includes(L.kind)) L.topology = "coverage";
+  return L;
+}
+function assertCompatibleImportedLayer(existing, incoming) {
+  if (!existing) return;
+  if (existing.source_kind && incoming.source_kind && existing.source_kind !== incoming.source_kind)
+    throw new Error(`Коллизия слоя «${incoming.id}»: разные источники данных`);
+  const sameSourceCode = existing.source_code && incoming.source_code &&
+    existing.source_code === incoming.source_code;
+  if (existing.source_code && incoming.source_code && !sameSourceCode)
+    throw new Error(`Коллизия слоя «${incoming.id}»: ${existing.source_code} ≠ ${incoming.source_code}`);
+  if (!sameSourceCode && existing.source_name && incoming.source_name &&
+      existing.source_name !== incoming.source_name)
+    throw new Error(`Коллизия layer_id «${incoming.id}»: «${existing.source_name}» и «${incoming.source_name}»`);
+  if (!sameSourceCode && existing.import_only && incoming.import_only && existing.title !== incoming.title)
+    throw new Error(`Коллизия layer_id «${incoming.id}»: разные названия слоёв`);
+  if (existing.kind && incoming.kind && existing.kind !== incoming.kind)
+    throw new Error(`Коллизия слоя «${incoming.id}»: разные назначения слоёв`);
+  if (existing.geometry_type && incoming.geometry_type && existing.geometry_type !== incoming.geometry_type)
+    throw new Error(`Коллизия слоя «${incoming.id}»: разные типы геометрии`);
+}
+function normalizeImportFields(fieldsByLayer) {
+  const normalized = {};
+  for (const [layerId, fields] of Object.entries(fieldsByLayer || {})) {
+    if (!Array.isArray(fields)) throw new Error(`Некорректная схема полей слоя «${layerId}»`);
+    const seen = new Set();
+    normalized[layerId] = [];
+    for (const field of fields) {
+      if (!field || typeof field.name !== "string" || !field.name.trim()) continue;
+      const name = field.name.trim();
+      if (seen.has(name)) continue;
+      seen.add(name);
+      normalized[layerId].push({ ...field, name });
+    }
+  }
+  return normalized;
+}
+function prepareSourceImport(input = {}) {
+  const incomingFeatures = Array.isArray(input.features) ? input.features : [];
+  const incomingLayers = Array.isArray(input.layers) ? input.layers : [];
+  const stagedLayerById = new Map();
+  for (const raw of incomingLayers) {
+    const layer = importedLayerFromSpec(raw);
+    const duplicate = stagedLayerById.get(layer.id);
+    if (duplicate) {
+      assertCompatibleImportedLayer(duplicate, layer);
+      continue;
+    }
+    assertCompatibleImportedLayer(LAYER_BY_ID[layer.id], layer);
+    stagedLayerById.set(layer.id, layer);
+  }
+  const fieldsByLayer = normalizeImportFields(input.fieldsByLayer || input.fields);
+  for (const layerId of Object.keys(fieldsByLayer))
+    if (!LAYER_BY_ID[layerId] && !stagedLayerById.has(layerId))
+      throw new Error(`Схема полей ссылается на неизвестный слой «${layerId}»`);
+
+  const existingKeys = new Set();
+  for (const feature of state.features) if (feature.srcKey) existingKeys.add(feature.srcKey);
+  const batchKeys = new Set();
+  const stagedFeatures = [];
+  const addedByLayer = Object.create(null);
+  const touchedLayerIds = new Set(Object.keys(fieldsByLayer));
+  let nextId = state.nextId, dup = 0, invalid = 0;
+  const invalidDetails = [];
+  const resolveImportLayer = feature => {
+    if (feature.layer_id)
+      return stagedLayerById.get(feature.layer_id) || LAYER_BY_ID[feature.layer_id] || null;
+    return LAYER_BY_KIND[feature.kind] || null;
+  };
+  for (const raw of incomingFeatures) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      invalid++; invalidDetails.push("объект не является записью"); continue;
+    }
+    if (raw.srcKey && (existingKeys.has(raw.srcKey) || batchKeys.has(raw.srcKey))) {
+      dup++;
+      continue;
+    }
+    const targetLayer = resolveImportLayer(raw);
+    if (!targetLayer)
+      throw new Error(`Объект импорта ссылается на неизвестный слой «${raw.layer_id || raw.kind || "—"}»`);
+    let upgraded;
+    try {
+      upgraded = upgradeFeature({ id: nextId, ...raw }, resolveImportLayer);
+    } catch (error) {
+      invalid++;
+      if (invalidDetails.length < 5) invalidDetails.push(error.message || String(error));
+      continue;
+    }
+    if (targetLayer.geometry_type && upgraded.geometry_type !== targetLayer.geometry_type)
+      throw new Error(`Слой «${targetLayer.title}» ожидает ${targetLayer.geometry_type}, получено ${upgraded.geometry_type}`);
+    if (upgraded.srcKey) batchKeys.add(upgraded.srcKey);
+    touchedLayerIds.add(targetLayer.id);
+    stagedFeatures.push(upgraded);
+    addedByLayer[targetLayer.id] = (addedByLayer[targetLayer.id] || 0) + 1;
+    nextId++;
+  }
+  const newLayers = [...stagedLayerById.values()].filter(layer => !LAYER_BY_ID[layer.id]);
+  return {
+    baseFeatures: state.features,
+    baseFeatureCount: state.features.length,
+    baseNextId: state.nextId,
+    baseLayerIds: LAYERS_V2.map(layer => layer.id).join("\u0000"),
+    features: stagedFeatures,
+    nextId,
+    newLayers,
+    addedByLayer,
+    fieldsByLayer,
+    touchedLayerIds,
+    snapshots: Array.isArray(input.snapshots) ? input.snapshots : [],
+    added: stagedFeatures.length,
+    dup,
+    invalid,
+    invalidDetails,
+  };
+}
+function commitPreparedSourceImport(plan) {
+  if (!plan || state.features !== plan.baseFeatures || state.features.length !== plan.baseFeatureCount ||
+      state.nextId !== plan.baseNextId || LAYERS_V2.map(layer => layer.id).join("\u0000") !== plan.baseLayerIds)
+    throw new Error("Проект изменился во время подготовки импорта — повторите операцию");
+
+  const featureLength = state.features.length;
+  const layerLength = LAYERS_V2.length;
+  const nextId = state.nextId;
+  const sources = state.sources.slice();
+  const undo = state.undo.slice();
+  const redo = state.redo.slice();
+  const selected = state.selected;
+  const layerBackups = new Map();
+  for (const layerId of plan.touchedLayerIds) {
+    const layer = LAYER_BY_ID[layerId];
+    if (layer) layerBackups.set(layerId, {
+      visible: layer.visible, fields: layer.fields ? JSON.parse(JSON.stringify(layer.fields)) : undefined,
+      fmt: layer.fmt ? JSON.parse(JSON.stringify(layer.fmt)) : undefined,
+      fmtInit: layer._fmtInit,
+    });
+  }
+  snapshot();
+  try {
+    for (const layer of plan.newLayers) {
+      LAYERS_V2.push(layer);
+      LAYER_BY_ID[layer.id] = layer;
+    }
+    state.features.push(...plan.features);
+    state.nextId = plan.nextId;
+    for (const [layerId, fields] of Object.entries(plan.fieldsByLayer)) {
+      const layer = LAYER_BY_ID[layerId];
+      if (!layer) throw new Error(`Не удалось зарегистрировать слой «${layerId}»`);
+      layer.fields = layer.fields || [];
+      const taken = new Set(layer.fields.map(field => field.name));
+      for (const field of fields)
+        if (!taken.has(field.name)) { layer.fields.push(field); taken.add(field.name); }
+    }
+    for (const layerId of plan.touchedLayerIds) {
+      const layer = LAYER_BY_ID[layerId];
+      if (!layer) throw new Error(`Не удалось применить слой «${layerId}»`);
+      layer.visible = true;
+      if ((layerId.startsWith("source.gisogd.") || layerId.startsWith("source.fgistp.")) && !layer._fmtInit) {
+        layer._fmtInit = true;
+        layer.fmt = { hatch: false, line_label: null, ...(layer.fmt || {}) };
+      }
+    }
+    for (const entry of plan.snapshots)
+      recordSource(entry && entry.snapshot !== undefined ? entry.snapshot : entry,
+        entry && entry.diff, { defer: true });
+    state.selected = null;
+    renderSources();
+    afterChange();
+    return { added: plan.added, dup: plan.dup, invalid: plan.invalid };
+  } catch (error) {
+    state.features.length = featureLength;
+    state.nextId = nextId;
+    LAYERS_V2.length = layerLength;
+    rebuildLayerIndexes();
+    for (const [layerId, backup] of layerBackups) {
+      const layer = LAYER_BY_ID[layerId];
+      if (!layer) continue;
+      layer.visible = backup.visible;
+      if (backup.fields === undefined) delete layer.fields; else layer.fields = backup.fields;
+      if (backup.fmt === undefined) delete layer.fmt; else layer.fmt = backup.fmt;
+      if (backup.fmtInit === undefined) delete layer._fmtInit; else layer._fmtInit = backup.fmtInit;
+    }
+    state.sources = sources;
+    state.undo.length = 0;
+    state.undo.push(...undo);
+    state.redo = redo;
+    state.selected = selected;
+    state._ix = null; state._snapIndex = null;
+    syncHistoryControls();
+    renderSources(); renderLayers(); renderProps(); draw();
+    throw error;
+  }
 }
 
 const DEFAULT_ALBUM_CONFIG = {
@@ -5581,13 +5811,13 @@ function renderSources() {
 }
 
 // снимок из ответа импорта → журнал; diff → тост «источник изменился»
-function recordSource(snapshot, diff) {
+function recordSource(snapshot, diff, options = {}) {
   if (!snapshot) return;
   if (!state.sources.some(s => s.id === snapshot.id)) {
     state.sources.unshift(snapshot);
     if (state.sources.length > 50) state.sources.pop();
   }
-  renderSources(); persist();
+  if (!options.defer) { renderSources(); persist(); }
   if (diff && (diff.added.length || diff.removed.length || diff.changed.length))
     toast(`Источник изменился: +${diff.added.length} −${diff.removed.length} ~${diff.changed.length}`);
 }
@@ -7308,13 +7538,35 @@ function applyRestoredState(d) {
   if (Array.isArray(d.userLayers)) {
     for (const spec of d.userLayers) {
       if (LAYER_BY_ID[spec.layer_id]) {
+        const existing = LAYER_BY_ID[spec.layer_id];
+        if (spec.import_only) {
+          existing.import_only = true;
+          existing.source_kind = spec.source_kind || existing.source_kind || null;
+          existing.source_code = spec.source_code || existing.source_code || null;
+          existing.source_name = spec.source_name || existing.source_name || spec.title;
+        }
         if (Array.isArray(spec.fields) && spec.fields.length)
-          LAYER_BY_ID[spec.layer_id].fields = spec.fields.filter(isRecord);
+          existing.fields = spec.fields.filter(isRecord);
         continue;  // уже есть (встроенный или повторный restore)
       }
       let created = null;
       const semanticCode = spec.studio_code || spec.code;
-      if (CODE_TO_GEOM[semanticCode]) {          // обычный (generic) слой
+      if (spec.import_only) {
+        created = importedLayerFromSpec({
+          id: spec.layer_id,
+          title: spec.title,
+          kind: spec.kind,
+          code: semanticCode,
+          geometry_type: spec.geometry_type,
+          style_id: spec.style_id,
+          stage: spec.stage,
+          source_kind: spec.source_kind,
+          source_code: spec.source_code,
+          source_name: spec.source_name,
+        });
+        LAYERS_V2.push(created);
+        LAYER_BY_ID[created.id] = created;
+      } else if (CODE_TO_GEOM[semanticCode]) {          // обычный (generic) слой
         created = createGenericLayer({ title: spec.title,
           geometry_type: CODE_TO_GEOM[semanticCode], styleId: spec.style_id,
           id: spec.layer_id });

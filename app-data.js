@@ -3,7 +3,7 @@
 //  видимому экстенту). Вынесено из монолита app.js (P0-разрез). Классический
 //  скрипт, общий global-scope, грузится ПЕРЕД app.js (on("btn-data") ссылается
 //  на openDataFetch при загрузке). Только определения — top-level исполнения нет.
-//  Runtime-зависимости из app.js: importSourceFeatures, recordSource,
+//  Runtime-зависимости из app.js: prepareSourceImport/commitPreparedSourceImport,
 //  startDownloadsWatch, zoomBy, snapshot, afterChange, LAYER_BY_ID, attrColumns,
 //  toast, closePopups, escHtml, plObjects, initBasemap, basemap, cv, s2w,
 //  localToLonLat. Биндинг on("btn-data") и остальной импорт (мост/inbox/ГИС ОГД/
@@ -320,65 +320,29 @@ async function openDataFetch() {
         refreshUI();
         return;
       }
-      snapshot();
-      // Слои-приёмники, которых нет в статическом LAYERS_V2 (напр.
-      // source.gisogd.zouit.* — свой слой на каждый знак ЛГР): регистрируем ДО
-      // раскладки объектов. Иначе layerOf не находит слой и молча откатывается
-      // на слой по ВИДУ — все ЗОУИТ снова в одной куче (железное правило 7).
-      for (const ld of (data.layers || [])) {
-        if (LAYER_BY_ID[ld.id]) continue;
-        const L = {
-          id: ld.id, title: ld.title, kind: ld.kind || "restrict",
-          semantic_class: ld.code, geometry_type: "polygon",
-          style_id: ld.style_id, stage: ld.stage || "existing",
-          source_kind: ld.source_kind, import_only: true, visible: true,
-          defaults: () => ({}),
-        };
-        if (["boundary", "restrict", "zone"].includes(L.kind)) L.topology = "coverage";
-        LAYERS_V2.push(L);
-        LAYER_BY_ID[L.id] = L;
-      }
-      let addedAll = 0, dupAll = 0, invalidAll = 0;
-      const parts = [];
+      const fieldsByLayer = {};
       for (const g of groups) {
-        const { added, dup, invalid } = importSourceFeatures(g.features);  // дедуп + валидация
-        addedAll += added; dupAll += dup; invalidAll += invalid;
-        parts.push(`${g.title} ${added}`);
-        // Объекты ОГД с LineCode разъезжаются по СВОИМ слоям (один код — один
-        // знак), поэтому показываем все затронутые слои, а не только слой
-        // группы: иначе объект есть, а слоя в панели не видно.
-        const touched = new Set([g.layer_id]);
-        for (const f of g.features) if (f.layer_id) touched.add(f.layer_id);
-        for (const lid of touched) {
-          const TL = LAYER_BY_ID[lid];
-          if (!TL) continue;
-          TL.visible = true;
-          // По умолчанию у импортированных зон штриховка и подпись ВЫКЛЮЧЕНЫ:
-          // на реальном чертеже поверх зон лежат линии ЛГР и сам проект, и
-          // сплошная штриховка «съедает» их. Включаются в «Оформлении слоя»
-          // (это переопределение слоя, знак в библиотеке не тронут).
-          if (lid.startsWith("source.gisogd.") && !TL._fmtInit) {
-            TL._fmtInit = true;
-            TL.fmt = { hatch: false, line_label: null, ...(TL.fmt || {}) };
-          }
-        }
-        const L = LAYER_BY_ID[g.layer_id];
-        if (!L) continue;
-        L.visible = true;          // слой-приёмник сразу виден в панели
-        // полная атрибуция источника → колонки таблицы атрибутов
-        // (и .grado через манифест); существующие поля не трогаем
-        if (g.fields && g.fields.length) {
-          L.fields = L.fields || [];
-          const taken = new Set(attrColumns(L).map(c => c.name));
-          for (const fd of g.fields)
-            if (!taken.has(fd.name)) { L.fields.push(fd); taken.add(fd.name); }
-        }
+        if (!g.layer_id || !Array.isArray(g.fields)) continue;
+        fieldsByLayer[g.layer_id] = [
+          ...(fieldsByLayer[g.layer_id] || []),
+          ...g.fields,
+        ];
       }
-      (data.snapshots || []).forEach(m => recordSource(m));
-      state.selected = null;
-      afterChange();               // вид не трогаем: данные пришли по нему же
+      const plan = prepareSourceImport({
+        features: groups.flatMap(g => g.features || []),
+        layers: data.layers || [],
+        fieldsByLayer,
+        snapshots: (data.snapshots || []).map(snapshot => ({ snapshot })),
+      });
+      if (!plan.added && plan.dup) {
+        close();
+        toast(`Данные: всё уже загружено (${plan.dup} объектов — без дубликатов)`);
+        return;
+      }
+      if (!plan.added) throw new Error("Нет корректных объектов для импорта");
+      const { added: addedAll, dup: dupAll, invalid: invalidAll } = commitPreparedSourceImport(plan);
+      const parts = groups.map(g => `${g.title} ${plan.addedByLayer[g.layer_id] || 0}`);
       close();
-      if (!addedAll && dupAll) { toast(`Данные: всё уже загружено (${dupAll} объектов — без дубликатов)`); return; }
       const dupNote = dupAll ? ` · ${dupAll} уже были` : "";
       const invalidNote = invalidAll ? ` · ${invalidAll} поврежд. пропущено` : "";
       const sourceNotes = (data.notes || []).filter(Boolean);

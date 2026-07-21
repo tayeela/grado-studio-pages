@@ -4,8 +4,8 @@
 //  Вынесено из монолита app.js (P0-разрез). Классический скрипт, общий
 //  global-scope. ВНИМАНИЕ: грузится ПОСЛЕ app.js (в отличие от прочих модулей),
 //  т.к. блок содержит top-level исполнение (setInterval(pollInbox), pollInbox(),
-//  on()-биндинги, st-core.onclick), которому нужны on/state/importSourceFeatures
-//  из app.js. Общий импортёр importSourceFeatures и журнал recordSource/
+//  on()-биндинги, st-core.onclick), которому нужны on/state и транзакционный
+//  импортёр prepareSourceImport/commitPreparedSourceImport из app.js. Журнал recordSource/
 //  fetchSources/renderSources остались в app.js (используются и app-data.js).
 // ============================================================================
 
@@ -25,18 +25,26 @@ async function pollInbox() {
     // сообщаем только когда канал занят (в QGIS открыт тот же порт)
     document.getElementById("st-bridge").textContent =
       data.bridge ? "" : "приём данных из браузера занят (закрыт в QGIS?)";
-    let added = 0, dup = 0, invalid = 0, snapped = false;
-    for (const item of data.items) {
-      if (!item.features.length) continue;
-      if (!snapped) { snapshot(); snapped = true; }
-      const r = importSourceFeatures(item.features);
-      added += r.added; dup += r.dup; invalid += r.invalid;
-      recordSource(item.snapshot, item.diff);   // снимок моста → журнал
+    const items = (data.items || []).filter(item => Array.isArray(item.features) && item.features.length);
+    let added = 0, dup = 0, invalid = 0;
+    if (items.length) {
+      const fieldsByLayer = {};
+      for (const item of items) {
+        for (const [layerId, fields] of Object.entries(item.fields || {}))
+          fieldsByLayer[layerId] = [...(fieldsByLayer[layerId] || []), ...(fields || [])];
+      }
+      const plan = prepareSourceImport({
+        features: items.flatMap(item => item.features),
+        layers: items.flatMap(item => item.layers || []),
+        fieldsByLayer,
+        snapshots: items.map(item => ({ snapshot: item.snapshot, diff: item.diff })),
+      });
+      ({ added, dup, invalid } = plan.added ? commitPreparedSourceImport(plan) : plan);
     }
     if (added || dup || invalid) {
       afterChange();
       fitView();
-      const src = data.items[0].source === "fgis_tp" ? "ФГИС ТП" : "НСПД";
+      const src = items[0]?.source === "fgis_tp" ? "ФГИС ТП" : "НСПД";
       toast(`Получено из браузера: +${plObjects(added)} (${src})` +
         (dup ? ` · ${dup} уже были` : "") +
         (invalid ? ` · ${invalid} поврежд. пропущено` : ""), invalid ? "warn" : undefined);
@@ -82,11 +90,13 @@ on("nspd-file", "change", async e => {
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     if (!data.features.length) { toast("В захвате нет полигонов НСПД", "warn"); return; }
-    snapshot();
-    const { added, dup, invalid } = importSourceFeatures(data.features);
-    state.selected = null;
-    recordSource(data.snapshot, data.diff);   // снимок импорта → журнал
-    afterChange();
+    const plan = prepareSourceImport({ features: data.features,
+      snapshots: [{ snapshot: data.snapshot, diff: data.diff }] });
+    if (!plan.added && plan.dup) {
+      toast(`НСПД: всё уже загружено (${plan.dup} объектов)`);
+      return;
+    }
+    const { added, dup, invalid } = commitPreparedSourceImport(plan);
     fitView();
     if (dup || invalid) toast(`НСПД: +${added}` +
       (dup ? ` · ${dup} уже были` : "") +
@@ -108,55 +118,28 @@ async function applyGisogdData(data, askText) {
     toast("В выгрузке не нашлось распознанных слоёв", "warn");
     return false;
   }
+  const plan = prepareSourceImport({
+    features: data.features,
+    layers: data.layers,
+    fieldsByLayer: data.fields,
+    snapshots: [{ snapshot: data.snapshot, diff: data.diff }],
+  });
+  if (!plan.added && plan.dup) {
+    toast(`ОГД: всё уже загружено (${plan.dup} объектов)`);
+    return true;
+  }
+  if (!plan.added && plan.invalid)
+    throw new Error(`Все объекты выгрузки повреждены: ${plan.invalidDetails.join("; ")}`);
   const summary = data.notes && data.notes.length ? data.notes.join("; ") : "слои распознаны";
   const ok = await uiConfirm(
-    `${askText}\n+${data.features.length} объектов.\n${summary}\n(Данные добавятся к текущему проекту.)`,
+    `${askText}\nНовых объектов: ${plan.added}.` +
+    (plan.dup ? ` Уже загружено: ${plan.dup}.` : "") +
+    (plan.invalid ? ` Повреждено и будет пропущено: ${plan.invalid}.` : "") +
+    `\n${summary}\nИзменения будут применены одной транзакцией.`,
     { ok: "Импортировать", cancel: "Отмена" });
   if (!ok) return false;
-  snapshot();
-  // Слои-приёмники, которых нет в статическом LAYERS_V2 (source.gisogd.zouit.* —
-  // свой слой на каждый знак ЛГР, объекты разъезжаются по LineCode): заводим ДО
-  // раскладки, иначе layerOf откатится на слой по ВИДУ и все ЗОУИТ снова лягут
-  // в одну кучу (железное правило 7).
-  for (const ld of (data.layers || [])) {
-    if (LAYER_BY_ID[ld.id]) continue;
-    const L = { id: ld.id, title: ld.title, kind: ld.kind || "restrict",
-      semantic_class: ld.code, geometry_type: "polygon", style_id: ld.style_id,
-      stage: ld.stage || "existing", source_kind: ld.source_kind,
-      import_only: true, visible: true, defaults: () => ({}) };
-    if (["boundary", "restrict", "zone"].includes(L.kind)) L.topology = "coverage";
-    LAYERS_V2.push(L);
-    LAYER_BY_ID[L.id] = L;
-  }
-  const { added, dup, invalid } = importSourceFeatures(data.features);
-  state.selected = null;
-  recordSource(data.snapshot, data.diff);
-  // атрибуты ОГД → колонки таблицы соответствующих слоёв (как в «Данных»)
-  if (data.fields) {
-    for (const [lid, flds] of Object.entries(data.fields)) {
-      const L = LAYER_BY_ID[lid]; if (!L) continue;
-      L.fields = L.fields || [];
-      const taken = new Set(L.fields.map(fd => fd.name));
-      for (const fd of flds)
-        if (!taken.has(fd.name)) { L.fields.push(fd); taken.add(fd.name); }
-    }
-  }
-  // показываем слои, в которые РЕАЛЬНО легли объекты (прежде список был зашит
-  // четырьмя id — слои по знакам в него не попадали и оставались невидимыми).
-  // Штриховка и подпись у импортированных зон по умолчанию выключены:
-  // включаются в «Оформлении слоя».
-  for (const lid of new Set(data.features.map(f => f.layer_id).filter(Boolean))) {
-    const L = LAYER_BY_ID[lid]; if (!L) continue;
-    L.visible = true;
-    if ((lid.startsWith("source.gisogd.") || lid.startsWith("source.fgistp."))
-        && !L._fmtInit) {
-      L._fmtInit = true;
-      L.fmt = { hatch: false, line_label: null, ...(L.fmt || {}) };
-    }
-  }
-  afterChange();
+  const { added, dup, invalid } = commitPreparedSourceImport(plan);
   fitView();
-  renderLayers();
   const dupNote = dup ? ` · ${dup} уже были (пропущены)` : "";
   const invalidNote = invalid ? ` · ${invalid} поврежд. пропущено` : "";
   toast(`ОГД: +${added} объектов${dupNote}` +
