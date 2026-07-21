@@ -235,6 +235,7 @@
       throw new Error("Некорректная видимая область");
     const area = bboxKm2(bbox);
     const result = { groups: [], notes: [], snapshots: [], layers: [] };
+    const failures = [];
     const osmSources = sources.filter(source => source.startsWith("osm."));
     const nspdSources = sources.filter(source => source.startsWith("nspd."));
     if (osmSources.length) {
@@ -242,7 +243,7 @@
       try {
         const query = pagesCore.buildOsmExtentRequest(bbox, osmSources);
         mergeExtent(result, pagesCore.importOsmExtent(await fetchOverpass(query), osmSources, bbox));
-      } catch (error) { result.notes.push(`OSM: ${error.message || error}`); }
+      } catch (error) { failures.push(`OSM: ${error.message || error}`); }
     }
     if (nspdSources.length) {
       if (area > 12) throw new Error(`Область ${area.toFixed(1)} км² больше предела 12 км² для НСПД — приблизьте вид`);
@@ -253,40 +254,28 @@
             body: JSON.stringify(pagesCore.buildNspdExtentRequest(bbox, source)) });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           mergeExtent(result, pagesCore.importNspdExtent(await response.json(), source, bbox));
-        } catch (error) { result.notes.push(`${source}: ${error.message || error}`); }
+        } catch (error) { failures.push(`${source}: ${error.message || error}`); }
       }
     }
     // ГИС ОГД: кураторские наборы (gisogd.*) и любой слой портала (gisogd:{code}).
-    // Один источник может быть несколькими слоями портала (ТиНАО) — сливаем.
+    // Один источник может быть несколькими слоями портала (ТиНАО), но каждая
+    // группа обязана сохранить собственные layer_id/title/fields до commit.
     const ogdSources = sources.filter(s => s.startsWith("gisogd.") || s.startsWith("gisogd:"));
     if (ogdSources.length) {
       if (area > 80) throw new Error(`Область ${area.toFixed(1)} км² больше предела 80 км² для ГИС ОГД — приблизьте вид`);
       for (const source of ogdSources) {
-        let merged = null;
-        for (const layer of await gisogdLayersFor(source)) {
+        const sourceLayers = await gisogdLayersFor(source);
+        if (!sourceLayers.length) {
+          failures.push(`${source}: слой не найден в каталоге портала`);
+          continue;
+        }
+        for (const layer of sourceLayers) {
           try {
             const raw = await gisogdLayerJson(layer.code, result.notes);
             const part = pagesCore.importGisogdExtent(raw, layer, bbox);
-            if (!merged) merged = part;
-            else {
-              merged.groups[0].features.push(...part.groups[0].features);
-              merged.groups[0].count = merged.groups[0].features.length;
-              part.groups[0].fields.forEach(fd => {
-                if (!merged.groups[0].fields.some(x => x.name === fd.name))
-                  merged.groups[0].fields.push(fd);
-              });
-              merged.snapshots.push(...part.snapshots);
-              for (const L of (part.layers || []))
-                if (!(merged.layers || (merged.layers = [])).some(x => x.id === L.id))
-                  merged.layers.push(L);
-            }
-          } catch (error) { result.notes.push(`ГИС ОГД [${layer.code}]: ${error.message || error}`); }
-        }
-        if (merged) {
-          merged.groups[0].source = source;
-          mergeExtent(result, merged);
-        } else if (!result.notes.some(n => n.includes(source))) {
-          result.notes.push(`${source}: слой не найден в каталоге портала`);
+            for (const group of (part.groups || [])) group.request_source = source;
+            mergeExtent(result, part);
+          } catch (error) { failures.push(`ГИС ОГД [${layer.code}]: ${error.message || error}`); }
         }
       }
     }
@@ -295,7 +284,11 @@
     const gisogdPicked = sources.some(s => s.startsWith("gisogd"));
     if (!osmSources.length && !nspdSources.length && !gisogdPicked
         && !sources.includes("terrain.contours"))
-      result.notes.push("Не выбраны поддерживаемые источники");
+      failures.push("Не выбраны поддерживаемые источники");
+    // Ответ либо содержит весь выбранный набор, либо не содержит ничего:
+    // фронт не должен применить «успешную половину» и потерять сведения о сбое.
+    if (failures.length)
+      throw new Error(`Импорт отменён: не все выбранные источники загружены. ${failures.join(" · ")}`);
     return result;
   }
 

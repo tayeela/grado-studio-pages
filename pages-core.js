@@ -556,6 +556,35 @@
   };
   const safeStem = filename => String(filename || "layer").split(/[\\/]/).pop()
     .replace(/\.(geojson|json)$/i, "").replace(/[/:*?"<>|]/g, "").trim() || "layer";
+  const CYRILLIC_TO_LAT = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e",
+    ж: "zh", з: "z", и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o",
+    п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "h", ц: "c", ч: "ch",
+    ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya" };
+  const identityText = value => String(value || "layer").normalize("NFKC").trim().toLowerCase();
+  const identityHash = value => {
+    let hash = 0x811c9dc5;
+    for (const ch of identityText(value)) {
+      const code = ch.codePointAt(0);
+      hash ^= code & 0xff; hash = Math.imul(hash, 0x01000193);
+      hash ^= (code >>> 8) & 0xff; hash = Math.imul(hash, 0x01000193);
+      if (code > 0xffff) {
+        hash ^= (code >>> 16) & 0xff; hash = Math.imul(hash, 0x01000193);
+      }
+    }
+    return (hash >>> 0).toString(36).padStart(7, "0");
+  };
+  // Отображаемое имя не является идентификатором. Транслитерация делает id
+  // читаемым, а hash полного Unicode-имени не даёт «СЗЗ…» и «Водоохранной…»
+  // схлопнуться в один source.gisogd.member.other.
+  const sourceLayerId = (scope, value) => {
+    const normalized = identityText(value);
+    const ascii = [...normalized].map(ch => CYRILLIC_TO_LAT[ch] ?? ch).join("");
+    const slug = ascii.replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "") || "layer";
+    return `source.gisogd.${scope}.${slug.slice(0, 64)}.${identityHash(normalized)}`;
+  };
+  const featureGeometryType = feature => feature.point ? "point" : feature.line ? "polyline"
+    : feature.arc ? "arc" : feature.circle ? "circle" : "polygon";
+  const genericCodeForGeometry = geometry => `generic.${geometry === "polyline" ? "line" : geometry}`;
 
   function importGeoJson(payload = {}, filename = "layer.geojson") {
     if (!payload || typeof payload !== "object" || Array.isArray(payload))
@@ -568,8 +597,7 @@
     const member = safeStem(filename);
     const [routedKind] = gisogdRoute(member);
     const kind = routedKind || "generic";
-    const slug = member.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "other";
-    const layerId = `source.gisogd.member.${slug}`;
+    const layerId = sourceLayerId("member", member);
     const layerTitle = `ГИС ОГД: ${member}`;
     const fields = {}, features = [], notes = [];
     let skipped = 0, geometryError = null;
@@ -584,7 +612,8 @@
       if (!parts.length) { skipped += 1; return; }
       const sourceKey = `${member}:${feature.id ?? index}`;
       const name = props.NAME || props.name;
-      const fieldList = Object.keys(props).map(key => ({ name: key, type: "text" }));
+      const fieldList = Object.entries(props).map(([key, value]) => ({ name: key,
+        type: typeof value === "number" ? "real" : typeof value === "boolean" ? "bool" : "text" }));
       // LineCode из объекта важнее маршрута по имени файла (как в выгрузке по
       // области): на каждый код — свой объект в свой слой со своим знаком, знак
       // кода = сторона. Объект БЕЗ LineCode идёт прежним путём по имени.
@@ -638,6 +667,22 @@
       });
     });
     if (!features.length && geometryError) throw geometryError;
+    // GeoJSON допускает смешанные геометрии, а слой проекта — нет. Такой файл
+    // раскладывается на устойчивые подслои одного источника вместо аварии при
+    // commit или хранения линий в «полигональном» слое.
+    const geometryTypes = [...new Set(features.map(featureGeometryType))];
+    if (geometryTypes.length > 1) {
+      const sourceFields = fields[layerId] || [];
+      delete fields[layerId];
+      for (const feature of features) {
+        const geometryType = featureGeometryType(feature);
+        const typedLayerId = `${layerId}.${geometryType}`;
+        feature.srcKey = feature.srcKey.replace(`${layerId}:`, `${typedLayerId}:`);
+        feature.layer_id = typedLayerId;
+        if (!fields[typedLayerId]) fields[typedLayerId] = sourceFields.map(field => ({ ...field }));
+      }
+      notes.push(`«${member}»: смешанная геометрия разделена на ${geometryTypes.length} слоя`);
+    }
     if (kind === "generic") notes.push(`«${member}»: тип не распознан — добавлен в слой «прочие»`);
     if (skipped) notes.push(`неподдерживаемых или повреждённых объектов пропущено: ${skipped}`);
     const sourceDoc = `ГИС ОГД / GeoJSON, файл ${filename}`;
@@ -652,9 +697,14 @@
       if (!f.layer_id || seenLayer.has(f.layer_id)) continue;
       seenLayer.add(f.layer_id);
       if (!f.layer_id.startsWith("source.gisogd.")) continue;
-      layers.push({ id: f.layer_id, title: layerTitle,
-        code: "generic.line", kind: f.kind, style_id: null,
-        stage: "existing", source_kind: "gisogd" });
+      const geometryType = featureGeometryType(f);
+      const geometryTitle = geometryTypes.length > 1
+        ? ({ point: "точки", polyline: "линии", polygon: "полигоны", arc: "дуги", circle: "окружности" }[geometryType]
+          || geometryType) : null;
+      layers.push({ id: f.layer_id, title: geometryTitle ? `${layerTitle} · ${geometryTitle}` : layerTitle,
+        code: genericCodeForGeometry(geometryType), kind: f.kind, geometry_type: geometryType,
+        style_id: null, stage: "existing", source_kind: "gisogd",
+        source_code: `file:${identityText(member)}`, source_name: member });
     }
     return { features, notes, fields, source_doc: sourceDoc, snapshot: manifest, diff: null, layers };
   }
@@ -909,15 +959,14 @@
     ["virtual1969", "Природно-общественно-производственная зона"], ["virtual1968", "Природно-производственная зона"],
     ["virtual1967", "Производственная зона"], ["virtual1966", "Производственно-жилая зона"],
     ["virtual1965", "Сельскохозяйственная зона"]];
-  const _FZ_ROUTE = { kind: "zone", layer_id: "source.gisogd.func_zones" };
+  const curatedLayer = (code, name, kind) => ({ code, name, kind,
+    layer_id: `source.gisogd.${code}`, source_code: code, source_name: name });
   const GISOGD_WEB_LAYERS = {
-    "gisogd.func_zones": [{ code: "virtual1742", name: "Функциональные зоны", ..._FZ_ROUTE }],
-    "gisogd.func_zones_tinao": _TINAO_FZ.map(([code, name]) => ({ code, name, ..._FZ_ROUTE })),
+    "gisogd.func_zones": [curatedLayer("virtual1742", "Функциональные зоны", "zone")],
+    "gisogd.func_zones_tinao": _TINAO_FZ.map(([code, name]) => curatedLayer(code, name, "zone")),
     "gisogd.szz": [["virtual1743", "СЗЗ установленная"], ["virtual1746", "СЗЗ ориентировочная"],
-      ["virtual1745", "СЗЗ расчётная"]].map(([code, name]) =>
-      ({ code, name, kind: "restrict", layer_id: "source.gisogd.restrict" })),
-    "gisogd.vodookhr": [{ code: "virtual1747", name: "Водоохранная зона",
-      kind: "restrict", layer_id: "source.gisogd.restrict" }],
+      ["virtual1745", "СЗЗ расчётная"]].map(([code, name]) => curatedLayer(code, name, "restrict")),
+    "gisogd.vodookhr": [curatedLayer("virtual1747", "Водоохранная зона", "restrict")],
   };
 
   // layer = {code, name, kind?, layer_id?}; payload — сырой GeoJSON слоя целиком
@@ -957,7 +1006,7 @@
               layer_id: layerId, ...part,
               props: { ...props, line_code: code, line_side: side },
               style_id: csid,
-              srcKey: `${layerId}:${code}:${key}#${pi}`,
+              srcKey: `${layerId}:${layer.code}:${code}:${key}#${pi}`,
             });
           }
           addFields(group, props);
@@ -965,7 +1014,7 @@
         }
         // формат как у сервера (layer_id:key#i): layerId уже содержит код слоя
         const out = { kind, layer_id: layerId, ...part, props: { ...props },
-                      srcKey: `${layerId}:${key}#${pi}` };
+                      srcKey: `${layerId}:${layer.code}:${key}#${pi}` };
         const objStyle = styleId || (kind === "zone" ? gpZoneStyle(props) : null);
         if (objStyle) out.style_id = objStyle;
         group.features.push(out);
@@ -986,9 +1035,13 @@
       if (!f.layer_id || seenL.has(f.layer_id)) continue;
       seenL.add(f.layer_id);
       if (!f.layer_id.startsWith("source.gisogd.")) continue;
+      const geometryType = featureGeometryType(f);
       layers.push({ id: f.layer_id, title: group.title,
-                    code: "generic.line", kind: f.kind, style_id: null,
-                    stage: "existing", source_kind: "gisogd" });
+                    code: genericCodeForGeometry(geometryType), kind: f.kind,
+                    geometry_type: geometryType, style_id: null,
+                    stage: "existing", source_kind: "gisogd",
+                    source_code: layer.source_code || layer.code,
+                    source_name: layer.source_name || name });
     }
     return { groups: [group], notes: skipped ? [`пропущено повреждённых: ${skipped}`] : [],
              snapshots: [manifest], layers };
@@ -997,7 +1050,7 @@
   return { setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
     computeTep, preflightProject, webProject, importNspd, importGeoJson,
     gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent,
-    GISOGD_WEB_LAYERS,
+    GISOGD_WEB_LAYERS, sourceLayerId,
     originWgs84: [...ORIGIN_WGS84],
     buildOsmExtentRequest, importOsmExtent, buildNspdExtentRequest, importNspdExtent };
 });
