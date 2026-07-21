@@ -118,6 +118,7 @@
     if (overlay.dataset.a11yReady) return;
     const dialog = overlay.querySelector('.modal');
     if (!dialog) return;
+    hideTooltip();
     overlay.dataset.a11yReady = 'true';
     const active = document.activeElement;
     const source = overlay.contains(active) ? lastTrigger : active;
@@ -233,7 +234,12 @@
   document.addEventListener('focusout', event => {
     if (tooltipTarget && !tooltipTarget.contains(event.relatedTarget)) hideTooltip();
   });
-  document.addEventListener('pointerdown', hideTooltip, true);
+  document.addEventListener('pointerdown', () => {
+    // Клик переносит фокус на кнопку. Без короткой паузы focusin заново
+    // показывает подсказку уже поверх открытого меню или диалога.
+    suppressFocusTooltipUntil = performance.now() + 360;
+    hideTooltip();
+  }, true);
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     // Закрытие popover/modal возвращает фокус на кнопку-триггер. Не показываем

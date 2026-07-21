@@ -229,7 +229,7 @@ body[data-workspace-mode="measure"] #toolbar [data-workspace-tool]:not([data-wor
 
 @media (max-width:520px){
   .logo span{display:none}
-  .workspace-modes button{padding-inline:7px}
+  .workspace-modes button{padding-inline:8px}
   .workspace-modes button+button{border-left:0}
-  .layers-visibility,.panel-visibility{width:30px}
+  .layers-visibility,.panel-visibility{width:32px}
 }

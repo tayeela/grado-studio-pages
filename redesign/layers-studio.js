@@ -97,7 +97,7 @@
     panel.setAttribute('aria-label', 'Каталог знаков');
     panel.innerHTML = `<div class="style-library-head"><span><b>Стандарт и библиотека</b><small class="style-library-status">Выберите знак для слоя</small></span>
         <button type="button" class="style-library-expand" title="Открыть редактор эталонных знаков" aria-label="Открыть библиотеку знаков"><svg class="ic"><use href="#ic-format"/></svg></button></div>
-      <label class="style-library-search"><svg class="ic"><use href="#i-search"/></svg><input type="search" placeholder="Поиск по названию или ID" autocomplete="off"></label>
+      <label class="style-library-search"><svg class="ic"><use href="#i-search"/></svg><input type="search" placeholder="Поиск по названию или ID" aria-label="Поиск знака по названию или ID" autocomplete="off"></label>
       <div class="style-library-tabs" role="tablist" aria-label="Стандарты знаков"></div>
       <div class="style-library-list" role="listbox" aria-label="Знаки"></div>
       <button type="button" class="style-create-custom"><svg class="ic"><use href="#ic-plus"/></svg>Создать пользовательский знак</button>`;
