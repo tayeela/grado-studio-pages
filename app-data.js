@@ -107,6 +107,383 @@ async function openDataFetch() {
   if (!basemap.originLon) { try { await initBasemap(); } catch (e) {} }
   if (!basemap.originLon) { toast("Нет системы координат — включите подложку", "warn"); return; }
   closePopups();
+
+  const bbox = viewExtentBbox();
+  const km2 = bboxKm2(bbox);
+  const areaTxt = km2 < 1 ? km2.toFixed(2) : km2.toFixed(1);
+  const latMid = (bbox[1] + bbox[3]) / 2 * Math.PI / 180;
+  const widthKm = Math.abs(bbox[2] - bbox[0]) * 111.32 * Math.cos(latMid);
+  const heightKm = Math.abs(bbox[3] - bbox[1]) * 111.32;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("grado_data_sources") || "{}"); } catch (e) {}
+
+  const unavailable = group => !!window.GRADO_STATIC && group.web === false;
+  const overLimit = group => km2 > group.maxKm2;
+  const groupDisabled = group => unavailable(group) || overLimit(group);
+  const selected = new Set();
+  DATA_SOURCE_GROUPS.forEach(group => {
+    if (groupDisabled(group)) return;
+    (group.items || []).forEach(item => {
+      if ((saved[item.key] ?? item.def) === true) selected.add(item.key);
+    });
+  });
+  Object.entries(saved).forEach(([key, value]) => {
+    if (value && key.startsWith("gisogd:") && !groupDisabled(DATA_SOURCE_GROUPS[3])) selected.add(key);
+  });
+
+  let step = 2;
+  let activeGroup = Number(localStorage.getItem("grado_data_active_source"));
+  if (![0, 1, 2, 3].includes(activeGroup)) activeGroup = 3;
+  let query = "", activeTopic = "";
+  let ogdCatalog = [], ogdError = null, ogdLoading = true, importing = false;
+  const groupUi = [
+    { icon: "i-map", domain: "openstreetmap.org" },
+    { icon: "i-poly", domain: "nspd.gov.ru" },
+    { icon: "i-ruler", domain: "SRTM" },
+    { icon: "i-db", domain: "gisogd.mos.ru" },
+  ];
+  const sourceOrder = [3, 1, 0, 2];
+  const blockedGroups = DATA_SOURCE_GROUPS.filter(group => groupDisabled(group));
+  const strictestBlocked = blockedGroups.filter(group => !unavailable(group))
+    .sort((a, b) => a.maxKm2 - b.maxKm2)[0];
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal data-modal data-wizard" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
+    <div class="modal-head"><span id="data-modal-title">Данные по области</span>
+      <button class="modal-x" aria-label="Закрыть данные по области"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body data-wizard-body">
+      <nav class="data-steps" aria-label="Этапы добавления данных"></nav>
+      <div class="data-area-summary"></div>
+      <div class="data-step-view"></div>
+    </div>
+    <div class="modal-actions data-wizard-actions"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", event => event.stopPropagation());
+  const close = () => overlay.remove();
+  overlay.querySelector(".modal-x").addEventListener("click", close);
+  overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+
+  const simpleItemByKey = new Map();
+  DATA_SOURCE_GROUPS.forEach((group, gi) => (group.items || []).forEach(item =>
+    simpleItemByKey.set(item.key, { ...item, gi })));
+  const ogdByKey = () => new Map(ogdCatalog.map(item => [`gisogd:${item.code}`, item]));
+  const groupIndexForKey = key => key.startsWith("gisogd") ? 3 : simpleItemByKey.get(key)?.gi;
+  const countForGroup = gi => [...selected].filter(key => groupIndexForKey(key) === gi).length;
+  const labelForKey = key => simpleItemByKey.get(key)?.label || ogdByKey().get(key)?.name || key.replace(/^gisogd:/, "Слой ");
+  const selectedRows = () => [...selected].map(key => ({ key, label: labelForKey(key), gi: groupIndexForKey(key) }))
+    .filter(row => Number.isInteger(row.gi));
+  const selectedSourceCount = () => new Set(selectedRows().map(row => row.gi)).size;
+  const layerNoun = n => {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return "слой";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "слоя";
+    return "слоёв";
+  };
+  const saveSelection = () => {
+    const payload = {};
+    DATA_SOURCE_GROUPS.forEach(group => (group.items || []).forEach(item => {
+      payload[item.key] = selected.has(item.key);
+    }));
+    [...selected].filter(key => key.startsWith("gisogd:")).forEach(key => { payload[key] = true; });
+    try { localStorage.setItem("grado_data_sources", JSON.stringify(payload)); } catch (e) {}
+  };
+  const icon = id => `<svg class="ic" aria-hidden="true"><use href="#${id}"/></svg>`;
+  const areaWarning = () => strictestBlocked
+    ? `<div class="data-area-alert warning">${icon("i-ruler")}<span>${escHtml(strictestBlocked.title)}: до ${strictestBlocked.maxKm2} км²</span>
+        <button class="data-inline-action" data-action="zoom" data-target="${strictestBlocked.maxKm2}">Приблизить автоматически</button></div>`
+    : `<div class="data-area-alert success">${icon("ic-check")}<span>Ограничения источников проверены</span></div>`;
+
+  function renderSteps() {
+    const labels = ["Область", "Источники", "Проверка"];
+    overlay.querySelector(".data-steps").innerHTML = labels.map((label, index) => {
+      const number = index + 1;
+      const reachable = number < 3 || selected.size > 0;
+      return `<button class="data-step${step === number ? " active" : ""}${step > number ? " complete" : ""}"
+        data-step="${number}"${reachable ? "" : " disabled"} aria-label="Шаг ${number}: ${label}" aria-current="${step === number ? "step" : "false"}">
+        <span>${step > number ? icon("ic-check") : number}</span><b>${label}</b></button>`;
+    }).join(`<span class="data-step-line" aria-hidden="true"></span>`);
+  }
+
+  function renderAreaSummary() {
+    overlay.querySelector(".data-area-summary").innerHTML = `<div class="data-area-metric data-area-primary">
+        <span>${icon("i-poly")}</span><div><small>Видимая область</small><strong>${areaTxt} км²</strong></div></div>
+      <div class="data-area-metric"><small>Размеры</small><b>${widthKm.toFixed(1)} × ${heightKm.toFixed(1)} км</b></div>
+      <div class="data-area-metric"><small>Координаты</small><b>WGS 84</b></div>${areaWarning()}`;
+  }
+
+  function topicsForCatalog() {
+    const counts = new Map();
+    ogdCatalog.forEach(layer => {
+      const topic = (layer.path || "Слои").split(" / ").filter(Boolean)[0] || "Слои";
+      counts.set(topic, (counts.get(topic) || 0) + 1);
+    });
+    return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 7);
+  }
+
+  function sourceNavHtml() {
+    return `<aside class="data-source-nav" aria-label="Источники данных">
+      <h3>Источники данных</h3>
+      <div class="data-source-list">${sourceOrder.map(gi => {
+        const group = DATA_SOURCE_GROUPS[gi], disabled = groupDisabled(group), count = countForGroup(gi);
+        const total = group.picker ? ogdCatalog.length + group.items.length : group.items.length;
+        const reason = unavailable(group) ? (group.webNote || "Недоступно в веб-версии")
+          : overLimit(group) ? `Нужно до ${group.maxKm2} км²` : "";
+        return `<button class="data-source-tab${activeGroup === gi ? " active" : ""}${disabled ? " disabled" : ""}"
+          data-group="${gi}" aria-pressed="${activeGroup === gi}"${disabled ? " aria-disabled=\"true\"" : ""}>
+          <span class="data-source-icon">${icon(groupUi[gi].icon)}</span><span class="data-source-copy"><b>${escHtml(group.title)}</b>
+          <small>${reason || escHtml(groupUi[gi].domain)}</small></span>
+          ${count ? `<span class="data-source-count selected">${count}</span>` : `<span class="data-source-count">${total || "—"}</span>`}
+          ${icon("ic-chevron")}</button>`;
+      }).join("")}</div>
+      <button class="data-file-action" data-action="file">${icon("i-download")}<span><b>Импортировать файл</b><small>GeoJSON / ZIP</small></span></button>
+    </aside>`;
+  }
+
+  function plainRowsHtml(group, gi) {
+    const low = query.trim().toLowerCase();
+    const items = group.items.filter(item => !low || item.label.toLowerCase().includes(low));
+    if (!items.length) return `<div class="data-empty">Ничего не найдено</div>`;
+    return `<div class="data-layer-list">${items.map(item => `<label class="data-layer-row${selected.has(item.key) ? " selected" : ""}">
+      <input type="checkbox" data-src="${item.key}"${selected.has(item.key) ? " checked" : ""}>
+      <span class="data-layer-copy"><b>${escHtml(item.label)}</b><small>${escHtml(group.hint)}</small></span>
+      <span class="data-layer-meta">до ${group.maxKm2} км²</span></label>`).join("")}</div>`;
+  }
+
+  function ogdRowsHtml(group, gi) {
+    if (ogdLoading) return `<div class="data-loading-state"><span class="data-spinner"></span><b>Загружаем каталог ГИС ОГД</b><small>Окно уже готово — можно выбрать другой источник</small></div>`;
+    if (ogdError) return `<div class="data-empty error"><b>Каталог временно недоступен</b><span>${escHtml(ogdError)}</span>
+      <button data-action="retry-catalog">Повторить</button></div>`;
+    const low = query.trim().toLowerCase();
+    const quick = group.items.filter(item => !low || item.label.toLowerCase().includes(low));
+    const catalog = ogdCatalog.filter(layer => {
+      const textHit = !low || (layer.name || "").toLowerCase().includes(low) || (layer.path || "").toLowerCase().includes(low);
+      const topicHit = !activeTopic || (layer.path || "").split(" / ")[0] === activeTopic;
+      return textHit && topicHit;
+    });
+    const selectedMap = Object.fromEntries([...selected].map(key => [key, true]));
+    const topics = topicsForCatalog();
+    const quickRows = quick.length ? `<div class="data-quick-title">Часто используемые</div><div class="data-layer-list data-quick-list">${quick.map(item =>
+      `<label class="data-layer-row${selected.has(item.key) ? " selected" : ""}"><input type="checkbox" data-src="${item.key}"${selected.has(item.key) ? " checked" : ""}>
+        <span class="data-layer-copy"><b>${escHtml(item.label)}</b><small>готовый набор слоёв</small></span><span class="data-layer-meta">mos.ru</span></label>`).join("")}</div>` : "";
+    return `<div class="data-topic-chips"><button class="${activeTopic ? "" : "active"}" data-topic="">Все темы <span>${ogdCatalog.length}</span></button>
+      ${topics.map(([topic, count]) => `<button class="${activeTopic === topic ? "active" : ""}" data-topic="${escHtml(topic)}">${escHtml(topic)} <span>${count}</span></button>`).join("")}</div>
+      ${quickRows}<div class="data-catalog-head"><span>Каталог портала</span><b>${catalog.length}</b></div>
+      <div class="ogdc-list ogd-tree">${catalog.length
+        ? ogdTreeHtml(ogdBuildTree(catalog), gi, selectedMap, false, !!low || !!activeTopic)
+        : `<div class="data-empty">Ничего не найдено</div>`}</div>`;
+  }
+
+  function activeSourceHtml() {
+    const group = DATA_SOURCE_GROUPS[activeGroup], disabled = groupDisabled(group);
+    const count = countForGroup(activeGroup);
+    const allLabel = group.picker ? "Выбрать найденные" : (count === group.items.length ? "Снять выбор" : "Выбрать всё");
+    return `<section class="data-source-panel" aria-labelledby="data-source-title">
+      <div class="data-source-head"><div><h3 id="data-source-title">${escHtml(group.title)}</h3><p>${escHtml(group.hint)} · до ${group.maxKm2} км²</p></div>
+      <label class="data-search">${icon("i-search")}<span class="sr-only">Поиск слоёв</span>
+        <input type="search" value="${escHtml(query)}" placeholder="Поиск слоёв по названию" autocomplete="off"${disabled ? " disabled" : ""}></label></div>
+        ${disabled ? `<div class="data-blocked-source">${icon("i-ruler")}<div><b>${unavailable(group) ? "Источник недоступен" : `Область больше ${group.maxKm2} км²`}</b>
+        <span>${escHtml(unavailable(group) ? (group.webNote || "Недоступно в этой версии") : "Уменьшите область — выбранные слои других источников сохранятся.")}</span></div>
+        ${overLimit(group) ? `<button data-action="zoom" data-target="${group.maxKm2}">Приблизить автоматически</button>` : ""}</div>` : `
+        <div class="data-source-tools"><span>${count ? `Выбрано: ${count}` : "Выберите нужные слои"}</span>
+          <button data-action="select-visible">${allLabel}</button></div>
+        <div class="data-source-content">${group.picker ? ogdRowsHtml(group, activeGroup) : plainRowsHtml(group, activeGroup)}</div>`}
+    </section>`;
+  }
+
+  function selectionTrayHtml() {
+    const rows = selectedRows();
+    const preview = rows.slice(0, 3).map(row => row.label).join(", ");
+    return `<button class="data-selection-tray${rows.length ? " has-selection" : ""}" data-action="show-review"${rows.length ? "" : " disabled"}>
+      <span class="data-selection-icon">${icon("i-layers")}</span><span class="data-selection-copy"><b>${rows.length
+        ? `Выбрано ${rows.length} ${layerNoun(rows.length)} из ${selectedSourceCount()} источников` : "Слои пока не выбраны"}</b>
+      <small>${rows.length ? `${escHtml(preview)}${rows.length > 3 ? ", …" : ""}` : "Отметьте слои в каталоге выше"}</small></span>
+      ${rows.length ? `<span class="data-selection-more">Показать все</span>` : ""}</button>`;
+  }
+
+  function areaStepHtml() {
+    return `<section class="data-area-step"><div class="data-area-hero">${icon("i-poly")}<div><h2>Проверьте область загрузки</h2>
+      <p>Источники вернут только объекты, пересекающие текущий вид карты.</p></div></div>
+      <div class="data-readiness-list">${sourceOrder.map(gi => {
+        const group = DATA_SOURCE_GROUPS[gi], disabled = groupDisabled(group);
+        return `<div class="data-readiness-row"><span>${icon(groupUi[gi].icon)}</span><div><b>${escHtml(group.title)}</b><small>${escHtml(group.hint)}</small></div>
+          <strong class="${disabled ? "warning" : "success"}">${unavailable(group) ? "недоступен" : overLimit(group) ? `до ${group.maxKm2} км²` : "доступен"}</strong>
+          ${overLimit(group) ? `<button data-action="zoom" data-target="${group.maxKm2}">Приблизить</button>` : ""}</div>`;
+      }).join("")}</div></section>`;
+  }
+
+  function reviewStepHtml() {
+    const rows = selectedRows();
+    const groups = sourceOrder.map(gi => ({ gi, rows: rows.filter(row => row.gi === gi) })).filter(group => group.rows.length);
+    return `<section class="data-review-step"><div class="data-review-head"><div><h2>Проверьте состав загрузки</h2>
+      <p>Каждый источник создаст отдельные слои. Повторная загрузка не создаёт дубликатов.</p></div>
+      <button data-action="clear-selection"${rows.length ? "" : " disabled"}>Снять всё</button></div>
+      <div class="data-review-grid"><div class="data-review-list">${groups.length ? groups.map(({ gi, rows: groupRows }) =>
+        `<section><header>${icon(groupUi[gi].icon)}<b>${escHtml(DATA_SOURCE_GROUPS[gi].title)}</b><span>${groupRows.length}</span></header>
+          ${groupRows.map(row => `<div class="data-review-row"><span>${escHtml(row.label)}</span><button data-remove="${escHtml(row.key)}" aria-label="Убрать ${escHtml(row.label)}">${icon("ic-close")}</button></div>`).join("")}</section>`).join("")
+        : `<div class="data-empty"><b>Нет выбранных слоёв</b><span>Вернитесь к источникам и отметьте нужные данные.</span></div>`}</div>
+        <aside class="data-review-summary"><h3>Итого</h3><dl><div><dt>Слоёв</dt><dd>${rows.length}</dd></div><div><dt>Источников</dt><dd>${selectedSourceCount()}</dd></div>
+          <div><dt>Область</dt><dd>${areaTxt} км²</dd></div><div><dt>Система координат</dt><dd>WGS 84</dd></div></dl>
+          <div class="data-review-ok">${icon("ic-check")}<span>Все выбранные источники доступны для этой области</span></div></aside></div></section>`;
+  }
+
+  function renderActions() {
+    const actions = overlay.querySelector(".data-wizard-actions");
+    const count = selected.size;
+    if (step === 1) actions.innerHTML = `<span class="data-status muted"></span><span class="spacer"></span>
+      <button data-action="cancel">Отмена</button><button class="primary" data-action="next-sources">Продолжить к источникам</button>`;
+    else if (step === 2) actions.innerHTML = `<button data-action="back-area">Назад</button><span class="data-status muted"></span><span class="spacer"></span>
+      <button class="primary" data-action="next-review"${count ? "" : " disabled"}>Продолжить к проверке</button>`;
+    else actions.innerHTML = `<button data-action="back-sources">Назад</button><span class="data-status muted"></span><span class="spacer"></span>
+      <button class="primary data-load" data-action="load"${count ? "" : " disabled"}>Загрузить ${count} ${layerNoun(count)}</button>`;
+  }
+
+  function render(options = {}) {
+    if (!overlay.isConnected) return;
+    renderSteps();
+    renderAreaSummary();
+    const view = overlay.querySelector(".data-step-view");
+    if (step === 1) view.innerHTML = areaStepHtml();
+    else if (step === 2) view.innerHTML = `<div class="data-workspace">${sourceNavHtml()}${activeSourceHtml()}</div>${selectionTrayHtml()}`;
+    else view.innerHTML = reviewStepHtml();
+    renderActions();
+    if (options.focusSearch && step === 2) {
+      const input = overlay.querySelector(".data-search input");
+      input?.focus(); input?.setSelectionRange(query.length, query.length);
+    }
+  }
+
+  const visibleKeys = () => {
+    const group = DATA_SOURCE_GROUPS[activeGroup], low = query.trim().toLowerCase();
+    if (!group.picker) return group.items.filter(item => !low || item.label.toLowerCase().includes(low)).map(item => item.key);
+    const quick = group.items.filter(item => !low || item.label.toLowerCase().includes(low)).map(item => item.key);
+    const catalog = ogdCatalog.filter(layer => (!low || (layer.name || "").toLowerCase().includes(low) || (layer.path || "").toLowerCase().includes(low))
+      && (!activeTopic || (layer.path || "").split(" / ")[0] === activeTopic)).map(layer => `gisogd:${layer.code}`);
+    return [...quick, ...catalog];
+  };
+
+  async function loadCatalog() {
+    ogdLoading = true; ogdError = null; render();
+    try {
+      const response = await fetch("/api/gisogd-catalog");
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      ogdCatalog = data.layers || [];
+    } catch (error) { ogdError = error.message || String(error); }
+    finally { ogdLoading = false; render(); }
+  }
+
+  async function performLoad() {
+    if (importing || !selected.size) return;
+    importing = true; saveSelection();
+    const loadBtn = overlay.querySelector(".data-load");
+    const status = overlay.querySelector(".data-status");
+    if (loadBtn) { loadBtn.disabled = true; loadBtn.classList.add("loading"); }
+    overlay.querySelectorAll("button,input").forEach(control => control.disabled = true);
+    if (status) status.textContent = "Загрузка…";
+    const busyDone = beginBusy("Загрузка данных по области…");
+    try {
+      const response = await fetch("/api/fetch-extent", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bbox, sources: [...selected] }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || (`HTTP ${response.status}`));
+      const groups = (data.groups || []).filter(group => group.count > 0);
+      const total = groups.reduce((sum, group) => sum + group.count, 0);
+      if (!total) {
+        importing = false; render(); step = 2; render();
+        const nextStatus = overlay.querySelector(".data-status");
+        if (nextStatus) nextStatus.textContent = "В выбранной области данных не найдено";
+        if (data.notes?.length) toast(data.notes.join(" · "), "warn");
+        return;
+      }
+      const fieldsByLayer = {};
+      for (const group of groups) {
+        if (!group.layer_id || !Array.isArray(group.fields)) continue;
+        fieldsByLayer[group.layer_id] = [...(fieldsByLayer[group.layer_id] || []), ...group.fields];
+      }
+      const plan = prepareSourceImport({ features: groups.flatMap(group => group.features || []),
+        layers: data.layers || [], fieldsByLayer,
+        snapshots: (data.snapshots || []).map(snapshot => ({ snapshot })) });
+      if (!plan.added && plan.dup) {
+        close(); toast(`Данные: всё уже загружено (${plan.dup} объектов — без дубликатов)`); return;
+      }
+      if (!plan.added) throw new Error("Нет корректных объектов для импорта");
+      const { added, dup, invalid } = commitPreparedSourceImport(plan);
+      close();
+      const duplicateNote = dup ? ` · ${dup} уже были` : "";
+      const invalidNote = invalid ? ` · ${invalid} поврежд. пропущено` : "";
+      const notes = (data.notes || []).filter(Boolean);
+      toast(`Данные: +${plObjects(added)}${duplicateNote}${invalidNote}${notes.length ? ` · ${notes.join(" · ")}` : ""}`,
+        invalid || notes.length ? "warn" : undefined);
+    } catch (error) {
+      importing = false; render(); step = 3; render();
+      const nextStatus = overlay.querySelector(".data-status");
+      if (nextStatus) nextStatus.textContent = "Не удалось загрузить: " + String(error.message || error).slice(0, 150);
+      toast("Не удалось загрузить: " + String(error.message || error).slice(0, 180), "error");
+    } finally { busyDone(); }
+  }
+
+  overlay.addEventListener("change", event => {
+    const checkbox = event.target.closest("input[data-src]");
+    if (!checkbox) return;
+    if (checkbox.checked) selected.add(checkbox.dataset.src); else selected.delete(checkbox.dataset.src);
+    saveSelection(); render();
+  });
+  overlay.addEventListener("input", event => {
+    if (!event.target.matches(".data-search input")) return;
+    query = event.target.value; render({ focusSearch: true });
+  });
+  overlay.addEventListener("keydown", event => {
+    if (event.key === "/" && step === 2 && !event.target.matches("input")) {
+      event.preventDefault(); overlay.querySelector(".data-search input")?.focus();
+    }
+  });
+  overlay.addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button || button.disabled) return;
+    if (button.dataset.step) { step = Number(button.dataset.step); render(); return; }
+    if (button.dataset.group) {
+      const gi = Number(button.dataset.group);
+      if (groupDisabled(DATA_SOURCE_GROUPS[gi])) return;
+      activeGroup = gi; query = ""; activeTopic = "";
+      try { localStorage.setItem("grado_data_active_source", String(gi)); } catch (e) {}
+      render(); return;
+    }
+    if (button.dataset.topic !== undefined) { activeTopic = button.dataset.topic; render(); return; }
+    if (button.dataset.remove) { selected.delete(button.dataset.remove); saveSelection(); render(); return; }
+    const action = button.dataset.action;
+    if (!action) return;
+    if (action === "cancel") close();
+    else if (action === "back-area") { step = 1; render(); }
+    else if (action === "next-sources") { step = 2; render(); }
+    else if (action === "back-sources") { step = 2; render(); }
+    else if (action === "next-review" || action === "show-review") { step = 3; render(); }
+    else if (action === "clear-selection") { selected.clear(); saveSelection(); render(); }
+    else if (action === "select-visible") {
+      const keys = visibleKeys();
+      const allSelected = keys.length && keys.every(key => selected.has(key));
+      keys.forEach(key => allSelected ? selected.delete(key) : selected.add(key));
+      saveSelection(); render();
+    } else if (action === "zoom") {
+      const target = Number(button.dataset.target); saveSelection();
+      if (km2 > target) zoomBy(Math.sqrt(km2 / (target * 0.9)));
+      close(); openDataFetch();
+    } else if (action === "file") {
+      saveSelection(); close(); document.getElementById("btn-gisogd")?.click();
+    } else if (action === "retry-catalog") loadCatalog();
+    else if (action === "load") performLoad();
+  });
+
+  render();
+  loadCatalog();
+}
+
+async function openDataFetchLegacy() {
+  if (!basemap.originLon) { try { await initBasemap(); } catch (e) {} }
+  if (!basemap.originLon) { toast("Нет системы координат — включите подложку", "warn"); return; }
+  closePopups();
   const bbox = viewExtentBbox();
   const km2 = bboxKm2(bbox);
   let saved = {};
