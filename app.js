@@ -3481,7 +3481,7 @@ function commitHistoryFrom(serialized) {
 function restoreHistoryEntry(serialized) {
   const restored = JSON.parse(serialized);
   if (Array.isArray(restored)) {
-    state.features = normalizeFeatureList(restored).map(upgradeFeature);
+    state.features = normalizeFeatureList(restored).map(feature => upgradeFeature(feature));
     syncNextId();
     return;
   }
@@ -5240,7 +5240,7 @@ function openVariants() {
     if (!(await uiConfirm(`Загрузить вариант «${v.name}»? Текущее состояние заменится. Сохраните его как вариант заранее, если нужно.`,
                           { ok: "Загрузить" }))) return;
     snapshot();
-    state.features = JSON.parse(JSON.stringify(v.features)).map(upgradeFeature);
+    state.features = JSON.parse(JSON.stringify(v.features)).map(feature => upgradeFeature(feature));
     setParamInputs(v.params);
     clearSelection(); afterChange(); fitView();
     overlay.remove();
@@ -7579,7 +7579,7 @@ function applyRestoredState(d) {
       if (created && Array.isArray(spec.fields)) created.fields = spec.fields.filter(isRecord);
     }
   }
-  state.features = (d.features || []).map(upgradeFeature);  // legacy kind → слой v2
+  state.features = (d.features || []).map(feature => upgradeFeature(feature));  // legacy kind → слой v2
   // ограничиваем восстанавливаемую историю (старые автосейвы больших выгрузок
   // держали до 100 снимков всего проекта ≈ гигабайты в памяти)
   if (Array.isArray(d.undo)) state.undo = d.undo.slice(-undoDepth());
