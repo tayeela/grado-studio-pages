@@ -7810,6 +7810,7 @@ function initPanelResizer() {
   const panel = document.getElementById('panel');
   if (!resizer || !panel) return;
   const toolbar = document.getElementById('toolbar');
+  const layersPanel = document.getElementById('layers-panel');
   const MIN_PANEL_WIDTH = 300;
   const MAX_PANEL_WIDTH = 640;
   const MIN_STAGE_WIDTH = 480;
@@ -7824,7 +7825,9 @@ function initPanelResizer() {
 
   const effectiveMaxWidth = () => {
     const railWidth = toolbar?.offsetWidth || 76;
-    const available = window.innerWidth - railWidth - resizer.offsetWidth - MIN_STAGE_WIDTH;
+    const layersWidth = layersPanel && getComputedStyle(layersPanel).visibility !== 'hidden'
+      ? layersPanel.offsetWidth : 0;
+    const available = window.innerWidth - railWidth - layersWidth - resizer.offsetWidth - MIN_STAGE_WIDTH;
     const viewportShare = Math.floor(window.innerWidth * 0.48);
     return Math.max(MIN_PANEL_WIDTH,
       Math.min(MAX_PANEL_WIDTH, viewportShare, Math.max(MIN_PANEL_WIDTH, available)));
