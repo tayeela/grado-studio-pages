@@ -4590,9 +4590,12 @@ function renderLayers() {
     section.className = "layer-stack-group";
     section.dataset.group = key;
     const open = groupState[key] !== false;
+    const groupLayers = LAYERS_V2.filter(layer => layerGroupKey(layer) === key);
+    const allVisible = groupLayers.length > 0 && groupLayers.every(layer => layer.visible);
     section.classList.toggle("collapsed", !open);
-    section.innerHTML = `<button type="button" class="layer-group-head" aria-expanded="${open}">
+    section.innerHTML = `<div class="layer-group-head-row"><button type="button" class="layer-group-head" aria-expanded="${open}">
       <svg class="ic"><use href="#ic-chevron"/></svg><span>${escHtml(meta.title)}</span><span class="layer-group-count"></span></button>
+      <button type="button" class="layer-group-visibility${allVisible ? "" : " is-off"}" aria-label="${allVisible ? "Скрыть" : "Показать"} все слои группы «${escHtml(meta.title)}»" title="${allVisible ? "Скрыть" : "Показать"} все слои группы"><svg class="ic"><use href="#ic-eye"/></svg></button></div>
       <div class="layer-group-body"></div>`;
     const head = section.querySelector(".layer-group-head");
     head.addEventListener("click", () => {
@@ -4600,6 +4603,23 @@ function renderLayers() {
       head.setAttribute("aria-expanded", String(!collapsed));
       groupState[key] = !collapsed;
       try { localStorage.setItem("grado_layer_groups", JSON.stringify(groupState)); } catch (_) {}
+    });
+    section.querySelector(".layer-group-visibility").addEventListener("click", () => {
+      snapshot();
+      const nextVisible = !allVisible;
+      groupLayers.forEach(layer => { layer.visible = nextVisible; });
+      if (!nextVisible) {
+        const selected = selectedFeature();
+        if (selected && groupLayers.includes(layerOf(selected))) {
+          state.selected = null;
+          renderProps();
+        }
+      }
+      state._ix = null; state._snapIndex = null;
+      persist();
+      draw();
+      renderLayers();
+      toast(`${nextVisible ? "Показаны" : "Скрыты"} все слои группы «${meta.title}»`);
     });
     el.appendChild(section);
     const body = section.querySelector(".layer-group-body");
@@ -4629,13 +4649,16 @@ function renderLayers() {
                     (layer.locked ? " locked" : "");
     row.draggable = true;
     row.dataset.lid = layer.id;
+    row.dataset.visible = String(layer.visible);
+    row.dataset.modified = String(!!((layer.rules && layer.rules.length) || (layer.fmt && Object.keys(layer.fmt).length)));
+    row.dataset.geometry = layer.geometry_type || "polygon";
     // Индикаторы кастомизации — чтобы сразу видеть, где нестандартное оформление
     let badges = "";
     if (layer.rules && layer.rules.length) {
       badges += `<span class="lrow-badge" title="условное форматирование: ${layer.rules.length} правил">правила</span>`;
     }
     if (layer.fmt && Object.keys(layer.fmt).length > 0) {
-      badges += `<span class="lrow-badge" title="есть переопределения оформления слоя">fmt</span>`;
+      badges += `<span class="lrow-badge" title="есть переопределения оформления слоя">стиль</span>`;
     }
     const layerTitle = escHtml(layer.title);
     const geometry = layerGeometryMeta(layer);
@@ -4673,7 +4696,7 @@ function renderLayers() {
       state._ix = null; state._snapIndex = null;
       persist();
       draw();
-      renderLayerLegend(sampleByLayer);
+      renderLayers();
     });
     // Отдельная кнопка делает выбор слоя доступным и мышью, и клавиатурой.
     // Чекбокс по-прежнему отвечает только за видимость.
