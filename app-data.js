@@ -860,7 +860,7 @@ async function openFgistpDialog() {
     <div class="modal-body compact">
       <div id="fg-step-doc">
         <input id="fg-search" class="ogdc-search" type="search"
-          placeholder="Название документа: Химки, генеральный план…" autocomplete="off">
+          placeholder="Название документа: Химки, генеральный план…" aria-label="Поиск документа территориального планирования" autocomplete="off">
         <div class="ogdc-hint">Вся Россия. Генпланы, СТП и их изменения — данные официального портала Минэкономразвития.</div>
         <div id="fg-docs" class="ogdc-list" aria-label="Найденные документы"></div>
       </div>
