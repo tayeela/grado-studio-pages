@@ -479,6 +479,23 @@ function layerCatStats(L) {
   }
   return [...m.values()].sort((a, b) => a.title.localeCompare(b.title, "ru"));
 }
+// Кэш готовых строк панели. Обработчики строки (их около тринадцати) замыкают
+// САМ объект слоя, а не значения момента отрисовки, поэтому узел можно
+// переиспользовать, пока его видимое содержимое не изменилось: appendChild
+// просто переносит его в новое место вместе со слушателями. Без этого панель
+// перестраивалась целиком на каждую правку — при 400 слоях-приёмниках это
+// сотни миллисекунд на каждый добавленный объект.
+const _layerRowCache = new Map();   // layer.id -> { sig, nodes: [строка, ...категории] }
+function layerRowSignature(layer, view) {
+  const catsOff = (layer.fmt && layer.fmt.cats_off) || [];
+  return [
+    layer.title, layer.visible, layer.locked, layer.geometry_type, layer.source_kind,
+    layer.import_only, (layer.rules || []).length,
+    layer.fmt ? Object.keys(layer.fmt).length : 0,
+    view.count, view.isActive, view.catOpen, view.swSvg,
+    view.cats.map(c => `${c.id}:${c.count}:${catsOff.includes(c.id) ? 0 : 1}`).join("|"),
+  ].join("");
+}
 // раскрытые слои (показ подпунктов-категорий) — по id, переживает reload
 const _catOpen = (() => {
   try { return new Set(JSON.parse(localStorage.getItem("grado_cat_open") || "[]")); }
@@ -4791,12 +4808,25 @@ function renderProps() {
 }
 // Порядок панели — как в QGIS: верхняя строка рисуется ПОВЕРХ. В draw()
 // массив идёт снизу вверх (индекс 0 = низ), поэтому список = обратный массив.
-function layerRowsTopFirst() {
+// Множество слоёв, в которых ЕСТЬ объекты — одним проходом по features.
+// Раньше эту проверку делал featuresOnLayer(L.id) внутри фильтра, то есть
+// полный проход по всем объектам НА КАЖДЫЙ слой: O(слои × объекты). При 400
+// слоях-приёмниках и 20 000 объектов это ~8 млн итераций с аллокацией массива
+// на каждый слой — и так дважды за перерисовку (панель + легенда).
+function layersWithFeatures() {
+  const ids = new Set();
+  for (const feature of state.features) {
+    const layer = layerOf(feature);
+    if (layer) ids.add(layer.id);
+  }
+  return ids;
+}
+function layerRowsTopFirst(withFeatures = layersWithFeatures()) {
   // Приёмники импорта и размеры показываем только если в них уже есть объекты
   // (меньше захламления). Но теперь их можно явно удалить или переоформить —
   // система стала гибче (см. resetLayerFormatting и deleteLayer).
   return [...LAYERS_V2].reverse()
-    .filter(L => !((L.import_only || L.annotation) && !featuresOnLayer(L.id).length));
+    .filter(L => !((L.import_only || L.annotation) && !withFeatures.has(L.id)));
 }
 
 // Перетаскивание строки src к строке target меняет порядок отрисовки.
@@ -4840,10 +4870,11 @@ function layerGeometryMeta(layer) {
 // statsByLayer — готовая статистика из renderLayers (счётчик и категории за
 // один проход). Без неё легенда снова сканировала бы все объекты на каждый слой.
 function renderLayerLegend(sampleByLayer = {}, statsByLayer = null) {
+  const withFeatures = statsByLayer ? new Set(statsByLayer.keys()) : layersWithFeatures();
   const host = document.getElementById("layers-legend-body");
   if (!host) return;
   host.innerHTML = "";
-  const visibleLayers = layerRowsTopFirst().filter(layer => layer.visible);
+  const visibleLayers = layerRowsTopFirst(withFeatures).filter(layer => layer.visible);
   if (!visibleLayers.length) {
     host.innerHTML = '<div class="legend-empty">Включите видимость слоя — его знак появится здесь.</div>';
     return;
@@ -4974,7 +5005,8 @@ function renderLayers() {
     groupHosts.set(key, body);
     return body;
   };
-  const displayedLayers = layerRowsTopFirst();
+  // statsByLayer собран выше тем же проходом — второй раз объекты не сканируем
+  const displayedLayers = layerRowsTopFirst(new Set(statsByLayer.keys()));
   const presentGroups = new Set(displayedLayers.map(layerGroupKey));
   Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupHostForKey);
   for (const layer of displayedLayers) {
@@ -4991,8 +5023,15 @@ function renderLayers() {
     // штриховка + рамка для зон), а не просто цветной квадрат: правка юзера
     // «превью должны полностью отображать стиль». styleSampleSVG — из app.js.
     const swSvg = styleSampleSVG(st, { w: 54, h: 20 });
-    const row = document.createElement("div");
     const isActive = layer.id === state.activeLayerId;
+    const sig = layerRowSignature(layer, { count, cats, catOpen, isActive, swSvg });
+    const cached = _layerRowCache.get(layer.id);
+    if (cached && cached.sig === sig) {
+      // содержимое не изменилось — переносим готовые узлы, не пересобирая
+      for (const node of cached.nodes) groupHost.appendChild(node);
+      continue;
+    }
+    const row = document.createElement("div");
     row.className = "layer-row" + (isActive ? " active" : "") +
                     (layer.locked ? " locked" : "");
     row.draggable = true;
@@ -5116,6 +5155,7 @@ function renderLayers() {
       renderLayers();
     });
     groupHost.appendChild(row);
+    const rowNodes = [row];
     // подпункты-категории (QGIS-легенда): образец знака + название + счётчик +
     // галка видимости (тот же fmt.cats_off). Скрытая категория — приглушена.
     if (catOpen) for (const cat of cats) {
@@ -5130,8 +5170,14 @@ function renderLayers() {
       crow.querySelector("input").addEventListener("change", ev =>
         toggleCategoryVisible(layer, cat.id, ev.target.checked));
       groupHost.appendChild(crow);
+      rowNodes.push(crow);
     }
+    _layerRowCache.set(layer.id, { sig, nodes: rowNodes });
   }
+  // слои, которых больше нет в панели, из кэша убираем — иначе он растёт вечно
+  const displayedIds = new Set(displayedLayers.map(l => l.id));
+  for (const id of [..._layerRowCache.keys()])
+    if (!displayedIds.has(id)) _layerRowCache.delete(id);
   groupHosts.forEach(body => {
     const section = body.closest(".layer-stack-group");
     section.querySelector(".layer-group-count").textContent = body.querySelectorAll(":scope > .layer-row").length;
