@@ -373,6 +373,24 @@
 .data-layer-meta{font-size:var(--fs-10);color:var(--muted);white-space:nowrap}.data-quick-title,.data-catalog-head{display:flex;align-items:center;
   justify-content:space-between;margin-top:10px;font-size:var(--fs-11);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.035em}
 .data-catalog-head b{font-size:var(--fs-10);font-weight:500}.data-quick-list{margin-top:6px}
+/* кэш слоёв портала: слой качается целиком и лежит неделю — видно, что занимает место */
+.data-cache{margin-top:10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--field-bg)}
+.modal-overlay .data-cache-head{display:flex;align-items:center;gap:8px;width:100%;height:auto;padding:8px 10px;
+  background:none;border:0;text-align:left;cursor:pointer}
+.data-cache-head b{font-size:var(--fs-11);font-weight:600}
+.data-cache-head small{flex:1;font-size:var(--fs-10);color:var(--muted)}
+.data-cache-head .ic{width:14px;height:14px;color:var(--muted);transition:transform .12s}
+.data-cache.open .data-cache-head .ic{transform:rotate(90deg)}
+.data-cache-list{border-top:1px solid var(--line);max-height:190px;overflow-y:auto}
+.data-cache-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line)}
+.data-cache-row:last-child{border-bottom:0}
+.data-cache-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.data-cache-copy b{font-size:var(--fs-11);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.data-cache-copy small{font-size:var(--fs-10);color:var(--muted)}
+.data-cache-row.stale .data-cache-copy small{color:var(--warn,var(--muted))}
+.modal-overlay .data-cache-drop{height:24px;padding:0 9px;font-size:var(--fs-10);border-radius:var(--r-sm)}
+.data-cache-actions{padding:8px 10px;border-top:1px solid var(--line)}
+.modal-overlay .data-cache-actions button{height:26px;padding:0 10px;font-size:var(--fs-10)}
 .data-topic-chips{display:flex;gap:6px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}.data-topic-chips::-webkit-scrollbar{display:none}
 .modal-overlay .data-topic-chips button{height:30px;padding:0 11px;border-radius:var(--r-sm);background:var(--field-bg);white-space:nowrap;
   color:var(--text-2);font-size:var(--fs-11)}.modal-overlay .data-topic-chips button.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}

@@ -194,6 +194,7 @@ async function openDataFetch() {
   if (![0, 1, 2, 3].includes(activeGroup)) activeGroup = 3;
   let query = "", activeTopic = "";
   let ogdCatalog = [], ogdError = null, ogdLoading = true, importing = false;
+  let cacheLayers = [], cacheTtlDays = 7, cacheOpen = false;
   let catalogController = null, loadController = null, loadMessage = "";
   const loadProgress = new Map();
   const groupUi = [
@@ -334,7 +335,7 @@ async function openDataFetch() {
         <span class="data-layer-copy"><b>${escHtml(item.label)}</b><small>готовый набор слоёв</small></span><span class="data-layer-meta">mos.ru</span></label>`).join("")}</div>` : "";
     return `<div class="data-topic-chips"><button class="${activeTopic ? "" : "active"}" data-topic="">Все темы <span>${ogdCatalog.length}</span></button>
       ${topics.map(([topic, count]) => `<button class="${activeTopic === topic ? "active" : ""}" data-topic="${escHtml(topic)}">${escHtml(topic)} <span>${count}</span></button>`).join("")}</div>
-      ${quickRows}<div class="data-catalog-head"><span>Каталог портала</span><b>${catalog.length}</b></div>
+      ${quickRows}${cacheHtml()}<div class="data-catalog-head"><span>Каталог портала</span><b>${catalog.length}</b></div>
       <div class="ogdc-list ogd-tree">${catalog.length
         ? ogdTreeHtml(ogdBuildTree(catalog), gi, selectedMap, false, !!low || !!activeTopic)
         : `<div class="data-empty">Ничего не найдено</div>`}</div>`;
@@ -438,6 +439,55 @@ async function openDataFetch() {
     return [...quick, ...catalog];
   };
 
+  // Слой портала качается ЦЕЛИКОМ (bbox он не фильтрует) и лежит в браузере
+  // неделю. Пока это было невидимо, единственным способом освободить место или
+  // обновить устаревший слой оставалось «почистить браузер» — вместе с
+  // проектом и контрольными копиями.
+  async function loadCacheInfo() {
+    try {
+      const data = await (await fetch("/api/gisogd-cache")).json();
+      cacheLayers = Array.isArray(data.layers) ? data.layers : [];
+      cacheTtlDays = data.ttl_days || 7;
+    } catch (error) { cacheLayers = []; }
+    render();
+  }
+  async function dropCache(code) {
+    const url = code ? `/api/gisogd-cache/${encodeURIComponent(code)}` : "/api/gisogd-cache";
+    try {
+      const response = await fetch(url, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      toast(code ? "Слой убран из кэша — следующая выгрузка скачает его заново"
+        : `Кэш очищен: ${data.removed || 0} ${layerNoun(data.removed || 0)}`);
+    } catch (error) { toast("Не удалось очистить кэш: " + (error.message || error), "error"); }
+    loadCacheInfo();
+  }
+  const cacheAge = at => {
+    if (!at) return "давно";
+    const hours = Math.floor((Date.now() - at) / 3600000);
+    if (hours < 1) return "только что";
+    if (hours < 24) return `${hours} ч назад`;
+    const days = Math.floor(hours / 24);
+    return `${days} ${days === 1 ? "день" : days < 5 ? "дня" : "дней"} назад`;
+  };
+  const cacheMb = bytes => (bytes ? `${(bytes / 1048576).toFixed(1)} МБ` : "размер неизвестен");
+  function cacheHtml() {
+    if (!cacheLayers.length) return "";
+    const totalBytes = cacheLayers.reduce((sum, item) => sum + (item.bytes || 0), 0);
+    const head = `<button class="data-cache-head" data-action="toggle-cache" aria-expanded="${cacheOpen}">
+      <b>В кэше браузера: ${cacheLayers.length} ${layerNoun(cacheLayers.length)}</b>
+      <small>${totalBytes ? `${(totalBytes / 1048576).toFixed(1)} МБ · ` : ""}хранится ${cacheTtlDays} дней, потом качается заново</small>
+      ${icon("ic-chevron")}</button>`;
+    if (!cacheOpen) return `<div class="data-cache">${head}</div>`;
+    const rows = cacheLayers.map(item => `<div class="data-cache-row${item.stale ? " stale" : ""}">
+      <span class="data-cache-copy"><b>${escHtml(item.name || item.code)}</b>
+        <small>${cacheMb(item.bytes)}${item.features ? ` · ${item.features} об.` : ""} · ${item.stale ? "устарел, обновится при выгрузке" : `скачан ${cacheAge(item.at)}`}</small></span>
+      <button class="data-cache-drop" data-action="drop-cache" data-code="${escHtml(item.code)}"
+        title="Убрать слой из кэша">Убрать</button></div>`).join("");
+    return `<div class="data-cache open">${head}<div class="data-cache-list">${rows}</div>
+      <div class="data-cache-actions"><button data-action="drop-cache-all">Очистить весь кэш ГИС ОГД</button></div></div>`;
+  }
+
   async function loadCatalog() {
     catalogController?.abort();
     const controller = new AbortController();
@@ -467,6 +517,22 @@ async function openDataFetch() {
     loadController = controller;
     render();
     const busyDone = beginBusy("Загрузка данных по области…");
+    // Слой ГИС ОГД идёт целиком, десятками мегабайт: без цифр молчащий
+    // индикатор неотличим от зависшего приложения. Байты приходят из адаптера
+    // (он читает поток), здесь только показываем.
+    let sourceStep = { completed: 0, total: 1 };
+    const onLayerBytes = event => {
+      const { name, code, loaded, total } = event.detail || {};
+      if (!loaded) return;
+      const mb = bytes => `${(bytes / 1048576).toFixed(1)} МБ`;
+      const share = total ? ` ${Math.round(loaded / total * 100)}%` : "";
+      loadMessage = `Качаем слой «${name || code}»:${share || ""} ${mb(loaded)}${total ? ` из ${mb(total)}` : ""}`;
+      // доля слоя внутри доли источника: индикатор не должен прыгать назад
+      const inner = total ? loaded / total : 0;
+      setBusyProgress((sourceStep.completed + inner) / Math.max(1, sourceStep.total), loadMessage);
+      render();
+    };
+    window.addEventListener("grado-source-progress", onLayerBytes);
     try {
       const batches = await fetchExtentSourceBatches(bbox, sources, {
         signal: controller.signal,
@@ -474,6 +540,7 @@ async function openDataFetch() {
           loadProgress.set(progress.source, progress);
           const completed = [...loadProgress.values()].filter(item => item.state === "done").length;
           const label = labelForKey(progress.source);
+          sourceStep = { completed, total: progress.total || 1 };
           if (progress.state === "loading") loadMessage = `${progress.index + 1} из ${progress.total}: ${label}`;
           else if (progress.state === "done") loadMessage = `Загружено ${completed} из ${progress.total} источников`;
           else if (progress.state === "failed") loadMessage = `Ошибка: ${label}`;
@@ -527,7 +594,10 @@ async function openDataFetch() {
         render();
         toast(loadMessage.slice(0, 180), "error");
       }
-    } finally { busyDone(); }
+    } finally {
+      window.removeEventListener("grado-source-progress", onLayerBytes);
+      busyDone();
+    }
   }
 
   overlay.addEventListener("change", event => {
@@ -582,11 +652,15 @@ async function openDataFetch() {
     } else if (action === "file") {
       saveSelection(); close(); document.getElementById("btn-gisogd")?.click();
     } else if (action === "retry-catalog") loadCatalog();
+    else if (action === "toggle-cache") { cacheOpen = !cacheOpen; render(); }
+    else if (action === "drop-cache") dropCache(button.dataset.code);
+    else if (action === "drop-cache-all") dropCache(null);
     else if (action === "load") performLoad();
   });
 
   render();
   loadCatalog();
+  loadCacheInfo();
 }
 
 async function openDataFetchLegacy() {
