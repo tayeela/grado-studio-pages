@@ -8417,9 +8417,17 @@ on("btn-demo", "click", () => {
   state.selected = null;
   const bd = demoCache["boundary"];
   if (bd) state.activeLayerId = bd.id;   // после демо можно сразу чертить
+  // Проект назывался «Новый проект» с полноценным кварталом на холсте: после
+  // перезагрузки автосохранение показывало «Новый проект» с семью слоями.
+  // Имя даём только нетронутому листу — переименованный проект не трогаем.
+  const nameEl = document.getElementById("project-name");
+  const current = (nameEl?.value || "").trim();
+  if (nameEl && (!current || current === "Новый проект")) nameEl.value = "Пример: жилой квартал";
   renderLayers();                        // созданные слои — в панель
   afterChange();
   fitView();
+  // На примере смотрят расчёт, а не список объектов: показываем ТЭП сразу.
+  document.getElementById("panel-tab-tep")?.click();
 });
 
 // ---------- старт ----------
@@ -8850,6 +8858,14 @@ on("start-unlock", "click", () => {
   document.getElementById("start-guide")?.setAttribute("hidden", "");
   document.getElementById("cv")?.focus();
   toast(`Слой «${layer.title}» разблокирован. Поставьте первую точку на холсте.`);
+});
+// Подложку не включаем сами (это запросы к внешнему серверу тайлов), но и
+// молчать о ней нельзя: пустой холст читается как «карты тут нет».
+on("start-basemap", "click", () => {
+  const show = document.getElementById("basemap-show");
+  if (!show) return;
+  if (!show.checked) { show.checked = true; show.dispatchEvent(new Event("change", { bubbles: true })); }
+  toast("Подложка включена. Источник и прозрачность — в панели «Подложка»");
 });
 on("start-demo", "click", () => {
   document.getElementById("btn-demo")?.click();

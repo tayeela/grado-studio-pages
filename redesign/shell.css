@@ -129,6 +129,12 @@ header{
 .start-guide-actions{display:flex;gap:8px;align-items:center;margin-top:4px}
 .start-guide-actions .btn{justify-content:center}
 .start-guide>small{display:block;margin-top:12px;color:var(--faint);font-size:var(--fs-10)}
+#start-guide-basemap{margin-top:6px}
+/* ссылка-действие внутри подсказки: не кнопка по виду, но кнопка по сути */
+.linkbtn{padding:0;border:0;background:none;color:var(--accent);font:inherit;font-size:inherit;
+  text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.linkbtn:hover{color:var(--accent-hover)}
+.linkbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 .cv-float{position:absolute;background:var(--glass-strong);backdrop-filter:var(--glass-blur);
   box-shadow:var(--glass-hi),var(--shadow-md);border-radius:var(--r-md)}
 .cv-compass{top:16px;right:16px;width:40px;height:40px;display:grid;place-items:center;color:var(--text-2)}
@@ -289,6 +295,9 @@ body.panel-hidden #panel,body.panel-hidden #panel-resizer{display:none}
 .cmdk-row{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);font-size:var(--fs-13);cursor:pointer}
 .cmdk-row .ic{width:17px;height:17px;color:var(--muted)}
 .cmdk-row.sel{background:var(--accent-weak);color:var(--accent)}
+/* команда есть, но только в настольной версии — видна и подписана, а не спрятана */
+.cmdk-row.cmdk-off{opacity:.5;cursor:default}
+.cmdk-row.cmdk-off .hint{color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0}
 .cmdk-row.sel .ic{color:var(--accent)}
 .cmdk-row .hint{margin-left:auto;font-size:var(--fs-10);color:var(--faint);font-family:var(--font-mono)}
 .cmdk-sec{font-size:var(--fs-10);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:9px 11px 4px}

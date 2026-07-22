@@ -750,8 +750,16 @@
           .catch(function () { badge.textContent = "b" + bv; });
       }
     }
+    // «Альбом» главной кнопкой обещал документ, а печать в масштабе — настольная:
+    // в браузере эта кнопка правит только СОСТАВ листов. Называем ровно то, что
+    // она делает, и снимаем с неё вид главного действия.
     const album = document.getElementById("btn-album");
-    if (album) { album.textContent = "Альбом"; album.title = "Настроить состав альбома"; }
+    if (album) {
+      album.textContent = "Состав альбома";
+      album.title = "Состав листов альбома. Печать в масштабе (PDF) — в настольной версии";
+      album.setAttribute("aria-label", "Состав листов альбома; печать PDF доступна в настольной версии");
+      album.classList.remove("primary");
+    }
     const buffer = document.getElementById("btn-buffer-open");
     if (buffer) {
       buffer.dataset.webUnavailable = "true";
