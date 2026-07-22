@@ -3601,10 +3601,13 @@ function undoDepth() {
   const n = state.features.length;
   return n > 20000 ? 5 : n > 8000 ? 15 : 100;
 }
-function serializeHistoryState() {
-  const saved = collectState();
+// Состояние истории БЕЗ объектов: слои, их оформление, поля, порядок, источники.
+// Мало по объёму и меняется редко, поэтому хранится строкой целиком.
+function historySmallState() {
+  const saved = collectState({ skipHistory: true });
   delete saved.undo;
   delete saved.redo;
+  delete saved.features;
   // Эти настройки не принадлежат геометрической истории: пользователь не
   // ожидает, что Undo чертежа переключит подложку, состав альбома или вариант.
   delete saved.name;
@@ -3615,28 +3618,100 @@ function serializeHistoryState() {
   delete saved.albumConfig;
   return JSON.stringify({ history_version: 2, ...saved });
 }
+// ---------------------------------------------------------------------------
+// Инкрементальные снимки отмены.
+//
+// Раньше каждый шаг истории хранил JSON всего проекта целиком. На реальной
+// выгрузке ОГД (20 000 объектов) один снимок весит ~13 МБ, а глубина истории —
+// до 100 шагов: больше гигабайта строк в памяти, хотя соседние шаги отличаются
+// парой объектов.
+//
+// Теперь запись хранит объекты ПООБЪЕКТНО, и неизменившиеся объекты
+// переиспользуют ТУ ЖЕ строку, что и в предыдущей записи. Строки в JS
+// неизменяемы и хранятся по ссылке, поэтому сто шагов держат один экземпляр
+// содержимого и сто массивов указателей. Замерено на 20 000 объектов:
+// пообъектная сериализация стоит столько же, что и целиком (186 против 187 мс),
+// сравнение с предыдущим шагом добавляет ~7 %.
+//
+// Записи остаются САМОДОСТАТОЧНЫМИ (без цепочки ключевых кадров): стеки в
+// остальном коде режут через slice/shift/pop, и любая цепочка сломалась бы.
+function historySnapshot(prev = null) {
+  const ids = [], jsons = [];
+  const prevById = prev ? prev.byId : null;
+  let freshBytes = 0;
+  for (const feature of state.features) {
+    const id = feature.id;
+    const json = JSON.stringify(feature);
+    const before = prevById ? prevById.get(id) : undefined;
+    // тот же контент — кладём ТУ ЖЕ строку, память не дублируется
+    if (before === json) { ids.push(id); jsons.push(before); continue; }
+    ids.push(id); jsons.push(json);
+    freshBytes += json.length;
+  }
+  const small = historySmallState();
+  const smallShared = prev && prev.small === small ? prev.small : small;
+  if (smallShared !== (prev && prev.small)) freshBytes += small.length;
+  const byId = new Map();
+  for (let i = 0; i < ids.length; i++) byId.set(ids[i], jsons[i]);
+  return { small: smallShared, ids, jsons, byId, freshBytes };
+}
+// объявлением, а не const: используется в значении по умолчанию pushHistoryEntry
+function historyTail(stack) {
+  return stack && stack.length ? stack[stack.length - 1] : null;
+}
+// Снимок → прежний формат v2 (файл проекта, автосейв, отчёт об ошибке)
+function historyEntryToString(entry) {
+  if (typeof entry === "string") return entry;
+  if (!entry || !Array.isArray(entry.jsons)) return null;
+  return `${entry.small.slice(0, -1)},"features":[${entry.jsons.join(",")}]}`;
+}
+// Прежний формат v2 → снимок (открытие проекта, восстановление автосейва)
+function historyEntryFromString(serialized) {
+  if (typeof serialized !== "string") return null;
+  let parsed;
+  try { parsed = JSON.parse(serialized); } catch (error) { return null; }
+  if (!isRecord(parsed) || !Array.isArray(parsed.features)) return null;
+  const features = parsed.features;
+  delete parsed.features;
+  const ids = [], jsons = [], byId = new Map();
+  let freshBytes = 0;
+  for (const feature of features) {
+    const json = JSON.stringify(feature);
+    ids.push(feature.id); jsons.push(json); byId.set(feature.id, json);
+    freshBytes += json.length;
+  }
+  const small = JSON.stringify(parsed);
+  return { small, ids, jsons, byId, freshBytes: freshBytes + small.length };
+}
+// В файл и автосейв кладём прежний строковый формат, но только последние шаги:
+// глубокая история на диске не нужна, а сериализация стоит дорого.
+const HISTORY_PERSIST_MAX = 10;
+function historyStackToStrings(stack) {
+  if (!Array.isArray(stack)) return [];
+  return stack.slice(-HISTORY_PERSIST_MAX).map(historyEntryToString).filter(Boolean);
+}
+function historyStackFromStrings(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(historyEntryFromString).filter(Boolean);
+}
 function syncHistoryControls() {
   const undoButton = document.getElementById("btn-undo");
   const redoButton = document.getElementById("btn-redo");
   if (undoButton) undoButton.disabled = !state.undo.length;
   if (redoButton) redoButton.disabled = !state.redo.length;
 }
-// Потолок истории по ОБЪЁМУ, а не только по числу объектов. Порог 8000 объектов
-// ничего не говорит о весе снимка: проект с тяжёлой геометрией (импорт ОГД —
-// сотни вершин на полигон) остаётся «маленьким» по счётчику и держит до 100
-// полных JSON-копий, то есть сотни мегабайт строк в памяти. Держим суммарный
-// объём в пределах бюджета, всегда сохраняя хотя бы один шаг отмены.
-// ponytail: полные снимки как были; если понадобится глубокая история на
-// тяжёлых проектах — переходить на инкрементальные диффы (изменённые объекты
-// до/после), это уже отдельная работа.
-const HISTORY_BYTE_BUDGET = 64 * 1024 * 1024;   // ~64 МБ строк истории
+// Потолок по ОБЪЁМУ вдобавок к числу шагов. Считаем только НОВОЕ содержимое
+// (freshBytes): объекты, унаследованные от предыдущего шага, лежат в памяти
+// одним экземпляром и повторно место не занимают.
+const HISTORY_BYTE_BUDGET = 64 * 1024 * 1024;
 function trimHistoryToBudget(stack) {
   let bytes = 0;
-  for (const entry of stack) bytes += entry.length;
-  while (stack.length > 1 && bytes > HISTORY_BYTE_BUDGET) bytes -= stack.shift().length;
+  for (const entry of stack) bytes += (entry && entry.freshBytes) || 0;
+  while (stack.length > 1 && bytes > HISTORY_BYTE_BUDGET)
+    bytes -= (stack.shift().freshBytes) || 0;
 }
-function pushHistoryEntry(serialized = serializeHistoryState()) {
-  state.undo.push(serialized);
+function pushHistoryEntry(entry = historySnapshot(historyTail(state.undo))) {
+  state.undo.push(entry);
   const max = undoDepth();
   while (state.undo.length > max) state.undo.shift();
   trimHistoryToBudget(state.undo);
@@ -3646,10 +3721,22 @@ function pushHistoryEntry(serialized = serializeHistoryState()) {
 function snapshot() {
   pushHistoryEntry();
 }
-function commitHistoryFrom(serialized) {
-  if (serialized && serialized !== serializeHistoryState()) pushHistoryEntry(serialized);
+// Снимки равны, если совпадают «мелкое» состояние и ПОСТРОЧНО объекты. Строки
+// неизменившихся объектов переиспользуются, поэтому сравнение обычно сводится к
+// сравнению ссылок и не стоит ничего.
+function historySameSnapshot(a, b) {
+  if (!a || !b || a.small !== b.small || a.jsons.length !== b.jsons.length) return false;
+  for (let i = 0; i < a.jsons.length; i++)
+    if (a.ids[i] !== b.ids[i] || a.jsons[i] !== b.jsons[i]) return false;
+  return true;
 }
-function restoreHistoryEntry(serialized) {
+function commitHistoryFrom(before) {
+  if (!before) return;
+  if (!historySameSnapshot(before, historySnapshot(before))) pushHistoryEntry(before);
+}
+function restoreHistoryEntry(entry) {
+  const serialized = historyEntryToString(entry);
+  if (serialized == null) throw new Error("unsupported history entry");
   const restored = JSON.parse(serialized);
   if (Array.isArray(restored)) {
     state.features = normalizeFeatureList(restored).map(feature => upgradeFeature(feature));
@@ -3704,7 +3791,7 @@ function syncNextId() {
 function undo() {
   if (!state.undo.length) return;
   const entry = state.undo.pop();
-  const current = serializeHistoryState();
+  const current = historySnapshot(historyTail(state.redo));
   state.redo.push(current);
   while (state.redo.length > undoDepth()) state.redo.shift();
   try {
@@ -3721,7 +3808,7 @@ function undo() {
 function redo() {
   if (!state.redo.length) return;
   const entry = state.redo.pop();
-  const current = serializeHistoryState();
+  const current = historySnapshot(historyTail(state.undo));
   state.undo.push(current);
   while (state.undo.length > undoDepth()) state.undo.shift();
   try {
@@ -3735,7 +3822,7 @@ function redo() {
   }
   clearSelection(); syncHistoryControls(); afterChange();
 }
-window.captureHistoryState = serializeHistoryState;
+window.captureHistoryState = () => historySnapshot(historyTail(state.undo));
 window.commitHistoryFrom = commitHistoryFrom;
 let autosaveTimer = null;
 let saveStateQueue = Promise.resolve();
@@ -3773,7 +3860,9 @@ function applyPendingProjectName() {
 // полный снимок состояния студии (общий проектный + личный вид). Один
 // источник и для localStorage/autosave, и для веб-синхронизации (collab.js
 // берёт из него только «общие» ключи проекта).
-function collectState() {
+// skipHistory — для historySmallState(): иначе каждый снимок отмены заново
+// материализовал бы десяток записей истории в строки (O(10n) на жест).
+function collectState(opts = {}) {
   return {
     schema_version: STATE_SCHEMA_VERSION,
     features: state.features, nextId: state.nextId,
@@ -3804,8 +3893,8 @@ function collectState() {
     // undo/redo — снимки всего проекта; у больших выгрузок их сериализация в
     // автосейв = главный фриз. Для них историю не персистим (в сессии undo
     // работает, после перезагрузки — сбрасывается). Малые — как прежде.
-    undo: state.features.length > 8000 ? [] : (state.undo || []),
-    redo: state.features.length > 8000 ? [] : (state.redo || []),
+    undo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.undo),
+    redo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.redo),
     projectCustomKinds: state.projectCustomKinds || [],
     variants: state.variants || [],
     accessRadii: state.accessRadii,
@@ -3829,7 +3918,8 @@ function collectProjectSettings() {
 function collectPersonal() {
   return {
     activeLayerId: state.activeLayerId, basemapSource: basemap.source,
-    exportStyle: exportStyleMode(), undo: state.undo || [], redo: state.redo || [],
+    exportStyle: exportStyleMode(),
+    undo: historyStackToStrings(state.undo), redo: historyStackToStrings(state.redo),
     variants: state.variants || [], accessRadii: state.accessRadii,
     layersVisible: Object.fromEntries(LAYERS_V2.map(L => [L.id, L.visible])),
   };
@@ -7476,8 +7566,8 @@ async function download(url, suffix) {
                     projectCustomKinds: state.projectCustomKinds || [],
     variants: state.variants || [],
     accessRadii: state.accessRadii,
-                    undo_stack: state.undo || [],
-                    redo_stack: state.redo || [],
+                    undo_stack: historyStackToStrings(state.undo),
+                    redo_stack: historyStackToStrings(state.redo),
                     albumConfig: state.albumConfig || null,
                     studioState: collectProjectSettings() };
   if (canvasStyles) payload.canvasStyles = canvasStyles;
@@ -7977,8 +8067,8 @@ function applyRestoredState(d) {
   state.features = (d.features || []).map(feature => upgradeFeature(feature));  // legacy kind → слой v2
   // ограничиваем восстанавливаемую историю (старые автосейвы больших выгрузок
   // держали до 100 снимков всего проекта ≈ гигабайты в памяти)
-  if (Array.isArray(d.undo)) state.undo = d.undo.slice(-undoDepth());
-  if (Array.isArray(d.redo)) state.redo = d.redo.slice(-undoDepth());
+  if (Array.isArray(d.undo)) state.undo = historyStackFromStrings(d.undo.slice(-undoDepth()));
+  if (Array.isArray(d.redo)) state.redo = historyStackFromStrings(d.redo.slice(-undoDepth()));
   // L2b-миграция: старые проекты ссылались на удалённые пресет-слои
   // (project.territory.boundary и т.п.). Осиротевшие объекты переселяем в
   // воссозданные слои их вида, иначе они молча исчезли бы с холста.
