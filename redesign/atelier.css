@@ -84,7 +84,7 @@ header{
   border-bottom:1px solid var(--hairline-2);
   box-shadow:none;
 }
-.logo{font-size:15px;letter-spacing:-.025em}
+.logo{font-size:var(--fs-15);letter-spacing:-.025em}
 .logo span{font-weight:450}
 .projname{max-width:148px;padding-inline:8px}
 .kbar{width:32px;height:32px;padding:0;justify-content:center;border-radius:var(--r-sm);background:transparent}
@@ -98,7 +98,7 @@ header .hsep{margin-inline:0}
    (другой шрифт, локаль, масштаб), переключатель обрежется сам, а не вытолкнет
    кнопки справа за пределы экрана. */
 .workspace-modes{display:flex;align-self:stretch;min-width:0;overflow:hidden;border-left:1px solid var(--hairline);border-right:1px solid var(--hairline)}
-.workspace-modes button{position:relative;display:flex;align-items:center;gap:7px;padding:0 14px;color:var(--text-2);font-size:12px;font-weight:560;white-space:nowrap}
+.workspace-modes button{position:relative;display:flex;align-items:center;gap:7px;padding:0 14px;color:var(--text-2);font-size:var(--fs-12);font-weight:560;white-space:nowrap}
 .workspace-modes button+button{border-left:1px solid var(--hairline)}
 .workspace-modes button:hover{background:var(--field-bg);color:var(--text)}
 .workspace-modes button[aria-pressed="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent-weak) 72%,var(--panel));font-weight:650}
@@ -119,24 +119,24 @@ header .hsep{margin-inline:0}
 }
 body.layers-panel-hidden #layers-panel{margin-left:calc(var(--layer-panel-width) * -1);visibility:hidden;pointer-events:none}
 .layers-panel-head{height:48px;display:flex;align-items:center;gap:2px;padding:0 12px;border-bottom:1px solid var(--hairline)}
-.layers-panel-head .title{flex:1;font-size:13px;font-weight:700;letter-spacing:.01em}
-.layers-panel-head .lcount{margin-left:5px;color:var(--muted);font-family:var(--font-mono);font-size:10px;font-weight:500}
+.layers-panel-head .title{flex:1;font-size:var(--fs-13);font-weight:700;letter-spacing:.01em}
+.layers-panel-head .lcount{margin-left:5px;color:var(--muted);font-family:var(--font-mono);font-size:var(--fs-10);font-weight:500}
 .layers-panel-head .h3-btn{width:30px;height:30px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted)}
 .layers-panel-head .h3-btn:hover{background:var(--field-bg);color:var(--text)}
 .layers-panel-head .h3-btn .ic{width:17px;height:17px}
 .layer-search{height:34px;margin:10px 12px;display:flex;align-items:center;gap:7px;padding:0 9px;background:var(--field-bg);border:1px solid var(--field-border);border-radius:var(--r-sm);color:var(--muted)}
 .layer-search:focus-within{border-color:var(--accent-line);box-shadow:0 0 0 2px var(--accent-weak)}
 .layer-search .ic{width:15px;height:15px;flex:0 0 auto}
-.layer-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--text);font:inherit;font-size:12px}
+.layer-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--text);font:inherit;font-size:var(--fs-12)}
 .layer-search input::placeholder{color:var(--muted)}
-.layer-search kbd{font:10px var(--font-mono);color:var(--faint);border:1px solid var(--hairline-2);border-radius:3px;padding:1px 5px;background:var(--panel)}
+.layer-search kbd{font:var(--fs-10) var(--font-mono);color:var(--faint);border:1px solid var(--hairline-2);border-radius:3px;padding:1px 5px;background:var(--panel)}
 .layers-panel-scroll{flex:1;min-height:0;overflow:auto;padding:0 8px 10px;scrollbar-gutter:stable}
 #layers-panel #card-layers{border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
 #layers-panel #layers-card-body{padding:0;gap:4px}
 #layers-panel #layers-body{gap:0}
 #layers-panel .layer-row{min-height:31px;padding:4px 5px;border-radius:var(--r-sm);border-bottom:1px solid color-mix(in srgb,var(--hairline) 58%,transparent)}
 #layers-panel .layer-row.active{background:var(--accent-weak);box-shadow:inset 2px 0 0 var(--accent)}
-#layers-panel .layer-row .nm{font-size:11px}
+#layers-panel .layer-row .nm{font-size:var(--fs-11)}
 #layers-panel .layer-row .sw-svg{width:34px}
 #layers-panel .addlayer{margin-top:10px;border-style:solid;border-color:var(--field-border);border-radius:var(--r-sm);background:transparent}
 #layers-panel .addlayer:hover{background:var(--field-bg)}
@@ -175,18 +175,18 @@ body[data-workspace-mode="measure"] #toolbar [data-workspace-tool]:not([data-wor
 .cv-float{border:1px solid var(--hairline-2);border-radius:var(--r-sm);background:var(--glass-strong);box-shadow:var(--shadow-sm)}
 .cv-compass{top:12px;right:12px}
 .cv-zoom{right:12px;bottom:46px}
-.statusbar{height:34px;padding-inline:12px;background:var(--glass-strong);box-shadow:0 -1px 0 var(--hairline-2);font-size:11px}
+.statusbar{height:34px;padding-inline:12px;background:var(--glass-strong);box-shadow:0 -1px 0 var(--hairline-2);font-size:var(--fs-11)}
 #st-snap{border-radius:3px}
 
 #panel{width:320px;background:var(--glass-strong);box-shadow:-1px 0 0 var(--hairline-2)}
 .panel-head{height:48px;border-bottom:1px solid var(--hairline);box-shadow:none}
 .panel-head .title{font-weight:700;letter-spacing:.01em}
 .panel-tabs{margin:0;padding:0 12px;gap:18px;border:0;border-radius:0;background:transparent;border-bottom:1px solid var(--hairline)}
-.panel-tabs button{height:38px;border-radius:0;background:transparent!important;box-shadow:none!important;font-size:11px}
+.panel-tabs button{height:38px;border-radius:0;background:transparent!important;box-shadow:none!important;font-size:var(--fs-11)}
 .panel-tabs button[aria-selected="true"]{color:var(--accent);font-weight:700;border-bottom:2px solid var(--accent)}
 .panel-scroll{padding:12px;gap:14px}
 #panel .card{border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
-#panel .card-h{min-height:34px;padding:0 2px;border-bottom:1px solid var(--hairline);font-size:11px;text-transform:uppercase;letter-spacing:.055em}
+#panel .card-h{min-height:34px;padding:0 2px;border-bottom:1px solid var(--hairline);font-size:var(--fs-11);text-transform:uppercase;letter-spacing:.055em}
 #panel .card-h:hover{background:transparent}
 #panel .card-b{padding:10px 2px 14px}
 .prop-title{margin-inline:-2px;padding:10px 2px;background:transparent}
