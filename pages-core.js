@@ -1009,11 +1009,16 @@
     return { source, title: spec.title, layer_id: spec.layer_id, kind: spec.kind,
       features: [], fields: [], count: 0 };
   };
-  const addFields = (group, props) => {
+  // labels: имя поля источника → человеческий заголовок колонки; таблица берёт
+  // field.label, а имя остаётся исходным — по нему работают стили и правила
+  const addFields = (group, props, labels) => {
     const existing = new Set(group.fields.map(field => field.name));
     Object.entries(props).forEach(([name, value]) => {
       if (existing.has(name)) return;
-      group.fields.push({ name, type: typeof value === "number" ? "real" : "text" });
+      const field = { name, type: typeof value === "number" ? "real" : "text" };
+      const label = labels && labels[name];
+      if (label) field.label = label;
+      group.fields.push(field);
       existing.add(name);
     });
   };
@@ -1230,6 +1235,54 @@
   const gisogdKey = (props, feature, index) =>
     String(props.orbis_id ?? props.id ?? feature.id ?? index).replace(/\.0$/, "");
 
+  // ---- атрибуты портала: своё отделяем от служебного --------------------
+  // Слой красных линий везёт 13 полей, из которых читаются два. Остальное —
+  // внутренние идентификаторы выгрузки (orbis_id, fid_1, guid), флаги редактора
+  // и длина/площадь, которые студия и так считает сама. В таблице они занимали
+  // 13 колонок и прятали то, ради чего объект выгружали.
+  const GISOGD_SERVICE_PROPS = new Set(["orbis_id", "fid_1", "guid", "id", "n",
+    "n_okrug", "n_rayon", "linerhagui", "iseditedby", "isauxiliar", "stylecode",
+    "changeauth", "shape_area", "shape_length", "linelineco"]);
+  // Пустые значения портала: у стороны линии, к которой поле не относится
+  const GISOGD_EMPTY_PROPS = new Set(["none", "not_found", "null", "-", "0"]);
+  const GISOGD_PROP_LABELS = {
+    linerhanum: "номер документа", createdate: "создан", changedate: "изменён",
+    line_code: "код ЛГР", line_side: "сторона линии", name: "наименование",
+    name_okrug: "округ", name_raion: "район", naimfunkzony: "функциональная зона",
+    fztip: "тип функц. зоны", summfondpersp: "суммарный фонд, перспектива",
+  };
+  // Позиция запрошенного кода в СЫРОМ списке linelineco. Списки полей у портала
+  // позиционные: linelineco «6,-1,4» ↔ linerhanum «NOT_FOUND,П071-21/1v.4,NOT_FOUND».
+  // Без позиции в атрибут уезжали номера документов ЧУЖИХ сторон линии.
+  const gisogdCodePos = (props, code) => {
+    if (code == null) return -1;
+    for (const [k, v] of Object.entries(props || {})) {
+      if (!LINE_CODE_KEYS.includes(k.toLowerCase()) || v === null || v === "") continue;
+      const parts = String(v).split(",");
+      const at = parts.findIndex(p => Math.abs(Number.parseInt(p.trim(), 10)) === Math.abs(code));
+      return { pos: at, len: parts.length };
+    }
+    return -1;
+  };
+  const gisogdCleanProps = (raw, code) => {
+    const at = gisogdCodePos(raw, code);
+    const out = {};
+    for (const [k, v] of Object.entries(raw || {})) {
+      if (v === null || v === "") continue;
+      if (GISOGD_SERVICE_PROPS.has(k.toLowerCase())) continue;
+      let value = v;
+      if (typeof value === "string" && at !== -1 && at.pos >= 0) {
+        const parts = value.split(",");
+        // режем только списки, идущие в ногу с кодами: у остальных запятая — часть текста
+        if (parts.length === at.len) value = parts[at.pos].trim();
+      }
+      if (typeof value === "string" && GISOGD_EMPTY_PROPS.has(value.trim().toLowerCase())) continue;
+      if (value === "") continue;
+      out[k] = value;
+    }
+    return out;
+  };
+
   // Кураторские наборы: маршрут задан явно. У слоёв ТиНАО имя — это тип зоны
   // («Жилая зона»), правила по имени его не опознают как функц. зону и увели бы
   // в «прочие», поэтому kind/layer_id проставлены руками (как в настольной версии).
@@ -1301,12 +1354,11 @@
       if (!fb || !bboxHit(fb, bbox)) return;
       let parts;
       try { parts = geometryParts(f.geometry); } catch (e) { skipped += 1; return; }
-      const props = Object.fromEntries(Object.entries(f.properties || {})
-        .filter(([, v]) => v !== null && v !== ""));
-      const key = gisogdKey(f.properties || {}, f, i);
+      const raw = f.properties || {};
+      const key = gisogdKey(raw, f, i);
       // LineCode из объекта важнее маршрута по имени слоя: на каждый код —
       // СВОЙ объект в СВОЙ слой со своим знаком; знак кода = сторона линии
-      const allRoutes = lineCodeRoutes(f.properties || {});
+      const allRoutes = lineCodeRoutes(raw);
       const routes = wantCode != null
         ? allRoutes.filter(([code]) => code === wantCode)
         : redlineOnly ? allRoutes.filter(([code]) => REDLINE_CODES.has(code)) : allRoutes;
@@ -1318,26 +1370,29 @@
       parts.forEach((part, pi) => {
         if (routes.length) {
           for (const [code, side, csid] of routes) {
+            // атрибуты — по СВОЕЙ стороне линии: у чужой стороны свой документ
+            const props = { ...gisogdCleanProps(raw, code), line_code: code, line_side: side };
             group.features.push({
               // слой — источника (layerId), различаются ЗНАКОМ (csid); раньше
               // код уводил объект в чужой слой-знак
               kind: REDLINE_CODES.has(code) ? "redline" : "restrict",
               layer_id: layerId, ...part,
-              props: { ...props, line_code: code, line_side: side },
+              props,
               style_id: csid,
               srcKey: `${layerId}:${layer.code}:${code}:${key}#${pi}`,
             });
+            addFields(group, props, GISOGD_PROP_LABELS);
           }
-          addFields(group, props);
           return;
         }
+        const props = gisogdCleanProps(raw, null);
         // формат как у сервера (layer_id:key#i): layerId уже содержит код слоя
         const out = { kind, layer_id: layerId, ...part, props: { ...props },
                       srcKey: `${layerId}:${layer.code}:${key}#${pi}` };
         const objStyle = styleId || (kind === "zone" ? gpZoneStyle(props) : null);
         if (objStyle) out.style_id = objStyle;
         group.features.push(out);
-        addFields(group, props);
+        addFields(group, props, GISOGD_PROP_LABELS);
       });
     });
     group.count = group.features.length;

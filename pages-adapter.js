@@ -269,15 +269,30 @@
     throwIfAborted(signal);
     return data;
   }
+  // Каталог — 663 слоя портала; в памяти он жил до первой перезагрузки страницы,
+  // и окно выгрузки каждый раз ждало сеть. Держим его рядом со слоями, в IndexedDB.
+  const GISOGD_CATALOG_KEY = "gisogd_catalog";
+  const GISOGD_CATALOG_TTL_MS = 7 * 24 * 3600 * 1000;
   let gisogdCatalogCache = null;
   async function gisogdCatalog(signal) {
     throwIfAborted(signal);
     if (gisogdCatalogCache) return gisogdCatalogCache;
+    try {
+      const hit = await databaseGet(GISOGD_CATALOG_KEY);
+      throwIfAborted(signal);
+      if (hit && hit.at && Array.isArray(hit.data) && hit.data.length
+          && (Date.now() - hit.at) < GISOGD_CATALOG_TTL_MS)
+        return (gisogdCatalogCache = hit.data);
+    } catch (error) { /* кэш недоступен — тянем из сети */ }
+    throwIfAborted(signal);
     const response = await nativeFetch(pagesCore.gisogdCatalogUrl(), { signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    gisogdCatalogCache = pagesCore.buildGisogdCatalog(await response.json());
+    const catalog = pagesCore.buildGisogdCatalog(await response.json());
     throwIfAborted(signal);
-    return gisogdCatalogCache;
+    gisogdCatalogCache = catalog;
+    try { await databaseSet(GISOGD_CATALOG_KEY, { at: Date.now(), data: catalog }); }
+    catch (error) { /* не влез — просто останемся с кэшем в памяти */ }
+    return catalog;
   }
   // ключ источника → {code, name}: кураторские (gisogd.func_zones…) и любой
   // слой портала (gisogd:{code}); имя берём из каталога — по нему идёт маршрут
