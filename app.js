@@ -2009,11 +2009,24 @@ function trimArcAt(f, wx, wy, boundaryIds) {
     arc.a0 = pAng;
     arc.sweep = eAng - pAng;
   }
-  // normalize
-  if (arc.sweep > Math.PI) arc.sweep -= 2 * Math.PI;
-  if (arc.sweep < -Math.PI) arc.sweep += 2 * Math.PI;
+  arc.sweep = sweepLike(arc.sweep, sw);
   afterChange();
   return true;
+}
+
+// Развёртка после обрезки/продления. Зажимать сырую разность atan2-углов в
+// ±180° нельзя: дуга больше полуокружности (arcFrom3Pts строит такие намеренно)
+// превращалась в своё дополнение с ДРУГОЙ стороны окружности — оставался не тот
+// кусок, по которому кликнули. Приводим к направлению исходного обхода,
+// сохраняя величину вплоть до полного круга.
+function sweepLike(sweep, ref) {
+  if (!Number.isFinite(sweep)) return sweep;
+  const TAU = 2 * Math.PI;
+  let s = sweep % TAU;
+  if (Math.abs(s) < 1e-9) return 0;
+  if (ref >= 0 && s < 0) s += TAU;
+  if (ref < 0 && s > 0) s -= TAU;
+  return s;
 }
 
 function extendArcAt(f, wx, wy, boundaryIds) {
@@ -2073,6 +2086,7 @@ function extendArcAt(f, wx, wy, boundaryIds) {
   if (!bestP) return false;
   snapshot();
   const pAng = Math.atan2(bestP[1] - arc.cy, bestP[0] - arc.cx);
+  const sw0 = arc.sweep;
   if (extEnd) {
     arc.sweep = pAng - arc.a0;
   } else {
@@ -2080,8 +2094,7 @@ function extendArcAt(f, wx, wy, boundaryIds) {
     arc.a0 = pAng;
     arc.sweep = eAng - pAng;
   }
-  if (arc.sweep > Math.PI) arc.sweep -= 2 * Math.PI;
-  if (arc.sweep < -Math.PI) arc.sweep += 2 * Math.PI;
+  arc.sweep = sweepLike(arc.sweep, sw0);
   afterChange();
   return true;
 }
@@ -2717,6 +2730,18 @@ function measureLabel(s, font) {
 // обзоре выходил «пунктир с узкими галками» (правка юзера).
 const LGR_DETAIL_MAX_DENOM = 10000;
 function lgrDenom() { return 3779.5 / state.view.k; }
+// Масштабная видимость слоя — как «Видимость слоёв» во FlexGIS и
+// scale-dependent visibility в QGIS. Выгрузка ОГД/ОСМ по городу — это десятки
+// тысяч объектов, которые на обзорном масштабе не нужны и только жгут кадр.
+// Порог живёт в fmt слоя (там же, где cats_off), поэтому сохраняется с проектом.
+// Скрываем при ОТДАЛЕНИИ: знаменатель масштаба больше порога.
+function layerInScale(L) {
+  const max = L && L.fmt && L.fmt.scale_max;
+  return !(max > 0) || lgrDenom() <= max;
+}
+// Рисуем/ловим курсором только то, что и видно, и попадает в масштаб.
+// layer.visible остаётся «сырым» для панели, экспорта и «Вписать всё».
+function layerDrawable(L) { return !!L && L.visible && layerInScale(L); }
 // «Читаемый режим» (переключатель в «Сетка и привязки») — ТОЛЬКО для экрана.
 // По эталону знак задан в метрах, поэтому на рабочих 1:4000+ засечка ~3 px:
 // в QGIS так же, но чертить неудобно. В читаемом режиме коэффициент = 1, т.е.
@@ -2957,7 +2982,19 @@ function drawLineLabel(pts, text, color) {
   ctx.restore();
 }
 
+// Перерисовка схлопывается в один кадр. draw() звали синхронно из ~80 мест:
+// каждое событие колеса (на тачпаде их несколько за кадр), КАЖДЫЙ загрузившийся
+// тайл подложки (30-50 при старте) и наведение на строку слоя запускали полный
+// проход по всем объектам. Планировщик здесь, а не в 80 местах вызова: все они
+// идут через эту функцию. drawNow() остаётся для случая, когда нужен кадр
+// немедленно. Ничто не читает канву синхронно после draw() (ни toDataURL, ни
+// getImageData), поэтому отложить на кадр безопасно.
+let _drawPending = 0;
 function draw() {
+  if (_drawPending) return;
+  _drawPending = requestAnimationFrame(() => { _drawPending = 0; drawNow(); });
+}
+function drawNow() {
   const w = cv.clientWidth, h = cv.clientHeight;
   ctx.clearRect(0, 0, w, h);
   drawBasemap(w, h);
@@ -2982,7 +3019,7 @@ function draw() {
   const _byLayer = new Map();
   for (const f of state.features) {
     const L = layerOf(f);
-    if (!L || !L.visible || _cull(f) || catOff(L, f)) continue;
+    if (!layerDrawable(L) || _cull(f) || catOff(L, f)) continue;
     let arr = _byLayer.get(L); if (!arr) _byLayer.set(L, arr = []); arr.push(f);
   }
   // занятые экранные bbox уже отрисованных подписей этого слоя за проход —
@@ -3564,10 +3601,13 @@ function undoDepth() {
   const n = state.features.length;
   return n > 20000 ? 5 : n > 8000 ? 15 : 100;
 }
-function serializeHistoryState() {
-  const saved = collectState();
+// Состояние истории БЕЗ объектов: слои, их оформление, поля, порядок, источники.
+// Мало по объёму и меняется редко, поэтому хранится строкой целиком.
+function historySmallState() {
+  const saved = collectState({ skipHistory: true });
   delete saved.undo;
   delete saved.redo;
+  delete saved.features;
   // Эти настройки не принадлежат геометрической истории: пользователь не
   // ожидает, что Undo чертежа переключит подложку, состав альбома или вариант.
   delete saved.name;
@@ -3578,26 +3618,125 @@ function serializeHistoryState() {
   delete saved.albumConfig;
   return JSON.stringify({ history_version: 2, ...saved });
 }
+// ---------------------------------------------------------------------------
+// Инкрементальные снимки отмены.
+//
+// Раньше каждый шаг истории хранил JSON всего проекта целиком. На реальной
+// выгрузке ОГД (20 000 объектов) один снимок весит ~13 МБ, а глубина истории —
+// до 100 шагов: больше гигабайта строк в памяти, хотя соседние шаги отличаются
+// парой объектов.
+//
+// Теперь запись хранит объекты ПООБЪЕКТНО, и неизменившиеся объекты
+// переиспользуют ТУ ЖЕ строку, что и в предыдущей записи. Строки в JS
+// неизменяемы и хранятся по ссылке, поэтому сто шагов держат один экземпляр
+// содержимого и сто массивов указателей. Замерено на 20 000 объектов:
+// пообъектная сериализация стоит столько же, что и целиком (186 против 187 мс),
+// сравнение с предыдущим шагом добавляет ~7 %.
+//
+// Записи остаются САМОДОСТАТОЧНЫМИ (без цепочки ключевых кадров): стеки в
+// остальном коде режут через slice/shift/pop, и любая цепочка сломалась бы.
+function historySnapshot(prev = null) {
+  const ids = [], jsons = [];
+  const prevById = prev ? prev.byId : null;
+  let freshBytes = 0;
+  for (const feature of state.features) {
+    const id = feature.id;
+    const json = JSON.stringify(feature);
+    const before = prevById ? prevById.get(id) : undefined;
+    // тот же контент — кладём ТУ ЖЕ строку, память не дублируется
+    if (before === json) { ids.push(id); jsons.push(before); continue; }
+    ids.push(id); jsons.push(json);
+    freshBytes += json.length;
+  }
+  const small = historySmallState();
+  const smallShared = prev && prev.small === small ? prev.small : small;
+  if (smallShared !== (prev && prev.small)) freshBytes += small.length;
+  const byId = new Map();
+  for (let i = 0; i < ids.length; i++) byId.set(ids[i], jsons[i]);
+  return { small: smallShared, ids, jsons, byId, freshBytes };
+}
+// объявлением, а не const: используется в значении по умолчанию pushHistoryEntry
+function historyTail(stack) {
+  return stack && stack.length ? stack[stack.length - 1] : null;
+}
+// Снимок → прежний формат v2 (файл проекта, автосейв, отчёт об ошибке)
+function historyEntryToString(entry) {
+  if (typeof entry === "string") return entry;
+  if (!entry || !Array.isArray(entry.jsons)) return null;
+  return `${entry.small.slice(0, -1)},"features":[${entry.jsons.join(",")}]}`;
+}
+// Прежний формат v2 → снимок (открытие проекта, восстановление автосейва)
+function historyEntryFromString(serialized) {
+  if (typeof serialized !== "string") return null;
+  let parsed;
+  try { parsed = JSON.parse(serialized); } catch (error) { return null; }
+  if (!isRecord(parsed) || !Array.isArray(parsed.features)) return null;
+  const features = parsed.features;
+  delete parsed.features;
+  const ids = [], jsons = [], byId = new Map();
+  let freshBytes = 0;
+  for (const feature of features) {
+    const json = JSON.stringify(feature);
+    ids.push(feature.id); jsons.push(json); byId.set(feature.id, json);
+    freshBytes += json.length;
+  }
+  const small = JSON.stringify(parsed);
+  return { small, ids, jsons, byId, freshBytes: freshBytes + small.length };
+}
+// В файл и автосейв кладём прежний строковый формат, но только последние шаги:
+// глубокая история на диске не нужна, а сериализация стоит дорого.
+const HISTORY_PERSIST_MAX = 10;
+function historyStackToStrings(stack) {
+  if (!Array.isArray(stack)) return [];
+  return stack.slice(-HISTORY_PERSIST_MAX).map(historyEntryToString).filter(Boolean);
+}
+function historyStackFromStrings(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(historyEntryFromString).filter(Boolean);
+}
 function syncHistoryControls() {
   const undoButton = document.getElementById("btn-undo");
   const redoButton = document.getElementById("btn-redo");
   if (undoButton) undoButton.disabled = !state.undo.length;
   if (redoButton) redoButton.disabled = !state.redo.length;
 }
-function pushHistoryEntry(serialized = serializeHistoryState()) {
-  state.undo.push(serialized);
+// Потолок по ОБЪЁМУ вдобавок к числу шагов. Считаем только НОВОЕ содержимое
+// (freshBytes): объекты, унаследованные от предыдущего шага, лежат в памяти
+// одним экземпляром и повторно место не занимают.
+const HISTORY_BYTE_BUDGET = 64 * 1024 * 1024;
+function trimHistoryToBudget(stack) {
+  let bytes = 0;
+  for (const entry of stack) bytes += (entry && entry.freshBytes) || 0;
+  while (stack.length > 1 && bytes > HISTORY_BYTE_BUDGET)
+    bytes -= (stack.shift().freshBytes) || 0;
+}
+function pushHistoryEntry(entry = historySnapshot(historyTail(state.undo))) {
+  state.undo.push(entry);
   const max = undoDepth();
   while (state.undo.length > max) state.undo.shift();
+  trimHistoryToBudget(state.undo);
   state.redo = [];
   syncHistoryControls();
 }
 function snapshot() {
   pushHistoryEntry();
 }
-function commitHistoryFrom(serialized) {
-  if (serialized && serialized !== serializeHistoryState()) pushHistoryEntry(serialized);
+// Снимки равны, если совпадают «мелкое» состояние и ПОСТРОЧНО объекты. Строки
+// неизменившихся объектов переиспользуются, поэтому сравнение обычно сводится к
+// сравнению ссылок и не стоит ничего.
+function historySameSnapshot(a, b) {
+  if (!a || !b || a.small !== b.small || a.jsons.length !== b.jsons.length) return false;
+  for (let i = 0; i < a.jsons.length; i++)
+    if (a.ids[i] !== b.ids[i] || a.jsons[i] !== b.jsons[i]) return false;
+  return true;
 }
-function restoreHistoryEntry(serialized) {
+function commitHistoryFrom(before) {
+  if (!before) return;
+  if (!historySameSnapshot(before, historySnapshot(before))) pushHistoryEntry(before);
+}
+function restoreHistoryEntry(entry) {
+  const serialized = historyEntryToString(entry);
+  if (serialized == null) throw new Error("unsupported history entry");
   const restored = JSON.parse(serialized);
   if (Array.isArray(restored)) {
     state.features = normalizeFeatureList(restored).map(feature => upgradeFeature(feature));
@@ -3652,7 +3791,7 @@ function syncNextId() {
 function undo() {
   if (!state.undo.length) return;
   const entry = state.undo.pop();
-  const current = serializeHistoryState();
+  const current = historySnapshot(historyTail(state.redo));
   state.redo.push(current);
   while (state.redo.length > undoDepth()) state.redo.shift();
   try {
@@ -3669,7 +3808,7 @@ function undo() {
 function redo() {
   if (!state.redo.length) return;
   const entry = state.redo.pop();
-  const current = serializeHistoryState();
+  const current = historySnapshot(historyTail(state.undo));
   state.undo.push(current);
   while (state.undo.length > undoDepth()) state.undo.shift();
   try {
@@ -3683,7 +3822,7 @@ function redo() {
   }
   clearSelection(); syncHistoryControls(); afterChange();
 }
-window.captureHistoryState = serializeHistoryState;
+window.captureHistoryState = () => historySnapshot(historyTail(state.undo));
 window.commitHistoryFrom = commitHistoryFrom;
 let autosaveTimer = null;
 let saveStateQueue = Promise.resolve();
@@ -3721,7 +3860,9 @@ function applyPendingProjectName() {
 // полный снимок состояния студии (общий проектный + личный вид). Один
 // источник и для localStorage/autosave, и для веб-синхронизации (collab.js
 // берёт из него только «общие» ключи проекта).
-function collectState() {
+// skipHistory — для historySmallState(): иначе каждый снимок отмены заново
+// материализовал бы десяток записей истории в строки (O(10n) на жест).
+function collectState(opts = {}) {
   return {
     schema_version: STATE_SCHEMA_VERSION,
     features: state.features, nextId: state.nextId,
@@ -3752,8 +3893,8 @@ function collectState() {
     // undo/redo — снимки всего проекта; у больших выгрузок их сериализация в
     // автосейв = главный фриз. Для них историю не персистим (в сессии undo
     // работает, после перезагрузки — сбрасывается). Малые — как прежде.
-    undo: state.features.length > 8000 ? [] : (state.undo || []),
-    redo: state.features.length > 8000 ? [] : (state.redo || []),
+    undo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.undo),
+    redo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.redo),
     projectCustomKinds: state.projectCustomKinds || [],
     variants: state.variants || [],
     accessRadii: state.accessRadii,
@@ -3777,7 +3918,8 @@ function collectProjectSettings() {
 function collectPersonal() {
   return {
     activeLayerId: state.activeLayerId, basemapSource: basemap.source,
-    exportStyle: exportStyleMode(), undo: state.undo || [], redo: state.redo || [],
+    exportStyle: exportStyleMode(),
+    undo: historyStackToStrings(state.undo), redo: historyStackToStrings(state.redo),
     variants: state.variants || [], accessRadii: state.accessRadii,
     layersVisible: Object.fromEntries(LAYERS_V2.map(L => [L.id, L.visible])),
   };
@@ -3793,15 +3935,55 @@ function setSaveStatus(text, kind = "") {
   el.textContent = text;
   el.className = kind ? `save-${kind}` : "";
 }
+// Отказ автосохранения раньше было видно только по мелкой надписи «Не сохранено»
+// в статус-строке: оба вызывающих места глушат ошибку через .catch(() => {}).
+// Можно было часами работать с неработающим автосейвом и потерять всё при
+// закрытии вкладки. Теперь — заметное сообщение (один раз на серию неудач)
+// и предупреждение браузера при попытке уйти.
+let autosaveFailed = false;
+function noteAutosaveResult(ok) {
+  if (ok === autosaveFailed) {   // состояние сменилось
+    autosaveFailed = !ok;
+    if (!ok) toast("Автосохранение не работает — сохраните проект файлом "
+      + "(Проект → Сохранить .grado-web.json), иначе правки пропадут", "error");
+  }
+}
+// Версия автосейва, поверх которой пишет ЭТА вкладка. Хранилище одно на origin,
+// и раньше каждая вкладка перезаписывала его целиком без сверки: вторая вкладка,
+// открытая час назад, одной правкой затирала свежую работу первой — молча и
+// невосстановимо. Теперь пишем «поверх известной версии» (семантика If-Match):
+// разошлись — сервер отвечает 409, и мы НЕ затираем чужое.
+let autosaveBase = null;
+let autosaveConflict = false;
+function noteAutosaveConflict() {
+  if (autosaveConflict) return;
+  autosaveConflict = true;
+  toast("Проект изменён в другой вкладке. Чтобы не затереть те правки, "
+    + "автосохранение здесь остановлено — сохраните эту версию файлом "
+    + "(Проект → Сохранить .grado-web.json) или перезагрузите страницу", "error");
+}
+window.addEventListener("beforeunload", event => {
+  if (!autosaveFailed && !autosaveConflict) return;
+  event.preventDefault();
+  event.returnValue = "";   // требуется частью браузеров для показа диалога
+});
+
 async function saveStateRequest(payload, options = {}) {
   setSaveStatus("Сохранение…", "busy");
   try {
+    if (autosaveConflict) throw new Error("Автосохранение остановлено из-за конфликта вкладок");
     const headers = { "Content-Type": "application/json" };
     if (options.checkpoint) headers["X-Grado-Checkpoint"] = "1";
+    if (autosaveBase) headers["X-Grado-Base"] = autosaveBase;
     const response = await fetch("/api/autosave", {
       method: "POST", headers,
       body: JSON.stringify(payload),
     });
+    if (response.status === 409) {
+      setSaveStatus("Не сохранено", "error");
+      noteAutosaveConflict();
+      throw new Error("Проект изменён в другой вкладке");
+    }
     if (!response.ok) {
       const issue = await response.json().catch(() => ({}));
       throw new Error(issue.error || `HTTP ${response.status}`);
@@ -3812,9 +3994,12 @@ async function saveStateRequest(payload, options = {}) {
     const time = Number.isNaN(savedAt.getTime()) ? "" :
       ` ${savedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
     setSaveStatus(`Сохранено${time}`, "ok");
+    if (result && result.saved_at) autosaveBase = result.saved_at;
+    noteAutosaveResult(true);
     return result;
   } catch (error) {
     setSaveStatus("Не сохранено", "error");
+    noteAutosaveResult(false);
     throw error;
   }
 }
@@ -3944,13 +4129,24 @@ function afterChange() {
 let tepTimer = null;
 let tepRequestVersion = 0;
 let tepAbortController = null;
+// «+value || fallback» подменял ЛЮБОЙ falsy результат, в том числе легитимный
+// ноль: «доля жилья 0 %» (полностью нежилая застройка — редактор её разрешает,
+// min="0") молча превращалась в 80 %, и ТЭП считал население, ДОО, школы и
+// парковки для несуществующих жителей. Ядро ноль принимает корректно
+// (bounded(params.ratio_zh, 0, 100, 80)), поэтому фолбэк нужен только для
+// пустого/нечислового поля.
+function numParam(id, fallback) {
+  const el = document.getElementById(id);
+  const value = el ? Number.parseFloat(el.value) : NaN;
+  return Number.isFinite(value) ? value : fallback;
+}
 function params() {
-  return { density: +document.getElementById("p-density").value || 25,
-           ratio_zh: +document.getElementById("p-ratio").value || 80,
-           education_zone: +document.getElementById("p-education-zone").value === 2 ? 2 : 1,
-           territory_mode: +document.getElementById("p-territory-mode").value === 2 ? 2 : 1,
-           k_rail: +document.getElementById("p-krail").value || 1,
-           k_ba: +document.getElementById("p-kba").value || 0.5 };
+  return { density: numParam("p-density", 25),
+           ratio_zh: numParam("p-ratio", 80),
+           education_zone: numParam("p-education-zone", 1) === 2 ? 2 : 1,
+           territory_mode: numParam("p-territory-mode", 1) === 2 ? 2 : 1,
+           k_rail: numParam("p-krail", 1),
+           k_ba: numParam("p-kba", 0.5) };
 }
 const TEP_AUTO_MAX = 8000;   // выше — авто-ТЭП выключен: иначе на КАЖДУЮ правку
                              // стрингуется и уходит на сервер весь проект (десятки
@@ -6434,7 +6630,7 @@ function hitCandidates(wx, wy, tolW) {
         seen.add(it);
         if (it.x1 < wx - tolW || it.x0 > wx + tolW ||
             it.y1 < wy - tolW || it.y0 > wy + tolW) continue;
-        if (!it.L.visible || it.L.locked || catOff(it.L, it.f)) continue;
+        if (!layerDrawable(it.L) || it.L.locked || catOff(it.L, it.f)) continue;
         out.push(it);
       }
     }
@@ -6628,6 +6824,17 @@ cv.addEventListener("pointerdown", e => {
     if (!toolFitsLayer("circle", L)) {
       toast("Этот слой не поддерживает окружности (выберите/создайте слой с геометрией окружность)", "warn");
       return;
+    }
+    // Второй клик по уже поставленному центру задаёт радиус и завершает
+    // окружность; иначе он просто переставлял бы центр.
+    if (state.drawing && state.drawing.center) {
+      const c = state.drawing.center;
+      const r = Math.hypot(s.p[0] - c[0], s.p[1] - c[1]);
+      if (r > 0.5) {
+        state.drawing = null; state.typed = "";
+        addFeature(L.id, { circle: { cx: c[0], cy: c[1], r } });
+        return;
+      }
     }
     state.drawing = { center: s.p, r: 0 };
     state.typed = "";
@@ -6827,11 +7034,15 @@ window.addEventListener("pointerup", e => {
     const c = state.drawing.center;
     const mp = state.mouse || [c[0], c[1]];
     const r = Math.hypot(mp[0] - c[0], mp[1] - c[1]);
-    state.drawing = null;
     const L = activeLayer();
     if (L && r > 0.5) {
+      state.drawing = null;
       addFeature(L.id, { circle: { cx: c[0], cy: c[1], r } });
     } else {
+      // Клик без протягивания: центр ОСТАЁТСЯ, радиус задаётся вторым кликом,
+      // вводом числа или Enter. Раньше pointerup того же клика сбрасывал
+      // drawing, и оба этих способа (стандартный приём САПР) были недостижимы —
+      // окружность можно было построить только нажать-протянуть-отпустить.
       draw();
     }
   }
@@ -6896,7 +7107,16 @@ document.addEventListener("keydown", e => {
   if ((e.metaKey || e.ctrlKey) && e.code === "KeyN") {
     e.preventDefault(); document.getElementById("btn-new-project").click(); return;
   }
-  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  // TEXTAREA и contenteditable раньше сюда проваливались: в редакторе формул
+  // пробел не набирался (preventDefault ниже), а Backspace ПАРАЛЛЕЛЬНО удалял
+  // выделенные объекты холста — правка текста молча уносила геометрию.
+  // BUTTON: пробел обязан активировать кнопку (WCAG 2.1.1), а Delete при
+  // фокусе на кнопке в модалке — не стирать объекты за её спиной.
+  const t = e.target;
+  if (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA"
+      || t.isContentEditable) return;
+  if (t.tagName === "BUTTON" &&
+      (e.code === "Space" || e.key === "Enter" || e.key === "Delete" || e.key === "Backspace")) return;
   if (e.key === "Shift") { shiftDown = true; if (state.drawing) draw(); return; }
   if (e.code === "Space") { spaceDown = true; e.preventDefault(); return; }
   if ((e.metaKey || e.ctrlKey) && e.code === "KeyZ") {
@@ -6912,6 +7132,22 @@ document.addEventListener("keydown", e => {
   }
   // набор при рисовании: длина (50), абсолют X Y (100 200 или 100;200),
   // полярно (длина<угол°). Разрешены цифры, разделители, знак, угол
+  // Начало фигуры С КЛАВИАТУРЫ. Набор координат гейтился уже начатым
+  // рисованием, а начиналось оно только в pointerdown холста — то есть первую
+  // точку можно было поставить исключительно мышью, хотя подпись холста
+  // обещает «Enter завершает фигуру» (WCAG 2.1.1 для основной функции
+  // приложения). Цифра при активном инструменте геометрии открывает набор:
+  // дальше работает уже существующий формат «100 200» (абсолютные X Y),
+  // которому предыдущая точка не нужна. Окружность не сеем — ей сначала нужен
+  // центр, а не радиус.
+  if (!state.drawing && !state.xf && TOOL_GEOM[state.tool] && state.tool !== "circle"
+      && /^[0-9]$/.test(e.key) && isDrawableLayer(activeLayer())) {
+    state.drawing = { pts: [] };
+    state.typed = e.key;
+    toast("Введите координаты «X Y» и нажмите Enter", "info");
+    draw();
+    return;
+  }
   if (state.drawing && /^[0-9.,;<> -]$/.test(e.key)) { state.typed += e.key; draw(); return; }
   if (state.drawing && e.key === "Backspace") {
     state.typed = state.typed.slice(0, -1); draw(); return;
@@ -7330,8 +7566,8 @@ async function download(url, suffix) {
                     projectCustomKinds: state.projectCustomKinds || [],
     variants: state.variants || [],
     accessRadii: state.accessRadii,
-                    undo_stack: state.undo || [],
-                    redo_stack: state.redo || [],
+                    undo_stack: historyStackToStrings(state.undo),
+                    redo_stack: historyStackToStrings(state.redo),
                     albumConfig: state.albumConfig || null,
                     studioState: collectProjectSettings() };
   if (canvasStyles) payload.canvasStyles = canvasStyles;
@@ -7831,8 +8067,8 @@ function applyRestoredState(d) {
   state.features = (d.features || []).map(feature => upgradeFeature(feature));  // legacy kind → слой v2
   // ограничиваем восстанавливаемую историю (старые автосейвы больших выгрузок
   // держали до 100 снимков всего проекта ≈ гигабайты в памяти)
-  if (Array.isArray(d.undo)) state.undo = d.undo.slice(-undoDepth());
-  if (Array.isArray(d.redo)) state.redo = d.redo.slice(-undoDepth());
+  if (Array.isArray(d.undo)) state.undo = historyStackFromStrings(d.undo.slice(-undoDepth()));
+  if (Array.isArray(d.redo)) state.redo = historyStackFromStrings(d.redo.slice(-undoDepth()));
   // L2b-миграция: старые проекты ссылались на удалённые пресет-слои
   // (project.territory.boundary и т.п.). Осиротевшие объекты переселяем в
   // воссозданные слои их вида, иначе они молча исчезли бы с холста.
@@ -7958,6 +8194,8 @@ window.afterExternalApply = function () {
   // сайта) — пробуем резервную копию на диске сервера
   applyPendingProjectName();
   fetch("/api/autosave").then(r => r.ok ? r.json() : null).then(d => {
+    // Отметка версии, поверх которой эта вкладка будет писать (см. autosaveBase)
+    if (d && d.saved_at) autosaveBase = d.saved_at;
     const saved = d && d.state && typeof d.state === "object" ? d.state : d;
     if (saved && Array.isArray(saved.features) && applyRestoredState(d)) {
       draw(); renderProps(); renderLayers(); renderSources(); refreshTep(); fitView();

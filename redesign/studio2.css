@@ -329,7 +329,11 @@
 .data-step-view{flex:1 1 auto!important;min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden}
 .data-workspace{display:grid;grid-template-columns:260px minmax(0,1fr);flex:1 1 auto;min-height:0;border:1px solid var(--field-border);
   border-radius:var(--r-md);background:var(--panel);overflow:hidden}
-.data-source-nav{min-width:0;border-right:1px solid var(--hairline);display:flex;flex-direction:column;background:var(--field-bg)}
+/* min-height:0 обязателен: без него список источников не сжимается до высоты
+   колонки и выдавливает закреплённую снизу кнопку «Импортировать файл» за
+   границу .data-workspace (overflow:hidden) — на 1280×720 она пропадала
+   совсем, и импорт файла было не открыть мышью. */
+.data-source-nav{min-width:0;min-height:0;border-right:1px solid var(--hairline);display:flex;flex-direction:column;background:var(--field-bg)}
 .data-source-nav h3,.data-source-panel h3,.data-review-summary h3{margin:0;font-size:var(--fs-15);font-weight:600;color:var(--text)}
 .data-source-nav h3{padding:15px 16px 12px;background:var(--panel);border-bottom:1px solid var(--hairline)}
 .data-source-list{display:flex;flex-direction:column;min-height:0;overflow-y:auto}
@@ -344,7 +348,7 @@
   white-space:normal;line-height:1.25}.data-source-copy small{font-size:var(--fs-11);color:var(--muted);white-space:normal;line-height:1.25}
 .data-source-count{min-width:25px;height:22px;padding:0 7px;border-radius:var(--r-pill);background:var(--panel);display:grid;place-items:center;
   font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}.data-source-count.selected{background:var(--accent-weak);color:var(--accent)}
-.modal-overlay .data-file-action{height:auto!important;min-height:58px;margin:auto 12px 12px;padding:9px 11px!important;display:flex;align-items:center;
+.modal-overlay .data-file-action{flex:none;height:auto!important;min-height:58px;margin:auto 12px 12px;padding:9px 11px!important;display:flex;align-items:center;
   gap:10px;text-align:left;background:var(--panel);border-color:var(--field-border)}
 .data-file-action>.ic{width:18px;height:18px;color:var(--muted)}.data-file-action span{display:flex;flex-direction:column;gap:2px}
 .data-file-action b{font-size:var(--fs-12);font-weight:550}.data-file-action small{font-size:10px;color:var(--muted)}
@@ -1051,3 +1055,27 @@ input[type=range].range-op:focus-visible{outline:2px solid var(--accent);outline
   animation:fg-spin .7s linear infinite}
 @keyframes fg-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.fg-loading::before{animation-duration:1.6s}}
+
+/* ---- обратная связь об ошибках -------------------------------------------
+   Эти правила жили в style.css, который не подключён к index.html: плашка
+   #errbar рендерилась статическим блоком без фона и сдвигала шапку, а тосты
+   ошибок были неотличимы от обычных подсказок. Переношу в подключённый слой. */
+#errbar{position:fixed;top:calc(var(--header-h,52px) + 12px);left:50%;
+  transform:translateX(-50%);display:none;align-items:center;gap:var(--sp-3);
+  width:max-content;max-width:min(620px,calc(100vw - 24px));
+  padding:10px 10px 10px 14px;border:1px solid color-mix(in srgb,var(--danger) 28%,var(--hairline));
+  border-radius:var(--r-md);background:var(--panel);color:var(--text);
+  box-shadow:var(--shadow-lg);font-size:var(--fs-12);line-height:1.4;
+  z-index:calc(var(--z-overlay) + 8)}
+#errbar::before{content:"";width:8px;height:8px;flex:0 0 auto;border-radius:50%;background:var(--danger)}
+#errbar .errbar-close{width:28px;height:28px;min-width:28px;padding:0;border:0;
+  border-radius:50%;background:transparent;color:var(--text-2);font-size:20px;line-height:1}
+#errbar .errbar-close:hover{background:var(--field-bg);color:var(--text)}
+#st-toast.toast-error{color:var(--danger);font-weight:var(--fw-semibold)}
+#st-toast.toast-warn{color:var(--warning);font-weight:var(--fw-semibold)}
+#st-toast.toast-ok{color:var(--success)}
+
+/* Отключённые кнопки шапки (Отменить/Вернуть) выглядели как активные:
+   стиль :disabled был только у .tool и кнопок модалок. */
+.iconbtn:disabled,.btn:disabled{opacity:.38;cursor:default;transform:none}
+.iconbtn:disabled:hover,.btn:disabled:hover{background:transparent;border-color:transparent}

@@ -290,6 +290,20 @@ function openLayerStyle(layer, opts = {}) {
           </div>`
         ).join("")}</div>
       </section>`;
+  // Масштабная видимость: городская выгрузка не нужна на обзорном масштабе.
+  // Пресеты — рабочие знаменатели ЛГР, «всегда» снимает ограничение.
+  const scaleMaxNow = (layer.fmt && layer.fmt.scale_max) || 0;
+  const scaleSection = `
+      <section class="style-section">
+        <div class="style-section-head"><span><b>Показывать до масштаба</b><small>Слой скроется при отдалении — обзор не тормозит на больших выгрузках</small></span></div>
+        <div class="fmt-body">
+          <select id="fmt-scale-max" aria-label="Показывать слой до масштаба">
+            ${[[0, "всегда"], [2000, "1:2000"], [5000, "1:5000"], [10000, "1:10 000"],
+               [25000, "1:25 000"], [50000, "1:50 000"]]
+              .map(([v, t]) => `<option value="${v}"${scaleMaxNow === v ? " selected" : ""}>${t}</option>`).join("")}
+          </select>
+        </div>
+      </section>`;
   const hasFill = cur.fill != null && cur.fill !== "transparent";
   const opacity = boundedNumber(Math.round((cur.fillOpacity != null ? cur.fillOpacity : 1) * 100), 10, 100, 100);
   const dp = dashPresetOf(cur.dash);
@@ -326,6 +340,7 @@ function openLayerStyle(layer, opts = {}) {
     <div id="ls-single" role="tabpanel" aria-labelledby="style-mode-single"${mode === "single" ? "" : " hidden"}>
       <label class="style-preset-label"><span>Базовый знак</span><select id="fmt-preset">${stylePickerOptions(layer.fmt && layer.fmt.style_ref)}</select></label>
       ${catsSection}
+      ${scaleSection}
       <div class="style-editor-grid">
         <div class="style-controls">
           <section class="style-section">
@@ -459,6 +474,14 @@ function openLayerStyle(layer, opts = {}) {
     state._snapIndex = null;
     draw();
   }));
+  // живой отклик: смена порога сразу показывает, виден ли слой на этом масштабе
+  if ($("fmt-scale-max")) $("fmt-scale-max").addEventListener("change", () => {
+    const next = parseInt($("fmt-scale-max").value, 10) || 0;
+    const fmt = { ...(layer.fmt || {}) };
+    if (next > 0) fmt.scale_max = next; else delete fmt.scale_max;
+    layer.fmt = fmt;
+    draw();
+  });
   const onColor = () => {
     uniformStyleDirty = true;
     $("fmt-preset").value = "";
@@ -669,6 +692,9 @@ function openLayerStyle(layer, opts = {}) {
 
     const off = catsOffNow();
     if (off.length) fmt.cats_off = off; else delete fmt.cats_off;
+
+    const scaleMax = parseInt($("fmt-scale-max")?.value, 10) || 0;
+    if (scaleMax > 0) fmt.scale_max = scaleMax; else delete fmt.scale_max;
     if (Object.keys(categoryStyles).length) fmt.cat_styles = clone(categoryStyles);
     else delete fmt.cat_styles;
 
@@ -762,8 +788,10 @@ function openLayerStyle(layer, opts = {}) {
     layer.fmt = collect(); draw(); updateDashPreview();
   });
   $("ls-single").querySelectorAll("input, select").forEach(el => {
+    // fmt-scale-max — не визуальный параметр: без исключения смена масштабной
+    // видимости включала бы uniformStyleDirty и затирала оформление категорий.
     if (el.id === "fmt-preset" || el.id === "fmt-copy-to" ||
-        el.classList.contains("fmt-cat")) return;
+        el.id === "fmt-scale-max" || el.classList.contains("fmt-cat")) return;
     for (const ev of ["input", "change"])
       el.addEventListener(ev, () => {
         uniformStyleDirty = true;

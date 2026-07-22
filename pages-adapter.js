@@ -398,6 +398,17 @@
           const state = await bodyJson(input, options);
           if (!isRecord(state) || !Array.isArray(state.features))
             return json({ error: "Некорректное состояние автосохранения" }, 400);
+          // Оптимистичная блокировка: клиент присылает версию, поверх которой
+          // пишет. Разошлась с хранилищем — значит, другая вкладка сохранила
+          // раньше, и слепая перезапись стёрла бы её работу. Без базы (первая
+          // запись вкладки, старый клиент) проверку не делаем.
+          const base = requestHeader(input, options, "X-Grado-Base");
+          if (base) {
+            const current = await storedProjectGet(AUTOSAVE_KEY).catch(() => null);
+            if (current && current.saved_at && current.saved_at !== base)
+              return json({ error: "Проект изменён в другой вкладке",
+                saved_at: current.saved_at }, 409);
+          }
           const savedAt = new Date().toISOString();
           const envelope = { state, saved_at: savedAt };
           try {

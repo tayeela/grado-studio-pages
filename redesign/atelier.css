@@ -92,7 +92,10 @@ header .btn:hover{background:var(--field-bg);border-color:var(--field-border)}
 header .btn.primary{background:var(--accent);border-color:var(--accent);padding-inline:12px}
 header .hsep{margin-inline:0}
 
-.workspace-modes{display:flex;align-self:stretch;border-left:1px solid var(--hairline);border-right:1px solid var(--hairline)}
+/* min-width:0 + overflow:hidden — страховка: если подписи всё же не помещаются
+   (другой шрифт, локаль, масштаб), переключатель обрежется сам, а не вытолкнет
+   кнопки справа за пределы экрана. */
+.workspace-modes{display:flex;align-self:stretch;min-width:0;overflow:hidden;border-left:1px solid var(--hairline);border-right:1px solid var(--hairline)}
 .workspace-modes button{position:relative;display:flex;align-items:center;gap:7px;padding:0 14px;color:var(--text-2);font-size:12px;font-weight:560;white-space:nowrap}
 .workspace-modes button+button{border-left:1px solid var(--hairline)}
 .workspace-modes button:hover{background:var(--field-bg);color:var(--text)}
@@ -193,10 +196,17 @@ body[data-workspace-mode="measure"] #toolbar [data-workspace-tool]:not([data-wor
 .modal-overlay{background:rgba(37,42,49,.33);backdrop-filter:blur(2px)}
 .modal-overlay .modal{border-radius:var(--r-lg);background:var(--glass-strong);backdrop-filter:none;box-shadow:var(--shadow-lg)}
 
-@media (max-width:1260px){
+/* Шапка не переносится (flex-wrap:nowrap), а её элементы не сжимаются, поэтому
+   при подписях режимов ей требуется ~1360px. Порог 1260px оставлял «дыру»
+   1261–1358px, где правые кнопки (в т.ч. «Скрыть инспектор») выдавливались за
+   вьюпорт и становились недоступны — ровно на самой ходовой ширине 1280px.
+   Схлопываем подписи заранее. */
+@media (max-width:1400px){
   .workspace-modes button{padding-inline:10px}
   .workspace-modes button span{display:none}
   .workspace-modes button[aria-pressed="true"] span{display:inline}
+}
+@media (max-width:1260px){
   header .btn[data-menu="menu-out"]{display:none}
 }
 
