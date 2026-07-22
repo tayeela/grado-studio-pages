@@ -1697,19 +1697,45 @@ function tileYToLat(ty, z) {
   return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
+// Кэш тайлов был безлимитным и чистился только при смене подложки. За долгую
+// сессию с панорамированием по городу он накапливал тысячи декодированных
+// Image (~256 КБ битмапа каждый) — сотни мегабайт, вкладка тяжелела.
+// Map хранит порядок вставки, поэтому LRU обходится переустановкой ключа при
+// обращении и удалением самого старого при переполнении.
+const TILE_CACHE_MAX = 800;   // ~200 МБ битмапов в худшем случае
 function tileImage(z, x, y) {
   const key = `${basemap.source}/${z}/${x}/${y}`;
   let e = basemap.cache.get(key);
-  if (!e) {
-    e = { img: new Image(), loaded: false, failed: false };
-    e.img.onload = () => { e.loaded = true; draw(); };
-    e.img.onerror = () => { e.failed = true; };
-    e.img.src = window.gradoTileUrl
-      ? window.gradoTileUrl(z, x, y, basemap.source)
-      : `/api/tiles/${z}/${x}/${y}.png?src=${basemap.source}`;
+  if (e) {
+    // обращение — освежаем позицию в порядке вытеснения
+    basemap.cache.delete(key);
     basemap.cache.set(key, e);
+    // неудачный тайл больше не «залипает» навсегда: даём повторную попытку
+    if (e.failed) {
+      e.failed = false; e.loaded = false;
+      e.img = new Image();
+      e.img.onload = () => { e.loaded = true; draw(); };
+      e.img.onerror = () => { e.failed = true; };
+      e.img.src = tileUrl(z, x, y);
+    }
+    return e;
+  }
+  e = { img: new Image(), loaded: false, failed: false };
+  e.img.onload = () => { e.loaded = true; draw(); };
+  e.img.onerror = () => { e.failed = true; };
+  e.img.src = tileUrl(z, x, y);
+  basemap.cache.set(key, e);
+  while (basemap.cache.size > TILE_CACHE_MAX) {
+    const oldest = basemap.cache.keys().next().value;
+    if (oldest === key) break;
+    basemap.cache.delete(oldest);
   }
   return e;
+}
+function tileUrl(z, x, y) {
+  return window.gradoTileUrl
+    ? window.gradoTileUrl(z, x, y, basemap.source)
+    : `/api/tiles/${z}/${x}/${y}.png?src=${basemap.source}`;
 }
 
 function drawBasemap(w, h) {
@@ -3860,8 +3886,9 @@ function applyPendingProjectName() {
 // полный снимок состояния студии (общий проектный + личный вид). Один
 // источник и для localStorage/autosave, и для веб-синхронизации (collab.js
 // берёт из него только «общие» ключи проекта).
-// skipHistory — для historySmallState(): иначе каждый снимок отмены заново
-// материализовал бы десяток записей истории в строки (O(10n) на жест).
+// Историю здесь НЕ материализуем: collectState() зовётся на каждую правку
+// (persist → afterChange), а превращение записей отмены в строки стоит дорого.
+// Её подшивает saveStateNow() — единственная точка реальной записи.
 function collectState(opts = {}) {
   return {
     schema_version: STATE_SCHEMA_VERSION,
@@ -3893,8 +3920,7 @@ function collectState(opts = {}) {
     // undo/redo — снимки всего проекта; у больших выгрузок их сериализация в
     // автосейв = главный фриз. Для них историю не персистим (в сессии undo
     // работает, после перезагрузки — сбрасывается). Малые — как прежде.
-    undo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.undo),
-    redo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.redo),
+    undo: [], redo: [],
     projectCustomKinds: state.projectCustomKinds || [],
     variants: state.variants || [],
     accessRadii: state.accessRadii,
@@ -4004,6 +4030,14 @@ async function saveStateRequest(payload, options = {}) {
   }
 }
 function saveStateNow(payload, options = {}) {
+  // История отмен сериализуется здесь, а не в collectState(): запись дебаунсится
+  // (1.5 с), а collectState() выполняется на каждую правку. Порог 8000 объектов
+  // прежний — у больших выгрузок историю на диск не пишем вовсе.
+  if (payload && typeof payload === "object" && Array.isArray(payload.features)) {
+    const heavy = payload.features.length > 8000;
+    payload.undo = heavy ? [] : historyStackToStrings(state.undo);
+    payload.redo = heavy ? [] : historyStackToStrings(state.redo);
+  }
   // Автосейв, контрольная копия и замена проекта обязаны завершаться в том
   // же порядке, в котором пользователь их запустил. ThreadingHTTPServer и
   // IndexedDB иначе могут последними записать более старый снимок.
