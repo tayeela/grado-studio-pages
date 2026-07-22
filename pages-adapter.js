@@ -249,8 +249,39 @@
   // ---- ГИС ОГД: слой качается целиком (портал не фильтрует по bbox) и живёт
   // в IndexedDB; повторная выгрузка любой площадки берёт его из кэша.
   const GISOGD_TTL_MS = 7 * 24 * 3600 * 1000;
-  const gisogdCacheKey = code => `gisogd_layer_${code}`;
-  async function gisogdLayerJson(code, notes, signal) {
+  const GISOGD_KEY_PREFIX = "gisogd_layer_";
+  const gisogdCacheKey = code => `${GISOGD_KEY_PREFIX}${code}`;
+  // Слой качается целиком и это ДОЛГО (у красных линий УДС — сотня мегабайт).
+  // Молчащий индикатор на такой загрузке неотличим от зависшего приложения,
+  // поэтому читаем поток и сообщаем байты наверх. Портал отдаёт Content-Length
+  // не всегда — тогда показываем сколько скачано, без процентов.
+  const gisogdProgress = (code, name, loaded, total) => {
+    if (typeof window === "undefined" || typeof CustomEvent !== "function") return;
+    window.dispatchEvent(new CustomEvent("grado-source-progress", {
+      detail: { source: "gisogd", code, name, loaded, total: total || null },
+    }));
+  };
+  const readWithProgress = async (response, code, name, signal) => {
+    const total = Number(response.headers.get("Content-Length")) || 0;
+    if (!response.body || typeof response.body.getReader !== "function")
+      return { text: await response.text(), bytes: total };
+    const reader = response.body.getReader();
+    const chunks = [];
+    let loaded = 0, ping = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (signal && signal.aborted) { reader.cancel().catch(() => {}); throwIfAborted(signal); }
+      chunks.push(value);
+      loaded += value.length;
+      // не чаще чем раз в четверть мегабайта: событие на каждый кусок — это
+      // тысячи перерисовок индикатора на одном слое
+      if (loaded - ping >= 262144) { ping = loaded; gisogdProgress(code, name, loaded, total); }
+    }
+    gisogdProgress(code, name, loaded, total || loaded);
+    return { text: new TextDecoder().decode(await new Blob(chunks).arrayBuffer()), bytes: loaded };
+  };
+  async function gisogdLayerJson(code, notes, signal, name) {
     throwIfAborted(signal);
     try {
       const hit = await databaseGet(gisogdCacheKey(code));
@@ -260,15 +291,42 @@
     throwIfAborted(signal);
     const response = await nativeFetch(pagesCore.gisogdLayerUrl(code), { signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const { text, bytes } = await readWithProgress(response, code, name || code, signal);
     throwIfAborted(signal);
-    notes.push(`слой ${code} загружен целиком (${(data.features || []).length} об.) — `
-      + "портал не фильтрует по области; дальше берётся из кэша браузера");
-    try { await databaseSet(gisogdCacheKey(code), { at: Date.now(), data }); }
+    const data = JSON.parse(text);
+    throwIfAborted(signal);
+    notes.push(`слой ${code} загружен целиком (${(data.features || []).length} об., `
+      + `${formatBytes(bytes)}) — портал не фильтрует по области; дальше берётся из кэша браузера`);
+    // размер запоминаем при записи: считать его потом — значит развернуть
+    // сотню мегабайт в строку только ради строчки в списке
+    try { await databaseSet(gisogdCacheKey(code), { at: Date.now(), bytes, name: name || null, data }); }
     catch (error) { notes.push(`слой ${code} не поместился в кэш — будет качаться заново`); }
     throwIfAborted(signal);
     return data;
   }
+  const formatBytes = bytes => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 МБ";
+    if (bytes < 1048576) return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+    return `${(bytes / 1048576).toFixed(1)} МБ`;
+  };
+  // Что лежит в кэше и сколько занимает — без этого единственный способ
+  // освободить место или обновить устаревший слой был «почистить браузер».
+  const gisogdCacheList = async () => {
+    const keys = await databaseRequest("readonly", store => store.getAllKeys());
+    const out = [];
+    for (const key of keys || []) {
+      if (typeof key !== "string" || !key.startsWith(GISOGD_KEY_PREFIX)) continue;
+      const code = key.slice(GISOGD_KEY_PREFIX.length);
+      const hit = await databaseGet(key).catch(() => null);
+      if (!hit) continue;
+      const at = hit.at || 0;
+      out.push({ code, name: hit.name || null, at: at || null,
+        bytes: Number(hit.bytes) || null,
+        features: Array.isArray(hit.data && hit.data.features) ? hit.data.features.length : null,
+        stale: !at || (Date.now() - at) >= GISOGD_TTL_MS });
+    }
+    return out.sort((a, b) => (b.at || 0) - (a.at || 0));
+  };
   // Каталог — 663 слоя портала; в памяти он жил до первой перезагрузки страницы,
   // и окно выгрузки каждый раз ждало сеть. Держим его рядом со слоями, в IndexedDB.
   const GISOGD_CATALOG_KEY = "gisogd_catalog";
@@ -357,7 +415,7 @@
         }
         for (const layer of sourceLayers) {
           try {
-            const raw = await gisogdLayerJson(layer.code, result.notes, signal);
+            const raw = await gisogdLayerJson(layer.code, result.notes, signal, layer.name);
             const part = pagesCore.importGisogdExtent(raw, layer, bbox);
             for (const group of (part.groups || [])) group.request_source = source;
             mergeExtent(result, part);
@@ -431,6 +489,30 @@
         if (error?.name === "AbortError" || signal?.aborted) throw abortError();
         return json({ error: `каталог ГИС ОГД недоступен: ${error.message || error}` }, 502);
       }
+    }
+    // Кэш слоёв портала: посмотреть, что занимает место, и убрать лишнее.
+    // Раньше единственным способом освободить его было «почистить браузер» —
+    // вместе с проектом и контрольными копиями.
+    if (path === "/api/gisogd-cache") {
+      if (method === "DELETE") {
+        try {
+          const keys = await databaseRequest("readonly", store => store.getAllKeys());
+          let removed = 0;
+          for (const key of keys || [])
+            if (typeof key === "string" && key.startsWith(GISOGD_KEY_PREFIX)) {
+              await databaseDelete(key); removed += 1;
+            }
+          return json({ removed });
+        } catch (error) { return json({ error: `кэш недоступен: ${error.message || error}` }, 500); }
+      }
+      try { return json({ layers: await gisogdCacheList(), ttl_days: GISOGD_TTL_MS / 86400000 }); }
+      catch (error) { return json({ layers: [], error: String(error.message || error) }); }
+    }
+    if (path.startsWith("/api/gisogd-cache/") && method === "DELETE") {
+      const code = decodeURIComponent(path.slice("/api/gisogd-cache/".length));
+      if (!/^[A-Za-z0-9_.-]{1,40}$/.test(code)) return json({ error: "некорректный код слоя" }, 400);
+      try { await databaseDelete(gisogdCacheKey(code)); return json({ removed: 1, code }); }
+      catch (error) { return json({ error: `кэш недоступен: ${error.message || error}` }, 500); }
     }
     if (path === "/api/initial-grado") return json(null);
     if (path === "/api/autosave/backups") {
