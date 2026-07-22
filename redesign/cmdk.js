@@ -67,7 +67,7 @@
       { t: "Измерение расстояния", k: "M", run: tool("measure"), available: () => toolEnabled("measure") },
     ]},
     { sec: "Данные", items: [
-      { t: "Данные по видимой области…", run: () => call("openDataFetch"), desktop: true },
+      { t: "Данные по видимой области…", run: () => call("openDataFetch") },
       { t: isWeb ? "Импорт ГИС ОГД (GeoJSON)" : "Импорт ГИС ОГД (ZIP / GeoJSON / папка)", run: () => click("btn-gisogd") },
       { t: "Импорт НСПД (файл расширения)", run: () => click("btn-nspd") },
       { t: "Заполнить примером (демо)", run: () => click("btn-demo") },
@@ -112,13 +112,20 @@
     query = (query || "").trim().toLowerCase();
     flat = []; let html = "";
     for (const g of COMMANDS) {
-      const items = g.items.filter(i => (!isWeb || !i.desktop) &&
-        (!i.available || i.available()) && (!query || i.t.toLowerCase().includes(query)));
+      // Настольные команды в браузере раньше просто исчезали из палитры: поиск
+      // «экспорт» не находил ничего, и это читалось как «функции нет вообще».
+      // Показываем их выключенными и подписанными — как в меню «Выпуск».
+      const items = g.items.filter(i =>
+        (!i.available || i.available() || (isWeb && i.desktop)) &&
+        (!query || i.t.toLowerCase().includes(query)));
       if (!items.length) continue;
       html += `<div class="cmdk-sec">${g.sec}</div>`;
       for (const i of items) {
+        const off = isWeb && i.desktop;
         const idx = flat.push(i) - 1;
-        html += `<div class="cmdk-row" role="option" aria-selected="false" data-i="${idx}"><svg class="ic"><use href="#i-search"/></svg>${i.t}${i.k ? `<span class="hint">${i.k}</span>` : ""}</div>`;
+        html += `<div class="cmdk-row${off ? " cmdk-off" : ""}" role="option" aria-selected="false"${
+          off ? ' aria-disabled="true"' : ""} data-i="${idx}"><svg class="ic"><use href="#i-search"/></svg>${i.t}${
+          off ? '<span class="hint">настольная версия</span>' : (i.k ? `<span class="hint">${i.k}</span>` : "")}</div>`;
       }
     }
     list.innerHTML = html || '<div class="cmdk-empty">Ничего не найдено</div>';
@@ -140,7 +147,19 @@
     });
   }
   function scrollSel() { const r = list.querySelector(`.cmdk-row[data-i="${sel}"]`); if (r) r.scrollIntoView({ block: "nearest" }); }
-  function run(i) { const c = flat[i]; close(); if (c) setTimeout(() => c.run(), 0); }
+  function run(i) {
+    const c = flat[i];
+    if (!c) { close(); return; }
+    // выключенная команда не должна делать вид, что сработала
+    if (isWeb && c.desktop) {
+      close();
+      if (typeof window.toast === "function")
+        window.toast(`«${c.t}» — только в настольной версии ГРАДО Студии`, "warn");
+      return;
+    }
+    close();
+    setTimeout(() => c.run(), 0);
+  }
   function open() {
     previousFocus = document.activeElement;
     cmdk.hidden = false;

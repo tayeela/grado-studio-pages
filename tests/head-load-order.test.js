@@ -23,7 +23,11 @@ assert.ok(lastCss > 0 && lastCss < firstScript,
 
 // ---------- ни одного блокирующего внешнего скрипта ----------
 const external = [...html.matchAll(/<script([^>]*)\ssrc="([^"]+)"/g)];
-assert.ok(external.length >= 18, "скрипты приложения должны остаться на месте");
+// collab.js на Pages не подключается: сервера с --hub там нет, включиться он
+// не может никогда, а весил 30 КБ в каждой загрузке
+assert.ok(external.length >= 17, "скрипты приложения должны остаться на месте");
+assert.doesNotMatch(html, /<script[^>]*src="\.\/collab\.js/,
+  "мёртвый в браузерной сборке модуль не должен качаться");
 for (const [, attrs, src] of external)
   assert.ok(/\bdefer\b/.test(attrs), `скрипт ${src} блокирует разбор разметки`);
 assert.ok(!/<script[^>]*\basync\b/.test(html),
