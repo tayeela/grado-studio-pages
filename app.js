@@ -2157,9 +2157,7 @@ function trimLineAt(f, wx, wy, boundaryIds) {
         const ps = circleIntersect(chain[j], chain[j + 1], cc, rr);
         for (let p of ps) {
           const dd = Math.hypot(p[0] - wx, p[1] - wy);
-          if (!best || (best.dd != null ? dd < best.dd : true)) {
-            best = { p, dd, fromCircle: true };
-          }
+          if (!best || dd < best.dd) best = { p, dd, fromCircle: true };
         }
       }
       continue;
@@ -2169,12 +2167,19 @@ function trimLineAt(f, wx, wy, boundaryIds) {
         const p = segIntersect(a, b, bchain[j], bchain[j + 1]);
         if (!p) continue;
         const t = paramOnSeg(p, a, b);
-        if (!best || Math.abs(t - tClick) < Math.abs(best.t - tClick)) best = { t, p };
+        // Кандидаты от окружностей и от отрезков сравниваются ОДНОЙ метрикой —
+        // расстоянием от точки клика до пересечения. Раньше у окружности был dd,
+        // у отрезка — |t − tClick|, и сравнение шло между несравнимым: тернарник
+        // «best.dd != null ? … : true» пропускал окружность безусловно, а
+        // Math.abs(best.t − tClick) при best от окружности давал NaN, из-за чего
+        // отрезок не выигрывал никогда. Резало по типу границы, а не по близости.
+        const dd = Math.hypot(p[0] - wx, p[1] - wy);
+        if (!best || dd < best.dd) best = { t, p, dd };
       }
   }
   if (!best) return false;
   snapshot();
-  if (best.fromCircle || best.dd != null) {
+  if (best.fromCircle) {
     // обобщённое решение стороны по позиции клика и p на всей цепочке
     const locC = locateOnChain(chain, [wx, wy]);
     const locP = locateOnChain(chain, best.p);
@@ -6604,7 +6609,9 @@ function placeTypedPoint() {
           let sw = aa2 - aa0;
           if (sw > Math.PI) sw -= 2 * Math.PI;
           if (sw < -Math.PI) sw += 2 * Math.PI;
-          snapshot();
+          // snapshot() здесь не нужен: addFeature() уже фиксирует историю. Из-за
+          // лишнего снимка в стеке оказывались два одинаковых состояния «до», и
+          // первый Ctrl+Z визуально ничего не делал — дуга исчезала со второго.
           const L = activeLayer();
           if (L) addFeature(L.id, { arc: { cx: c[0], cy: c[1], r, a0: aa0, sweep: sw } });
           state.drawing = null;
