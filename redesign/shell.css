@@ -138,6 +138,13 @@ header{
   background:var(--glass);backdrop-filter:var(--glass-blur);box-shadow:0 -1px 0 var(--hairline),var(--glass-hi);z-index:var(--z-panel);
   white-space:nowrap;overflow:hidden;
 }
+/* Тост живёт в статус-строке (z-index var(--z-panel) = 30), а оверлей диалога —
+   var(--z-modal) = 90. Сообщения, которые шлют САМИ диалоги (ошибки импорта,
+   предупреждения мастера данных, отчёт о повреждённых объектах), оказывались под
+   затемнением: elementFromPoint в точке тоста возвращал .modal-overlay. Пока
+   сообщение показано — поднимаем строку над диалогом; в остальное время слой
+   прежний, раскладка не меняется. */
+.statusbar:has(#st-toast:not(:empty)){z-index:calc(var(--z-modal) + 2)}
 .statusbar .mono{font-family:var(--font-mono);color:var(--text-2)}
 .statusbar .st-active{display:inline-flex;align-items:center;gap:6px;color:var(--text-2);font-weight:500;
   min-width:0;max-width:min(240px,32%);overflow:hidden;text-overflow:ellipsis}
