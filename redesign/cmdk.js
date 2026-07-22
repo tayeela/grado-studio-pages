@@ -60,6 +60,7 @@
       { t: "Сопрячь угол (fillet)", run: tool("fillet"), available: () => toolEnabled("fillet") },
       { t: "Буфер вокруг выбранных объектов…", run: () => click("btn-buffer-open"), desktop: true, available: () => buttonEnabled("btn-buffer-open") },
       { t: "Геообработка полигонов…", run: () => click("btn-vector-open"), available: () => buttonEnabled("btn-vector-open") },
+      { t: "Проверка топологии…", run: () => click("btn-topo-check"), available: () => buttonEnabled("btn-topo-check") },
       { t: "Поворот выделения", k: "R", run: tool("rotate"), available: () => toolEnabled("rotate") },
       { t: "Масштаб выделения", run: tool("scale"), available: () => toolEnabled("scale") },
       { t: "Зеркало", run: tool("mirror"), available: () => toolEnabled("mirror") },

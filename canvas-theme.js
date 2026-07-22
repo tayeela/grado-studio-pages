@@ -30,7 +30,9 @@
     zoneB:         '--zone-b',           // О-зоны
     zoneBLine:     '--zone-b-line',
     zoneGreen:     '--zone-green',       // Р-зоны / озеленение
-    zoneGreenLine: '--zone-green-line'
+    zoneGreenLine: '--zone-green-line',
+    danger:        '--danger-text',      // находки проверки топологии
+    warning:       '--warning-text'      // (перекрытие — danger, щель — warning)
   };
 
   var CANVAS_THEME = {};
