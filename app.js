@@ -5564,8 +5564,12 @@ function openManageKinds() {
   const $ = id => overlay.querySelector("#" + id);
   const swatchOf = sid => {
     const st = (state.projectStyles && state.projectStyles[sid]) || STYLES_V2[sid] || {};
-    if (st.fill) return st.fill;
-    if (st.hatch && st.hatch.color) return `repeating-linear-gradient(45deg, ${st.hatch.color} 0 1px, transparent 1px 4px)`;
+    // значения приходят из открытого файла проекта — в style="…" пускаем только
+    // проверенный цвет (см. safeCssColor), иначе тут был бы вектор XSS
+    const fill = safeCssColor(st.fill);
+    if (fill) return fill;
+    const hatch = st.hatch && safeCssColor(st.hatch.color);
+    if (hatch) return `repeating-linear-gradient(45deg, ${hatch} 0 1px, transparent 1px 4px)`;
     return "transparent";
   };
   function rowHtml(k) {
@@ -6133,6 +6137,48 @@ function openBufferDialog() {
 function escHtml(s) {
   return String(s).replace(/[&<>"]/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+// Цвета знаков приходят из ОТКРЫТОГО ФАЙЛА проекта (.grado-web.json) и из
+// оформления, полученного по сети, а дальше подставляются в атрибут style="…".
+// Экранирования тут мало: внутри style можно и без кавычек дотянуться до url()
+// и до чужих свойств. Поэтому пускаем только заведомо цветовой синтаксис —
+// hex, rgb/rgba, hsl/hsla, ключевое слово. Всё остальное отбрасываем.
+const CSS_COLOR_RE =
+  /^(#[0-9a-f]{3,8}|rgba?\([\d.,\s%/]+\)|hsla?\([\d.,\s%/a-z]+\)|[a-z]{3,20})$/i;
+function safeCssColor(value, fallback = null) {
+  if (typeof value !== "string") return fallback;
+  const color = value.trim();
+  if (!color || color.length > 64) return fallback;
+  return CSS_COLOR_RE.test(color) ? color : fallback;
+}
+// Корень проблемы был здесь: при восстановлении проверялся только КЛЮЧ стиля
+// (isSafeDictionaryKey), а значения клались как есть. Файл с fill вида
+// `"><img src=x onerror=…>` доезжал до style="…" в диалоге «Типы слоёв».
+// Проекты ходят между коллегами файлами, поэтому это вектор атакующий→жертва,
+// а не self-XSS. Цветовые поля пропускаем только валидными.
+const STYLE_COLOR_FIELDS = ["fill", "stroke", "border_color", "borderColor", "line_color"];
+function sanitizeProjectStyle(style) {
+  const clean = {};
+  for (const [key, value] of Object.entries(style)) {
+    if (!isSafeDictionaryKey(key)) continue;
+    if (STYLE_COLOR_FIELDS.includes(key)) {
+      const color = safeCssColor(value);
+      if (color) clean[key] = color;
+      continue;
+    }
+    if (key === "hatch" && isRecord(value)) {
+      const hatch = {};
+      for (const [hk, hv] of Object.entries(value)) {
+        if (!isSafeDictionaryKey(hk)) continue;
+        if (hk === "color") { const c = safeCssColor(hv); if (c) hatch[hk] = c; continue; }
+        hatch[hk] = hv;
+      }
+      clean[key] = hatch;
+      continue;
+    }
+    clean[key] = value;
+  }
+  return clean;
 }
 function ruCount(value, one, few, many) {
   const number = Math.abs(Number(value)) || 0;
@@ -8112,7 +8158,7 @@ function normalizeRestoredState(payload) {
   const projectStyles = Object.create(null);
   if (isRecord(restored.projectStyles)) {
     for (const [id, style] of Object.entries(restored.projectStyles))
-      if (isSafeDictionaryKey(id) && isRecord(style)) projectStyles[id] = style;
+      if (isSafeDictionaryKey(id) && isRecord(style)) projectStyles[id] = sanitizeProjectStyle(style);
   }
   const variants = Array.isArray(restored.variants) ? restored.variants.flatMap((variant, index) => {
     if (!isRecord(variant) || !Array.isArray(variant.features)) return [];
@@ -8180,6 +8226,18 @@ function normalizeRestoredState(payload) {
 function applyRestoredState(d) {
   // Автосейв v1 хранится в проверяемой оболочке; старые снимки остаются
   // сырым состоянием и по-прежнему открываются без миграции на диске.
+  // schema_version штамповался при сохранении, но при восстановлении не
+  // читался вовсе. Опасная комбинация с кэшем GitHub Pages: старый
+  // закэшированный код открывал снимок НОВОЙ схемы, collectState пересобирал
+  // его по своему белому списку полей — и первый же автосейв записывал
+  // усечённую версию. Данные новых полей терялись необратимо. Предупреждаем.
+  const snapshotSchema = Number((d && d.state && d.state.schema_version)
+    ?? (d && d.schema_version));
+  if (Number.isFinite(snapshotSchema) && snapshotSchema > STATE_SCHEMA_VERSION) {
+    toast(`Проект сохранён более новой версией приложения (схема ${snapshotSchema} `
+      + `против ${STATE_SCHEMA_VERSION}). Обновите страницу с Ctrl+F5 — иначе часть `
+      + "данных не будет понята и может пропасть при сохранении", "error");
+  }
   d = normalizeRestoredState(d);
   lastRestoreSkipped = 0;
   if (!d) return false;
