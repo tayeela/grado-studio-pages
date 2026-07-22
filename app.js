@@ -4185,6 +4185,14 @@ function params() {
 const TEP_AUTO_MAX = 8000;   // выше — авто-ТЭП выключен: иначе на КАЖДУЮ правку
                              // стрингуется и уходит на сервер весь проект (десятки
                              // МБ) → фриз. Для больших выгрузок пересчёт по кнопке.
+// Бейдж «живой расчёт» и зелёная точка на вкладке — статическая разметка,
+// которая не менялась при потере связи: панель одновременно показывала «живой
+// расчёт» и «нет связи с расчётом». Режим вешаем на #panel — он содержит и
+// вкладку, и карточку.
+function setTepMode(mode) {
+  const panel = document.getElementById("panel");
+  if (panel) panel.dataset.tepMode = mode;
+}
 function refreshTep(force) {
   clearTimeout(tepTimer);
   const requestVersion = ++tepRequestVersion;
@@ -4192,6 +4200,7 @@ function refreshTep(force) {
   if (state.features.length > TEP_AUTO_MAX && !force) {
     tepAbortController?.abort();
     if (st) {
+      setTepMode("manual");
       st.innerHTML = 'большой проект · <a href="#" id="tep-manual">пересчитать</a>';
       const a = document.getElementById("tep-manual");
       if (a) a.onclick = ev => { ev.preventDefault(); refreshTep(true); };
@@ -4216,12 +4225,13 @@ function refreshTep(force) {
       window.lastTepData = data;
       window.lastTepSignature = requestBody;
       document.getElementById("tep-status").textContent = "";
-      // в норме статус чистый — техническое «ядро: ок» пользователю не нужно
-      document.getElementById("st-core").textContent = "";
+      setTepMode("live");
     } catch (e) {
       if (e?.name === "AbortError" || requestVersion !== tepRequestVersion) return;
       document.getElementById("tep-status").textContent = "нет связи с расчётом";
-      document.getElementById("st-core").textContent = "⚠ расчёт недоступен (клик для reconnect)";
+      // #st-core с текстом «клик для reconnect» был скрыт инлайн-стилем и не имел
+      // обработчика клика — обещание без исполнения; удалён вместе с записью.
+      setTepMode("error");
       if (window.lastTepData && window.lastTepSignature === requestBody) {
         renderTep(window.lastTepData);
       } else {
@@ -7315,16 +7325,27 @@ function setTool(tool, opts = {}) {
   state.tool = tool; state.drawing = null; state.drag = null;
   state.edit = null; state.typed = "";
   if (tool !== "measure") state.measure = null;
+  // Подсказка режима видна в статус-строке, пока режим активен: тост исчезает
+  // через 5 секунд, а режим остаётся. Пустая строка — обычные инструменты.
+  const hintEl = document.getElementById("st-hint");
+  const setHint = text => { if (hintEl) hintEl.textContent = text; };
   if (tool === "trim" || tool === "extend") {
     state.trimCtx = { boundary: new Set(), ready: false };
-    toast(`Режим ${tool}: клик по границам (Enter), затем по цели для ${tool==='trim'?'обрезки':'продления'}. Границы подсвечены.`);
-    document.getElementById('st-hint').textContent = `Режим ${tool}: выберите границы, Enter — готово, клик по цели`;
+    // в интерфейсе инструменты называются по-русски — внутренний id наружу не выносим
+    const ru = tool === "trim" ? "Обрезать" : "Продлить";
+    const what = tool === "trim" ? "обрезки" : "продления";
+    toast(`Режим «${ru}»: клик по границам, Enter — готово, затем клик по цели для ${what}. Границы подсвечены.`);
+    setHint(`«${ru}»: выберите границы → Enter → клик по лишней части`);
   } else {
     state.trimCtx = null;
+    setHint("");
   }
   if (tool === "fillet") {
     promptFilletRadius();   // задать радиус при входе в инструмент
-    document.getElementById('st-hint').textContent = "Сопряжение: клик по углу линии/контура — скругляется дугой";
+    // раньше инструкция уходила ТОЛЬКО в скрытый #st-hint: после диалога радиуса
+    // пользователь оставался без единой подсказки, что делать дальше
+    toast("Режим «Сопрячь»: клик по углу линии или контура — угол скругляется дугой");
+    setHint("«Сопрячь»: клик по углу — скругление дугой заданного радиуса");
   }
   if (tool === "rotate" || tool === "scale" || tool === "mirror") xfStart(tool);
   else state.xf = null;
