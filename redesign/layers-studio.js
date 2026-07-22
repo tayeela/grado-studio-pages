@@ -96,8 +96,10 @@
     const mode = modal.querySelector('#ls-mode');
     const controls = grid.querySelector('.style-controls');
     const presetLabel = preset.closest('.style-preset-label');
+    const categories = modal.querySelector('#fmt-cats')?.closest('.style-categories-section');
     if (head && mode) head.insertBefore(mode, head.querySelector('.modal-x'));
     if (controls && presetLabel) controls.prepend(presetLabel);
+    if (controls && categories) controls.prepend(categories);
 
     // The full standards catalogue remains available from the project toolbar.
     // Inside layer styling, a compact preset selector keeps the task focused.

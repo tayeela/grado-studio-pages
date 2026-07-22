@@ -534,6 +534,13 @@ function layerStyle(L) {
   return L.fmt ? { ...base, ...L.fmt } : base;
 }
 
+function layerVisualFormat(L) {
+  const fmt = { ...((L && L.fmt) || {}) };
+  delete fmt.cats_off;
+  delete fmt.cat_styles;
+  return fmt;
+}
+
 // условное форматирование: первое правило слоя, чьё поле совпадает со
 // значением атрибута объекта, отдаёт свой библиотечный стиль.
 // Поддержка ops для более мощных правил (fmt-патчи): = > < >= <= contains starts
@@ -617,7 +624,15 @@ function styleOf(f) {
   // (напр. выключить штриховку/подпись у импортированных зон ОГД) просто не
   // применялись — объект молча оставался с библиотечным знаком.
   // Порядок остаётся: знак → оформление слоя → оформление объекта.
-  if ((sid || gsid) && L && L.fmt) base = { ...base, ...L.fmt };
+  if ((sid || gsid) && L && L.fmt) base = { ...base, ...layerVisualFormat(L) };
+  const categoryId = sid || gsid;
+  const categoryPatch = categoryId && L && L.fmt && L.fmt.cat_styles
+    ? L.fmt.cat_styles[categoryId] : null;
+  if (categoryPatch) {
+    const refId = categoryPatch.style_ref;
+    const refStyle = refId && (state.projectStyles[refId] || STYLES_V2[refId]);
+    base = { ...(refStyle || base), ...layerVisualFormat(L), ...categoryPatch };
+  }
   return f.fmt ? { ...base, ...f.fmt } : base;   // f.fmt — оформление отдельного объекта
 }
 
