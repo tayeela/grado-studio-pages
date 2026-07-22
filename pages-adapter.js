@@ -106,6 +106,7 @@
   const databaseGet = key => databaseRequest("readonly", store => store.get(key));
   const databaseSet = (key, value) =>
     databaseRequest("readwrite", store => store.put(value, key));
+  const databaseDelete = key => databaseRequest("readwrite", store => store.delete(key));
   const storedProjectGet = async key => {
     if (typeof indexedDB !== "undefined") {
       try {
@@ -143,6 +144,49 @@
     const pending = autosaveWriteQueue.then(action, action);
     autosaveWriteQueue = pending.catch(() => {});
     return pending;
+  };
+  const storedProjectDelete = async key => {
+    if (typeof indexedDB !== "undefined") {
+      try { await databaseDelete(key); } catch (error) { /* нет базы — чистим ниже */ }
+    }
+    try { localStorage.removeItem?.(key); } catch (error) { /* приватный режим */ }
+  };
+  // Контрольных копий держим НЕСКОЛЬКО. Один слот означал, что откатиться
+  // можно ровно на один шаг: следующая же контрольная точка затирала
+  // единственный путь назад, и на больших проектах это единственный путь
+  // назад вообще (глубина отмены урезается по памяти).
+  const BACKUP_SLOTS = 5;
+  const BACKUP_INDEX_KEY = "grado_pages_backup_index_v1";
+  const backupSlotKey = id => `grado_pages_backup_${id}`;
+  const readBackupIndex = async () => {
+    try {
+      const index = await storedProjectGet(BACKUP_INDEX_KEY);
+      return Array.isArray(index) ? index.filter(isRecord) : [];
+    } catch (error) { return []; }
+  };
+  // Копия не должна ронять сам автосейв: не поместилась — освобождаем место
+  // самой старой и пробуем ещё раз, не вышло — сохраняем проект без копии.
+  const pushBackup = async envelope => {
+    const meta = backupMeta(envelope);
+    if (!meta) return;
+    let index = await readBackupIndex();
+    const id = index.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0) + 1;
+    const write = async () => { await storedProjectSet(backupSlotKey(id), envelope); };
+    try {
+      await write();
+    } catch (error) {
+      const oldest = index[index.length - 1];
+      if (!oldest) return;
+      await storedProjectDelete(backupSlotKey(oldest.id));
+      index = index.slice(0, -1);
+      try { await write(); } catch (retryError) { return; }
+    }
+    index = [{ ...meta, id }, ...index];
+    const dropped = index.slice(BACKUP_SLOTS);
+    index = index.slice(0, BACKUP_SLOTS);
+    try { await storedProjectSet(BACKUP_INDEX_KEY, index); }
+    catch (error) { await storedProjectDelete(backupSlotKey(id)); return; }
+    for (const item of dropped) await storedProjectDelete(backupSlotKey(item.id));
   };
   const backupMeta = payload => {
     const state = isRecord(payload && payload.state) ? payload.state : payload;
@@ -376,22 +420,28 @@
     if (path === "/api/initial-grado") return json(null);
     if (path === "/api/autosave/backups") {
       try {
-        const backup = await storedProjectGet(AUTOSAVE_BACKUP_KEY);
-        const meta = backupMeta(backup);
-        return json({ backups: meta ? [meta] : [] });
+        const index = await readBackupIndex();
+        // копия прежнего единственного слота — самая старая в списке
+        const legacy = backupMeta(await storedProjectGet(AUTOSAVE_BACKUP_KEY));
+        const backups = legacy ? [...index, { ...legacy, id: "legacy" }] : index;
+        return json({ backups });
       } catch (error) {
         return json({ backups: [] });
       }
     }
-    if (path === "/api/autosave/backups/1") {
+    if (path.startsWith("/api/autosave/backups/")) {
+      const id = decodeURIComponent(path.slice("/api/autosave/backups/".length));
       try {
-        const backup = await storedProjectGet(AUTOSAVE_BACKUP_KEY);
+        // сначала слот, потом прежний единственный: id=1 существует в обеих
+        // схемах, и слот новее
+        const slot = id === "legacy" ? null : await storedProjectGet(backupSlotKey(id));
+        const backup = backupMeta(slot) ? slot
+          : (id === "legacy" || id === "1" ? await storedProjectGet(AUTOSAVE_BACKUP_KEY) : null);
         return backupMeta(backup) ? json(backup) : json({ error: "Копия не найдена" }, 404);
       } catch (error) {
         return json({ error: "Копия повреждена" }, 500);
       }
     }
-    if (path.startsWith("/api/autosave/backups/")) return json(null, 404);
     if (path === "/api/autosave") {
       if (method === "POST") {
         return queueAutosaveWrite(async () => {
@@ -411,12 +461,14 @@
           }
           const savedAt = new Date().toISOString();
           const envelope = { state, saved_at: savedAt };
+          // Контрольная копия создаётся только перед заменой проекта. Обычный
+          // автосейв хранит одну версию. IndexedDB не ограничивает рабочий
+          // проект крошечной синхронной квотой localStorage.
+          // Копия идёт в свой слот и НЕ мешает сохранению проекта: её отказ
+          // (нет места) не должен превращаться в отказ автосейва.
+          if (requestHeader(input, options, "X-Grado-Checkpoint") === "1")
+            await pushBackup(envelope).catch(() => {});
           try {
-            // Контрольная копия создаётся только перед заменой проекта. Обычный
-            // автосейв хранит одну версию. IndexedDB не ограничивает рабочий
-            // проект крошечной синхронной квотой localStorage.
-            if (requestHeader(input, options, "X-Grado-Checkpoint") === "1")
-              await storedProjectSet(AUTOSAVE_BACKUP_KEY, envelope);
             await storedProjectSet(AUTOSAVE_KEY, envelope);
             if (typeof localStorage.removeItem === "function")
               localStorage.removeItem(LEGACY_AUTOSAVE_KEY);

@@ -8054,23 +8054,35 @@ async function download(url, suffix) {
   const action = url === "/api/grado" ? "Сохраняю проект…" : "Собираю файл…";
   const exportButtons = ["btn-album", "btn-grado", "btn-dxf", "btn-print"]
     .map(id => document.getElementById(id)).filter(Boolean);
+  // Сохранение проекта — не выпуск документа. Проверка перед выпуском следит
+  // за качеством ЧЕРТЕЖА, и её ошибки запирали ещё и .grado: когда с проектом
+  // что-то не так, пользователь не мог даже сохранить работу — резервный канал
+  // отказывал ровно тогда, когда нужнее всего. .grado идёт мимо проверки.
+  const isProjectFile = url === "/api/grado";
   downloadInProgress = true;
   exportButtons.forEach(button => { button.disabled = true; });
-  toast("Проверяю проект перед выпуском…");
+  toast(isProjectFile ? action : "Проверяю проект перед выпуском…");
   try {
-    const target = url.replace("/api/", "");
-    const checkResponse = await fetch("/api/preflight", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ features, layers: payload.layers, target }),
-    });
-    if (!checkResponse.ok) throw new Error("не удалось проверить проект");
-    const report = await checkResponse.json();
-    if (!(await showPreflightReport(report))) {
-      if (report.errors.length) toast("Исправьте замечания перед выпуском", "warn");
-      else toast("Выпуск отменён");
-      return;
+    if (!isProjectFile) {
+      const target = url.replace("/api/", "");
+      // Недоступная проверка тоже запирала выпуск. Проверка — помощник, а не
+      // страж: не ответила — предупреждаем и выпускаем.
+      let report = null;
+      try {
+        const checkResponse = await fetch("/api/preflight", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ features, layers: payload.layers, target }),
+        });
+        if (checkResponse.ok) report = await checkResponse.json();
+      } catch (error) { report = null; }
+      if (!report) toast("Проверка недоступна — выпускаю без неё", "warn");
+      else if (!(await showPreflightReport(report))) {
+        if (report.errors.length) toast("Исправьте замечания перед выпуском", "warn");
+        else toast("Выпуск отменён");
+        return;
+      }
+      toast(action);
     }
-    toast(action);
     const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload) });
     if (!r.ok) throw new Error((await r.text()).slice(0, 200));
