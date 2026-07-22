@@ -6783,7 +6783,21 @@ cv.addEventListener("pointerdown", e => {
         }
       }
       const orig = feats.map(ff => featureMovablePts(ff).map(p => [p[0], p[1]]));
-      state.edit = { vi: "body", ids: movingIds, feats, orig, refOrig,
+      // Общие вершины покрытийных слоёв ищем ОДИН раз на жест. Раньше
+      // sharedCompanions() звался для каждой вершины на каждое движение мыши и
+      // сканировал все объекты проекта — O(вершин × объектов × вершин) на кадр,
+      // из-за чего перетаскивание функциональной зоны фризило. Топология
+      // совпадений за жест не меняется: компаньоны едут тем же офсетом.
+      const bodyComps = [];
+      for (const feat of feats) {
+        if (!isCoverageFeature(feat)) continue;
+        const pts = featurePts(feat);
+        for (let vi = 0; vi < pts.length; vi++) {
+          const comps = sharedCompanions(feat, vi);
+          if (comps.length) bodyComps.push({ feat, vi, comps });
+        }
+      }
+      state.edit = { vi: "body", ids: movingIds, feats, orig, refOrig, bodyComps,
                      grab: [wxr, wyr], moved: false };
       draw(); renderProps();
     } else {                                   // пустое место — рамка выделения
@@ -6892,6 +6906,11 @@ cv.addEventListener("pointermove", e => {
   }
   if (state.edit) {
     const ed = state.edit;
+    // Двигали ли объекты ВНЕ exclude-набора привязок. Индекс привязок строится
+    // по всем объектам, а исключения применяются на ЗАПРОСЕ — поэтому пока
+    // изменяется только то, что и так исключено, индекс остаётся корректным
+    // и перестраивать его на каждое движение мыши не нужно.
+    let snapDirty = false;
     if (!ed.moved) { snapshot(); ed.moved = true; }
     if (ed.edgeDrag) {
       applyEdgeDrag(ed, wx, wy);
@@ -6908,19 +6927,16 @@ cv.addEventListener("pointermove", e => {
         const pts = featureMovablePts(feat), o = ed.orig[fi];  // с дырами
         for (let i = 0; i < pts.length; i++) { pts[i][0] = o[i][0] + ox; pts[i][1] = o[i][1] + oy; }
       });
-      // joint edit for shared boundaries on coverage layers — one operation for common edge
-      ed.feats.forEach(feat => {
-        if (!isCoverageFeature(feat)) return;
+      // общие границы покрытийных слоёв: пары найдены один раз при pointerdown
+      for (const { feat, vi, comps } of (ed.bodyComps || [])) {
         const pts = featurePts(feat);
-        for (let vi = 0; vi < pts.length; vi++) {
-          const comps = sharedCompanions(feat, vi);
-          for (const c of comps) {
-            const cpts = featurePts(c.f);
-            cpts[c.vi][0] = pts[vi][0];
-            cpts[c.vi][1] = pts[vi][1];
-          }
+        for (const c of comps) {
+          const cpts = featurePts(c.f);
+          cpts[c.vi][0] = pts[vi][0];
+          cpts[c.vi][1] = pts[vi][1];
+          snapDirty = true;   // подвинули ЧУЖОЙ объект — индекс устарел
         }
-      });
+      }
     } else {
       // исключаем из привязок свою фигуру и всех компаньонов общей вершины
       const ex = new Set([ed.f.id]);
@@ -6965,7 +6981,14 @@ cv.addEventListener("pointermove", e => {
         }
       }
     }
-    state._ix = null; state._snapIndex = null;
+    state._ix = null;
+    // Раньше индекс привязок обнулялся здесь безусловно, и следующее же
+    // движение мыши строило его заново по ВСЕМ объектам проекта — O(все
+    // сегменты) на кадр, из-за чего перетаскивание на выгрузках ОГД лагало.
+    // При правке вершины всё изменяемое уже в exclude-наборе, поэтому сброс
+    // нужен только когда общие вершины покрытийных слоёв подвинули чужие
+    // объекты. По окончании жеста afterChange() всё равно сбрасывает индексы.
+    if (snapDirty) state._snapIndex = null;
     draw(); return;
   }
   const s = cursorPoint(wx, wy);
