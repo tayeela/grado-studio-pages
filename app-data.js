@@ -481,7 +481,10 @@ async function openDataFetch() {
     if (!cacheOpen) return `<div class="data-cache">${head}</div>`;
     const rows = cacheLayers.map(item => `<div class="data-cache-row${item.stale ? " stale" : ""}">
       <span class="data-cache-copy"><b>${escHtml(item.name || item.code)}</b>
-        <small>${cacheMb(item.bytes)}${item.features ? ` · ${item.features} об.` : ""} · ${item.stale ? "устарел, обновится при выгрузке" : `скачан ${cacheAge(item.at)}`}</small></span>
+        <small>${item.unknown
+          ? "лежит в кэше, вес станет известен после следующей выгрузки"
+          : `${cacheMb(item.bytes)}${item.features ? ` · ${item.features} об.` : ""} · ${
+              item.stale ? "устарел, обновится при выгрузке" : `скачан ${cacheAge(item.at)}`}`}</small></span>
       <button class="data-cache-drop" data-action="drop-cache" data-code="${escHtml(item.code)}"
         title="Убрать слой из кэша">Убрать</button></div>`).join("");
     return `<div class="data-cache open">${head}<div class="data-cache-list">${rows}</div>
