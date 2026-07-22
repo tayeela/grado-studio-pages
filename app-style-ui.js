@@ -260,6 +260,16 @@ function openLayerStyle(layer, opts = {}) {
   const origRules = clone(layer.rules);
   let mode = opts.mode || (origRules && origRules.length ? "rules" : "single");
   const cur = layerStyle(layer);
+  const categoryStyles = clone((layer.fmt && layer.fmt.cat_styles) || {}) || {};
+  const categoryStyleOf = catId => {
+    const patch = categoryStyles[catId] || {};
+    const refId = patch.style_ref || catId;
+    const base = state.projectStyles[refId] || STYLES_V2[refId] || {};
+    const layerFmt = { ...(layer.fmt || {}) };
+    delete layerFmt.cats_off;
+    delete layerFmt.cat_styles;
+    return { ...base, ...layerFmt, ...patch };
+  };
   // Категории слоя: слой повторяет слой-источник, поэтому классы объектов
   // (дороги OSM по тегу highway, знаки ОГД по LineCode/имени) живут ВНУТРИ него
   // и гасятся здесь, а не отдельными слоями-знаками. Список — по РЕАЛЬНО
@@ -268,10 +278,16 @@ function openLayerStyle(layer, opts = {}) {
   const cats = typeof layerCats === "function" ? layerCats(layer) : [];
   const catsOffSet = new Set((layer.fmt && layer.fmt.cats_off) || []);
   const catsSection = cats.length < 2 ? "" : `
-      <section class="style-section">
+      <section class="style-section style-categories-section">
         <div class="style-section-head"><span><b>Категории слоя</b><small>Что показывать из выгруженного слоя (${cats.length})</small></span></div>
-        <div class="fmt-body" id="fmt-cats">${cats.map(c =>
-          `<label class="chk"><input type="checkbox" class="fmt-cat" value="${escHtml(c.id)}"${catsOffSet.has(c.id) ? "" : " checked"}> ${escHtml(c.title)}</label>`
+        <div class="fmt-body style-category-list" id="fmt-cats">${cats.map(c =>
+          `<div class="style-category-row" data-category-id="${escHtml(c.id)}">
+            <label class="style-category-main"><input type="checkbox" class="fmt-cat" value="${escHtml(c.id)}"${catsOffSet.has(c.id) ? "" : " checked"}>
+              <span class="style-category-sample" aria-hidden="true">${styleSampleSVG(categoryStyleOf(c.id), { w: 60, h: 22 })}</span>
+              <span class="style-category-copy"><b>${escHtml(c.title)}</b><small>${escHtml(c.id)}</small></span>
+            </label>
+            <button type="button" class="style-category-edit" data-category-id="${escHtml(c.id)}" aria-label="Оформление категории «${escHtml(c.title)}»">Оформление</button>
+          </div>`
         ).join("")}</div>
       </section>`;
   const hasFill = cur.fill != null && cur.fill !== "transparent";
@@ -452,6 +468,126 @@ function openLayerStyle(layer, opts = {}) {
   const lcolorCF = $("fmt-lcolor")
     ? makeColorField($("fmt-lcolor"), toHexColor(lfFont.color, "#5c5a54"), onColor) : null;
   const closeColorFields = () => { fillCF.close(); strokeCF.close(); if (lcolorCF) lcolorCF.close(); };
+
+  const syncCategoryStyles = catId => {
+    layer.fmt = { ...(layer.fmt || {}) };
+    if (Object.keys(categoryStyles).length) layer.fmt.cat_styles = clone(categoryStyles);
+    else delete layer.fmt.cat_styles;
+    const row = [...overlay.querySelectorAll(".style-category-row")]
+      .find(item => item.dataset.categoryId === catId);
+    const sample = row && row.querySelector(".style-category-sample");
+    if (sample) sample.innerHTML = styleSampleSVG(categoryStyleOf(catId), { w: 60, h: 22 });
+    draw();
+  };
+
+  const openCategoryStyleEditor = catId => {
+    const cat = cats.find(item => item.id === catId);
+    if (!cat) return;
+    closeColorFields();
+    const original = clone(categoryStyles[catId]);
+    const initial = categoryStyleOf(catId);
+    const initialRef = (categoryStyles[catId] && categoryStyles[catId].style_ref) || catId;
+    const initialDash = dashPresetOf(initial.dash);
+    const categoryOverlay = document.createElement("div");
+    categoryOverlay.className = "modal-overlay category-style-overlay";
+    categoryOverlay.innerHTML = `<div class="modal category-style-modal" role="dialog" aria-modal="true" aria-labelledby="category-style-title">
+      <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Категория слоя</span><span id="category-style-title">${escHtml(cat.title)}</span></span>
+        <button type="button" class="modal-x" aria-label="Закрыть оформление категории"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <div class="modal-body category-style-body">
+        <label class="category-style-field category-style-field-wide"><span>Базовый знак</span><select id="cat-style-preset">${stylePickerOptions(initialRef)}</select></label>
+        <div class="category-style-preview" id="cat-style-preview">${styleSampleSVG(initial, { w: 250, h: 56 })}</div>
+        <div class="category-style-grid">
+          <label class="category-style-field"><span>Цвет линии</span><div id="cat-style-stroke"></div></label>
+          <label class="category-style-field"><span>Толщина, px</span><input type="number" id="cat-style-width" min="0.2" max="8" step="0.1" value="${boundedNumber(initial.width, 0.2, 8, 1)}"></label>
+          <label class="category-style-field"><span>Тип линии</span><select id="cat-style-dash">
+            ${opt(initialDash, "solid", "Сплошная")}${opt(initialDash, "dash", "Штрих")}${opt(initialDash, "dashdot", "Штрих-пунктир")}${opt(initialDash, "dashdotdot", "Штрих — две точки")}${opt(initialDash, "custom", "Свой шаблон…")}
+          </select></label>
+          <label class="category-style-field" id="cat-style-dash-wrap" style="display:${initialDash === "custom" ? "" : "none"}"><span>Шаблон, px</span><input type="text" id="cat-style-dash-custom" value="${escHtml(dashToStr(initialDash === "custom" ? initial.dash : null))}" placeholder="8, 3, 2, 3"></label>
+          ${isPoly ? `<label class="category-style-field"><span>Цвет заливки</span><div id="cat-style-fill"></div></label>
+          <label class="category-style-field"><span>Непрозрачность, %</span><input type="number" id="cat-style-opacity" min="10" max="100" step="5" value="${boundedNumber(Math.round((initial.fillOpacity == null ? 1 : initial.fillOpacity) * 100), 10, 100, 100)}"></label>` : ""}
+        </div>
+        <p class="category-style-note">Настройка действует только на категорию «${escHtml(cat.title)}» в этом слое.</p>
+      </div>
+      <div class="modal-actions"><button type="button" id="cat-style-reset">Вернуть стандарт</button><span class="spacer"></span><button type="button" id="cat-style-cancel">Отмена</button><button type="button" class="primary" id="cat-style-save">Готово</button></div>
+    </div>`;
+    document.body.appendChild(categoryOverlay);
+
+    const q = selector => categoryOverlay.querySelector(selector);
+    const categoryStroke = makeColorField(q("#cat-style-stroke"), toHexColor(initial.stroke, "#888888"), () => applyLive());
+    const categoryFill = isPoly
+      ? makeColorField(q("#cat-style-fill"), toHexColor(initial.fill, "#faf0bf"), () => applyLive()) : null;
+    const currentCategoryDash = () => q("#cat-style-dash").value === "custom"
+      ? parseDashStr(q("#cat-style-dash-custom").value)
+      : (DASH_PRESETS[q("#cat-style-dash").value] ?? null);
+    const categoryPatch = () => {
+      const patch = { ...(categoryStyles[catId] || {}) };
+      patch.style_ref = q("#cat-style-preset").value || catId;
+      patch.stroke = categoryStroke.get();
+      patch.width = boundedNumber(q("#cat-style-width").value, 0.2, 8, 1);
+      patch.dash = currentCategoryDash();
+      if (isPoly) {
+        patch.fill = categoryFill.get();
+        patch.fillOpacity = boundedNumber(q("#cat-style-opacity").value, 10, 100, 100) / 100;
+      }
+      return patch;
+    };
+    function applyLive() {
+      categoryStyles[catId] = categoryPatch();
+      syncCategoryStyles(catId);
+      q("#cat-style-preview").innerHTML = styleSampleSVG(categoryStyleOf(catId), { w: 250, h: 56 });
+    }
+    const closeEditor = () => {
+      categoryStroke.close();
+      if (categoryFill) categoryFill.close();
+      document.removeEventListener("keydown", onCategoryKeydown);
+      categoryOverlay.remove();
+    };
+    const cancelEditor = () => {
+      if (original) categoryStyles[catId] = original;
+      else delete categoryStyles[catId];
+      syncCategoryStyles(catId);
+      closeEditor();
+    };
+    const onCategoryKeydown = event => { if (event.key === "Escape") cancelEditor(); };
+    document.addEventListener("keydown", onCategoryKeydown);
+    q("#cat-style-dash").addEventListener("change", () => {
+      q("#cat-style-dash-wrap").style.display = q("#cat-style-dash").value === "custom" ? "" : "none";
+      applyLive();
+    });
+    q("#cat-style-preset").addEventListener("change", () => {
+      const refId = q("#cat-style-preset").value || catId;
+      const ref = state.projectStyles[refId] || STYLES_V2[refId] || {};
+      categoryStroke.set(toHexColor(ref.stroke, "#888888"));
+      q("#cat-style-width").value = boundedNumber(ref.width, 0.2, 8, 1);
+      const preset = dashPresetOf(ref.dash);
+      q("#cat-style-dash").value = preset;
+      q("#cat-style-dash-custom").value = preset === "custom" ? dashToStr(ref.dash) : "";
+      q("#cat-style-dash-wrap").style.display = preset === "custom" ? "" : "none";
+      if (categoryFill) {
+        categoryFill.set(toHexColor(ref.fill, "#faf0bf"));
+        q("#cat-style-opacity").value = boundedNumber(Math.round((ref.fillOpacity == null ? 1 : ref.fillOpacity) * 100), 10, 100, 100);
+      }
+      applyLive();
+    });
+    categoryOverlay.querySelectorAll("input, select").forEach(input => {
+      if (input.id === "cat-style-preset" || input.id === "cat-style-dash") return;
+      input.addEventListener("input", applyLive);
+      input.addEventListener("change", applyLive);
+    });
+    q("#cat-style-reset").addEventListener("click", () => {
+      delete categoryStyles[catId];
+      syncCategoryStyles(catId);
+      closeEditor();
+    });
+    q("#cat-style-cancel").addEventListener("click", cancelEditor);
+    q("#cat-style-save").addEventListener("click", closeEditor);
+    q(".modal-x").addEventListener("click", cancelEditor);
+    categoryOverlay.addEventListener("click", event => { if (event.target === categoryOverlay) cancelEditor(); });
+  };
+
+  overlay.querySelectorAll(".style-category-edit").forEach(button => {
+    button.addEventListener("click", () => openCategoryStyleEditor(button.dataset.categoryId));
+  });
   if ($("fmt-labelf")) $("fmt-labelf").addEventListener("change", () => {
     $("fmt-labelf-fields").style.display = $("fmt-labelf").value ? "" : "none";
   });
@@ -525,6 +661,7 @@ function openLayerStyle(layer, opts = {}) {
       fillOpacity: (parseInt($("fmt-opacity").value) || 100) / 100,
       dash: currentDash(),
     };
+    if (Object.keys(categoryStyles).length) fmt.cat_styles = clone(categoryStyles);
     if ($("fmt-hatch").checked) {
       const av = $("fmt-hangle").value;
       fmt.hatch = { angle: av === "cross" ? 45 : +av, cross: av === "cross",
