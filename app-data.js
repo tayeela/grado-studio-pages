@@ -415,8 +415,24 @@ async function openDataFetch() {
       <button class="primary data-load" data-action="load"${count ? "" : " disabled"}>Загрузить ${count} ${layerNoun(count)}</button>`;
   }
 
+  // Окно перерисовывает своё тело целиком, а вместе с ним пропадал элемент, на
+  // котором стоял фокус: клавиатурный пользователь оказывался на <body> ЗА
+  // модальным окном — дальше Tab уходил в интерфейс под ним. Запоминаем, на чём
+  // стоял фокус, и возвращаем его на тот же элемент после перерисовки.
+  const focusMark = element => {
+    if (!element || !overlay.contains(element)) return null;
+    for (const attr of ["data-src", "data-action", "data-group", "data-topic", "data-code", "id"]) {
+      const value = element.getAttribute(attr);
+      if (value) return `[${attr}="${CSS.escape(value)}"]`;
+    }
+    if (element.matches(".data-search input")) return ".data-search input";
+    return null;
+  };
   function render(options = {}) {
     if (!overlay.isConnected) return;
+    const active = document.activeElement;
+    const mark = focusMark(active);
+    const caret = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
     renderSteps();
     renderAreaSummary();
     const view = overlay.querySelector(".data-step-view");
@@ -427,7 +443,23 @@ async function openDataFetch() {
     if (options.focusSearch && step === 2) {
       const input = overlay.querySelector(".data-search input");
       input?.focus(); input?.setSelectionRange(query.length, query.length);
+      return;
     }
+    if (mark && !overlay.contains(document.activeElement)) {
+      const again = overlay.querySelector(mark);
+      if (again) {
+        again.focus({ preventScroll: true });
+        if (caret != null && typeof again.setSelectionRange === "function")
+          try { again.setSelectionRange(caret, caret); } catch (error) { /* не текстовое поле */ }
+        return;
+      }
+    }
+    // фокус ушёл вместе с элементом, а вернуть его некуда — держим его в окне,
+    // иначе Tab уводит за модальное окно
+    if (!overlay.contains(document.activeElement))
+      (overlay.querySelector(".data-search input")
+        || overlay.querySelector("button:not([disabled])")
+        || overlay.querySelector(".modal"))?.focus({ preventScroll: true });
   }
 
   const visibleKeys = () => {

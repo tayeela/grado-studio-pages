@@ -734,9 +734,21 @@
       // в связке с app.js?v=, поэтому НЕ врёт как version.json, который грузится
       // отдельно и может обновиться, пока код в кэше старый). Если после
       // обновления число не сменилось — страница из кэша браузера.
+      // В шапке — версия приложения; номер сборки уходит в подсказку. Раньше
+      // рядом с названием стояло «b10000» — это диагностика разработчика, а не
+      // то, что человек ищет глазами в рабочем окне.
       var bv = window.__GRADO_ASSET_VERSION__;
-      if (bv) logo.insertAdjacentHTML("beforeend",
-        '<b class="build-badge" title="Номер загруженного кода. Если после обновления он не сменился — страница открыта из кэша браузера (жёсткая перезагрузка или новый адрес со ?смена-номера).">b' + bv + '</b>');
+      if (bv) {
+        logo.insertAdjacentHTML("beforeend",
+          '<b class="build-badge" title="Версия приложения. Номер загруженного кода: b' + bv
+          + '. Если после обновления он не сменился — страница открыта из кэша браузера '
+          + '(жёсткая перезагрузка или новый адрес со ?смена-номера).">…</b>');
+        var badge = logo.querySelector(".build-badge");
+        nativeFetch(new URL("./version.json", window.location.href).href, { cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (info) { badge.textContent = info && info.version ? "v" + info.version : "b" + bv; })
+          .catch(function () { badge.textContent = "b" + bv; });
+      }
     }
     const album = document.getElementById("btn-album");
     if (album) { album.textContent = "Альбом"; album.title = "Настроить состав альбома"; }
