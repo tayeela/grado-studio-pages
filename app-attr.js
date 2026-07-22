@@ -54,9 +54,12 @@ function deleteLayerFieldFrom(layer, name) {
   for (const f of featuresOnLayer(layer.id)) if (f.props) delete f.props[name];
 }
 
-// ---------- калькулятор полей: безопасный вычислитель выражений ------------
+// ---------- вычислитель выражений: калькулятор полей и отбор объектов -------
 // Поддержка: числа, 'строки', поля по имени (→ props), $area/$length/$perimeter,
 // + - * / %, унарный -, скобки, функции. «+» — сумма чисел или конкатенация строк.
+// Сравнения (= <> != < <= > >=), И/ИЛИ/НЕ (они же and/or/not) и LIKE добавлены
+// ради отбора «выбрать по выражению»; калькулятору полей они тоже нужны — без
+// сравнения if() не имел смысла.
 const EXPR_FUNCS = {
   round: (x, n) => { const p = Math.pow(10, n || 0); return Math.round(x * p) / p; },
   floor: Math.floor, ceil: Math.ceil, abs: Math.abs, sqrt: Math.sqrt,
@@ -64,7 +67,15 @@ const EXPR_FUNCS = {
   upper: s => String(s).toUpperCase(), lower: s => String(s).toLowerCase(),
   length: s => String(s).length, concat: (...a) => a.join(""),
   if: (c, a, b) => (c ? a : b),
+  contains: (s, part) => String(s).toLowerCase().includes(String(part).toLowerCase()),
+  starts_with: (s, part) => String(s).toLowerCase().startsWith(String(part).toLowerCase()),
+  coalesce: (...a) => a.find(v => v !== null && v !== undefined && v !== "" && v !== 0) ?? a[a.length - 1],
 };
+// «пусто»: у выгрузок портала отсутствующее значение приходит и как пустая
+// строка, и как заглушка — сравнение с ними должно давать одно и то же
+const EXPR_EMPTY = new Set(["", "none", "null", "not_found", "-"]);
+const exprEmpty = v => v === null || v === undefined ||
+  EXPR_EMPTY.has(String(v).trim().toLowerCase());
 function exprTokens(s) {
   const t = [], isId = c => /[A-Za-z_$Ѐ-ӿ0-9.]/.test(c);
   let i = 0;
@@ -84,7 +95,12 @@ function exprTokens(s) {
       let j = i; while (j < s.length && isId(s[j])) j++;
       t.push({ t: "id", v: s.slice(i, j) }); i = j; continue;
     }
-    if ("+-*/%(),".includes(c)) { t.push({ t: "op", v: c }); i++; continue; }
+    // двухсимвольные сравнения ищем раньше односимвольных
+    const two = s.slice(i, i + 2);
+    if (["<=", ">=", "!=", "<>", "=="].includes(two)) {
+      t.push({ t: "op", v: two === "==" ? "=" : two === "<>" ? "!=" : two }); i += 2; continue;
+    }
+    if ("+-*/%(),=<>".includes(c)) { t.push({ t: "op", v: c }); i++; continue; }
     throw new Error("непонятный символ «" + c + "»");
   }
   return t;
@@ -103,13 +119,42 @@ function evalFieldExpr(expr, f) {
     const n = parseFloat(p);
     return (typeof p === "string" && isNaN(n)) ? p : (isNaN(n) ? p : n);
   };
-  const PREC = { "+": 1, "-": 1, "*": 2, "/": 2, "%": 2 };
+  // приоритеты: ИЛИ < И < сравнение < + - < * / %
+  const PREC = { "или": 1, "or": 1, "и": 2, "and": 2,
+    "=": 3, "!=": 3, "<": 3, "<=": 3, ">": 3, ">=": 3, "like": 3,
+    "+": 4, "-": 4, "*": 5, "/": 5, "%": 5 };
+  const WORD_OPS = new Set(["и", "или", "and", "or", "like"]);
+  const asOp = tk => {
+    if (!tk) return null;
+    if (tk.t === "op") return tk.v;
+    if (tk.t === "id" && WORD_OPS.has(String(tk.v).toLowerCase())) return String(tk.v).toLowerCase();
+    return null;
+  };
+  // сравнение чисел — числами, строк — строками без учёта регистра: в выгрузках
+  // портала одно и то же значение приходит и «Ж-1», и «ж-1»
+  const cmp = (a, b) => {
+    const na = parseFloat(a), nb = parseFloat(b);
+    if (typeof a !== "string" && typeof b !== "string") return a === b ? 0 : a < b ? -1 : 1;
+    if (!isNaN(na) && !isNaN(nb) && String(a).trim() !== "" && String(b).trim() !== "")
+      return na === nb ? 0 : na < nb ? -1 : 1;
+    const sa = String(a).trim().toLowerCase(), sb = String(b).trim().toLowerCase();
+    return sa === sb ? 0 : sa < sb ? -1 : 1;
+  };
+  const like = (value, pattern) => {
+    const rx = String(pattern).split("").map(function (ch) {
+      if (ch === "%") return ".*";                 // как в SQL: любое число символов
+      if (ch === "_") return ".";                   // один любой символ
+      return /[A-Za-zА-Яа-яЁё0-9 ]/.test(ch) ? ch : "\\" + ch;
+    }).join("");
+    return new RegExp(`^${rx}$`, "i").test(String(value).trim());
+  };
   function primary() {
     const tk = next();
     if (!tk) throw new Error("неожиданный конец");
     if (tk.t === "num" || tk.t === "str") return tk.v;
     if (tk.t === "op" && tk.v === "(") { const e = expr0(0); if (!(peek() && peek().v === ")")) throw new Error("нет «)»"); next(); return e; }
     if (tk.t === "op" && (tk.v === "-" || tk.v === "+")) { const x = primary(); return tk.v === "-" ? -x : x; }
+    if (tk.t === "id" && ["не", "not"].includes(String(tk.v).toLowerCase())) return !primary();
     if (tk.t === "id") {
       if (peek() && peek().v === "(") {
         next(); const args = [];
@@ -125,9 +170,19 @@ function evalFieldExpr(expr, f) {
   }
   function expr0(minPrec) {
     let left = primary();
-    while (peek() && peek().t === "op" && PREC[peek().v] >= minPrec) {
-      const op = next().v, right = expr0(PREC[op] + 1);
-      if (op === "+") left = (typeof left === "string" || typeof right === "string") ? String(left) + String(right) : left + right;
+    while (asOp(peek()) && PREC[asOp(peek())] >= minPrec) {
+      const op = asOp(peek()); next();
+      const right = expr0(PREC[op] + 1);
+      if (op === "и" || op === "and") left = !!left && !!right;
+      else if (op === "или" || op === "or") left = !!left || !!right;
+      else if (op === "like") left = like(left, right);
+      else if (op === "=") left = exprEmpty(left) && exprEmpty(right) ? true : cmp(left, right) === 0;
+      else if (op === "!=") left = exprEmpty(left) && exprEmpty(right) ? false : cmp(left, right) !== 0;
+      else if (op === "<") left = cmp(left, right) < 0;
+      else if (op === "<=") left = cmp(left, right) <= 0;
+      else if (op === ">") left = cmp(left, right) > 0;
+      else if (op === ">=") left = cmp(left, right) >= 0;
+      else if (op === "+") left = (typeof left === "string" || typeof right === "string") ? String(left) + String(right) : left + right;
       else if (op === "-") left = left - right;
       else if (op === "*") left = left * right;
       else if (op === "/") left = right === 0 ? 0 : left / right;
