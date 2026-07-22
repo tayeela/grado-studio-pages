@@ -1079,3 +1079,12 @@ input[type=range].range-op:focus-visible{outline:2px solid var(--accent);outline
    стиль :disabled был только у .tool и кнопок модалок. */
 .iconbtn:disabled,.btn:disabled{opacity:.38;cursor:default;transform:none}
 .iconbtn:disabled:hover,.btn:disabled:hover{background:transparent;border-color:transparent}
+
+/* Состояние расчёта ТЭП. Бейдж «живой расчёт» и зелёная точка на вкладке были
+   статической разметкой: при потере связи панель одновременно сообщала «живой
+   расчёт» и «нет связи с расчётом», а на больших выгрузках — «живой расчёт» и
+   «большой проект · пересчитать». Режим ставит refreshTep() (setTepMode). */
+#panel[data-tep-mode="error"] .tep-live,
+#panel[data-tep-mode="manual"] .tep-live{display:none}
+#panel[data-tep-mode="error"] .panel-tab-live{background:var(--danger)}
+#panel[data-tep-mode="manual"] .panel-tab-live{background:var(--muted)}
