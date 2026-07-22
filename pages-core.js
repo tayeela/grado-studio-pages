@@ -144,6 +144,81 @@
     id, group, title, value: rounded(value, digits), unit,
   });
 
+  // ---- площадь ограничений внутри границы разработки -----------------------
+  // Здание отдаёт ВЕСЬ свой СПП, даже если частью вышло за границу (решение
+  // пользователя: посадка считается по объекту целиком). ЗОУИТ — наоборот,
+  // только та часть, что попала в границы разработки.
+  //
+  // Считаем площадь ОБЪЕДИНЕНИЯ зон, пересечённого с границей. Объединение
+  // обязательно: складывать площади по одной — значит считать перекрытие
+  // (СЗЗ + водоохранная над одним местом) дважды.
+  //
+  // Библиотека грузится ПОЗЖЕ этого файла, поэтому ищем её лениво, в момент
+  // расчёта; в Node-тестах её нет вовсе — тогда возвращаем null и вызывающий
+  // код честно откатывается на прежнюю суммарную площадь.
+  const closedRing = ring => {
+    const pts = (ring || []).map(p => [number(p && p[0], 0), number(p && p[1], 0)]);
+    if (pts.length < 3) return null;
+    const first = pts[0], last = pts[pts.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) pts.push([first[0], first[1]]);
+    return pts;
+  };
+  const featureToPolygon = feature => {
+    const outer = closedRing(feature && feature.ring);
+    if (!outer) return null;
+    const holes = ((feature && feature.holes) || []).map(closedRing).filter(Boolean);
+    return [outer, ...holes];
+  };
+  const multiPolygonArea = geom => {
+    if (!Array.isArray(geom)) return 0;
+    let total = 0;
+    for (const polygon of geom) {
+      if (!Array.isArray(polygon) || !polygon.length) continue;
+      total += ringArea(polygon[0]);
+      for (let i = 1; i < polygon.length; i++) total -= ringArea(polygon[i]);
+    }
+    return Math.max(0, total);
+  };
+  function restrictAreaInsideBoundary(restricts, boundaries) {
+    const pc = typeof window !== "undefined" && window.polygonClipping;
+    if (!pc || typeof pc.union !== "function" || typeof pc.intersection !== "function") return null;
+    const zones = restricts.map(featureToPolygon).filter(Boolean);
+    const bounds = boundaries.map(featureToPolygon).filter(Boolean);
+    if (!zones.length || !bounds.length) return null;
+    try {
+      const merged = pc.union(...zones.map(p => [p]));
+      const territory = pc.union(...bounds.map(p => [p]));
+      const inside = pc.intersection(merged, territory);
+      return multiPolygonArea(inside) / 10000;
+    } catch (error) {
+      return null;   // вырожденная геометрия — не роняем весь расчёт
+    }
+  }
+
+  // Самопересекающийся контур («бабочка») формулой шнурования даёт взаимное
+  // уничтожение знаковых частей: площадь занижается или обнуляется, а за ней
+  // молча обнуляется весь ТЭП. Контуры границ — десятки точек, поэтому
+  // достаточно честной проверки каждой пары несмежных сегментов.
+  const segmentsCross = (p1, p2, p3, p4) => {
+    const d = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const d1 = d(p3, p4, p1), d2 = d(p3, p4, p2), d3 = d(p1, p2, p3), d4 = d(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+           ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  };
+  function ringSelfIntersects(ring) {
+    const pts = closedRing(ring);
+    if (!pts || pts.length < 5) return false;
+    const n = pts.length - 1;              // последняя точка дублирует первую
+    if (n > 400) return false;             // ponytail: O(n²) на импортных контурах не гоняем
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue;   // смежные через замыкание
+        if (segmentsCross(pts[i], pts[i + 1], pts[j], pts[j + 1])) return true;
+      }
+    }
+    return false;
+  }
+
   function computeTep(payload = {}) {
     const rawFeatures = Array.isArray(payload.features) ? payload.features.filter(Boolean) : [];
     const params = payload.params && typeof payload.params === "object" ? payload.params : {};
@@ -153,8 +228,18 @@
       ? features.filter(feature => feature.kind === "boundary" && feature.ring)
         .reduce((sum, feature) => sum + featureAreaM2(feature), 0) / 10000
       : 15;
-    const rawRestrictArea = features.filter(feature => feature.kind === "restrict" && feature.ring)
+    // ЗОУИТ берём из ИСХОДНОГО набора, а не из отфильтрованного по центроиду:
+    // зона, центр которой снаружи, всё равно может накрывать часть территории.
+    const boundaryFeatures = rawFeatures.filter(f => f.kind === "boundary" && f.ring);
+    const restrictFeatures = rawFeatures.filter(f => f.kind === "restrict" && f.ring);
+    const clippedRestrict = hasTerritory
+      ? restrictAreaInsideBoundary(restrictFeatures, boundaryFeatures) : null;
+    // Откат на прежнюю методику, если клиппинг недоступен (нет библиотеки —
+    // например, в тестах ядра) или граница не задана.
+    const restrictFallback = features.filter(feature => feature.kind === "restrict" && feature.ring)
       .reduce((sum, feature) => sum + featureAreaM2(feature), 0) / 10000;
+    const rawRestrictArea = clippedRestrict == null ? restrictFallback : clippedRestrict;
+    const restrictClipped = clippedRestrict != null;
     const terrArea = rounded(rawTerrArea, 4);
     const restrictArea = rounded(rawRestrictArea, 4);
     // Площади ЗОУИТ суммируются без объединения геометрий: пересекающиеся зоны
@@ -253,12 +338,29 @@
           + "Проставьте этажность, иначе «СПП факт» и «Плотность факт» опираются на допущение",
       });
     }
+    // Самопересечение контура: площадь считается формулой шнурования, и
+    // «бабочка» гасит собственную площадь — ТЭП молча уезжает вниз или в ноль.
+    const twisted = [...boundaryFeatures, ...restrictFeatures]
+      .filter(feature => ringSelfIntersects(feature.ring));
+    if (twisted.length) {
+      const boundaryTwisted = twisted.some(f => f.kind === "boundary");
+      checks.unshift({ title: "Контур сам себя пересекает", ok: false,
+        msg: `${twisted.length} ${twisted.length === 1 ? "контур пересекает" : "контура пересекают"} сам себя`
+          + (boundaryTwisted ? " (в том числе граница территории)" : "")
+          + ". Площадь такого контура считается со взаимным уничтожением частей — "
+          + "она занижена или равна нулю, а вместе с ней и весь ТЭП. "
+          + "Исправьте порядок вершин",
+      });
+    }
     if (restrictOverflow) {
       checks.unshift({ title: "Ограничения превышают территорию", ok: false,
-        msg: `Сумма площадей ЗОУИТ (${rounded(restrictArea, 2)} га) больше площади территории `
+        msg: `Площадь ЗОУИТ (${rounded(restrictArea, 2)} га) больше площади территории `
           + `(${rounded(terrArea, 2)} га) — расчётная площадь принята равной 0. `
-          + "Обычная причина — пересекающиеся зоны: их площади складываются без объединения, "
-          + "поэтому перекрытие вычитается дважды. Проверьте наложения слоёв ограничений",
+          + (restrictClipped
+            ? "Ограничения покрывают всю территорию разработки целиком — проверьте, "
+              + "те ли слои отнесены к ограничениям"
+            : "Площади зон сложены без объединения, поэтому перекрытие вычтено дважды. "
+              + "Проверьте наложения слоёв ограничений"),
       });
     }
     return {
