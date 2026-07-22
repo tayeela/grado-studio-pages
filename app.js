@@ -2009,11 +2009,24 @@ function trimArcAt(f, wx, wy, boundaryIds) {
     arc.a0 = pAng;
     arc.sweep = eAng - pAng;
   }
-  // normalize
-  if (arc.sweep > Math.PI) arc.sweep -= 2 * Math.PI;
-  if (arc.sweep < -Math.PI) arc.sweep += 2 * Math.PI;
+  arc.sweep = sweepLike(arc.sweep, sw);
   afterChange();
   return true;
+}
+
+// Развёртка после обрезки/продления. Зажимать сырую разность atan2-углов в
+// ±180° нельзя: дуга больше полуокружности (arcFrom3Pts строит такие намеренно)
+// превращалась в своё дополнение с ДРУГОЙ стороны окружности — оставался не тот
+// кусок, по которому кликнули. Приводим к направлению исходного обхода,
+// сохраняя величину вплоть до полного круга.
+function sweepLike(sweep, ref) {
+  if (!Number.isFinite(sweep)) return sweep;
+  const TAU = 2 * Math.PI;
+  let s = sweep % TAU;
+  if (Math.abs(s) < 1e-9) return 0;
+  if (ref >= 0 && s < 0) s += TAU;
+  if (ref < 0 && s > 0) s -= TAU;
+  return s;
 }
 
 function extendArcAt(f, wx, wy, boundaryIds) {
@@ -2073,6 +2086,7 @@ function extendArcAt(f, wx, wy, boundaryIds) {
   if (!bestP) return false;
   snapshot();
   const pAng = Math.atan2(bestP[1] - arc.cy, bestP[0] - arc.cx);
+  const sw0 = arc.sweep;
   if (extEnd) {
     arc.sweep = pAng - arc.a0;
   } else {
@@ -2080,8 +2094,7 @@ function extendArcAt(f, wx, wy, boundaryIds) {
     arc.a0 = pAng;
     arc.sweep = eAng - pAng;
   }
-  if (arc.sweep > Math.PI) arc.sweep -= 2 * Math.PI;
-  if (arc.sweep < -Math.PI) arc.sweep += 2 * Math.PI;
+  arc.sweep = sweepLike(arc.sweep, sw0);
   afterChange();
   return true;
 }
@@ -2969,7 +2982,19 @@ function drawLineLabel(pts, text, color) {
   ctx.restore();
 }
 
+// Перерисовка схлопывается в один кадр. draw() звали синхронно из ~80 мест:
+// каждое событие колеса (на тачпаде их несколько за кадр), КАЖДЫЙ загрузившийся
+// тайл подложки (30-50 при старте) и наведение на строку слоя запускали полный
+// проход по всем объектам. Планировщик здесь, а не в 80 местах вызова: все они
+// идут через эту функцию. drawNow() остаётся для случая, когда нужен кадр
+// немедленно. Ничто не читает канву синхронно после draw() (ни toDataURL, ни
+// getImageData), поэтому отложить на кадр безопасно.
+let _drawPending = 0;
 function draw() {
+  if (_drawPending) return;
+  _drawPending = requestAnimationFrame(() => { _drawPending = 0; drawNow(); });
+}
+function drawNow() {
   const w = cv.clientWidth, h = cv.clientHeight;
   ctx.clearRect(0, 0, w, h);
   drawBasemap(w, h);
@@ -3596,10 +3621,25 @@ function syncHistoryControls() {
   if (undoButton) undoButton.disabled = !state.undo.length;
   if (redoButton) redoButton.disabled = !state.redo.length;
 }
+// Потолок истории по ОБЪЁМУ, а не только по числу объектов. Порог 8000 объектов
+// ничего не говорит о весе снимка: проект с тяжёлой геометрией (импорт ОГД —
+// сотни вершин на полигон) остаётся «маленьким» по счётчику и держит до 100
+// полных JSON-копий, то есть сотни мегабайт строк в памяти. Держим суммарный
+// объём в пределах бюджета, всегда сохраняя хотя бы один шаг отмены.
+// ponytail: полные снимки как были; если понадобится глубокая история на
+// тяжёлых проектах — переходить на инкрементальные диффы (изменённые объекты
+// до/после), это уже отдельная работа.
+const HISTORY_BYTE_BUDGET = 64 * 1024 * 1024;   // ~64 МБ строк истории
+function trimHistoryToBudget(stack) {
+  let bytes = 0;
+  for (const entry of stack) bytes += entry.length;
+  while (stack.length > 1 && bytes > HISTORY_BYTE_BUDGET) bytes -= stack.shift().length;
+}
 function pushHistoryEntry(serialized = serializeHistoryState()) {
   state.undo.push(serialized);
   const max = undoDepth();
   while (state.undo.length > max) state.undo.shift();
+  trimHistoryToBudget(state.undo);
   state.redo = [];
   syncHistoryControls();
 }
@@ -3805,15 +3845,55 @@ function setSaveStatus(text, kind = "") {
   el.textContent = text;
   el.className = kind ? `save-${kind}` : "";
 }
+// Отказ автосохранения раньше было видно только по мелкой надписи «Не сохранено»
+// в статус-строке: оба вызывающих места глушат ошибку через .catch(() => {}).
+// Можно было часами работать с неработающим автосейвом и потерять всё при
+// закрытии вкладки. Теперь — заметное сообщение (один раз на серию неудач)
+// и предупреждение браузера при попытке уйти.
+let autosaveFailed = false;
+function noteAutosaveResult(ok) {
+  if (ok === autosaveFailed) {   // состояние сменилось
+    autosaveFailed = !ok;
+    if (!ok) toast("Автосохранение не работает — сохраните проект файлом "
+      + "(Проект → Сохранить .grado-web.json), иначе правки пропадут", "error");
+  }
+}
+// Версия автосейва, поверх которой пишет ЭТА вкладка. Хранилище одно на origin,
+// и раньше каждая вкладка перезаписывала его целиком без сверки: вторая вкладка,
+// открытая час назад, одной правкой затирала свежую работу первой — молча и
+// невосстановимо. Теперь пишем «поверх известной версии» (семантика If-Match):
+// разошлись — сервер отвечает 409, и мы НЕ затираем чужое.
+let autosaveBase = null;
+let autosaveConflict = false;
+function noteAutosaveConflict() {
+  if (autosaveConflict) return;
+  autosaveConflict = true;
+  toast("Проект изменён в другой вкладке. Чтобы не затереть те правки, "
+    + "автосохранение здесь остановлено — сохраните эту версию файлом "
+    + "(Проект → Сохранить .grado-web.json) или перезагрузите страницу", "error");
+}
+window.addEventListener("beforeunload", event => {
+  if (!autosaveFailed && !autosaveConflict) return;
+  event.preventDefault();
+  event.returnValue = "";   // требуется частью браузеров для показа диалога
+});
+
 async function saveStateRequest(payload, options = {}) {
   setSaveStatus("Сохранение…", "busy");
   try {
+    if (autosaveConflict) throw new Error("Автосохранение остановлено из-за конфликта вкладок");
     const headers = { "Content-Type": "application/json" };
     if (options.checkpoint) headers["X-Grado-Checkpoint"] = "1";
+    if (autosaveBase) headers["X-Grado-Base"] = autosaveBase;
     const response = await fetch("/api/autosave", {
       method: "POST", headers,
       body: JSON.stringify(payload),
     });
+    if (response.status === 409) {
+      setSaveStatus("Не сохранено", "error");
+      noteAutosaveConflict();
+      throw new Error("Проект изменён в другой вкладке");
+    }
     if (!response.ok) {
       const issue = await response.json().catch(() => ({}));
       throw new Error(issue.error || `HTTP ${response.status}`);
@@ -3824,9 +3904,12 @@ async function saveStateRequest(payload, options = {}) {
     const time = Number.isNaN(savedAt.getTime()) ? "" :
       ` ${savedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
     setSaveStatus(`Сохранено${time}`, "ok");
+    if (result && result.saved_at) autosaveBase = result.saved_at;
+    noteAutosaveResult(true);
     return result;
   } catch (error) {
     setSaveStatus("Не сохранено", "error");
+    noteAutosaveResult(false);
     throw error;
   }
 }
@@ -6652,6 +6735,17 @@ cv.addEventListener("pointerdown", e => {
       toast("Этот слой не поддерживает окружности (выберите/создайте слой с геометрией окружность)", "warn");
       return;
     }
+    // Второй клик по уже поставленному центру задаёт радиус и завершает
+    // окружность; иначе он просто переставлял бы центр.
+    if (state.drawing && state.drawing.center) {
+      const c = state.drawing.center;
+      const r = Math.hypot(s.p[0] - c[0], s.p[1] - c[1]);
+      if (r > 0.5) {
+        state.drawing = null; state.typed = "";
+        addFeature(L.id, { circle: { cx: c[0], cy: c[1], r } });
+        return;
+      }
+    }
     state.drawing = { center: s.p, r: 0 };
     state.typed = "";
     draw();
@@ -6850,11 +6944,15 @@ window.addEventListener("pointerup", e => {
     const c = state.drawing.center;
     const mp = state.mouse || [c[0], c[1]];
     const r = Math.hypot(mp[0] - c[0], mp[1] - c[1]);
-    state.drawing = null;
     const L = activeLayer();
     if (L && r > 0.5) {
+      state.drawing = null;
       addFeature(L.id, { circle: { cx: c[0], cy: c[1], r } });
     } else {
+      // Клик без протягивания: центр ОСТАЁТСЯ, радиус задаётся вторым кликом,
+      // вводом числа или Enter. Раньше pointerup того же клика сбрасывал
+      // drawing, и оба этих способа (стандартный приём САПР) были недостижимы —
+      // окружность можно было построить только нажать-протянуть-отпустить.
       draw();
     }
   }
@@ -6919,7 +7017,16 @@ document.addEventListener("keydown", e => {
   if ((e.metaKey || e.ctrlKey) && e.code === "KeyN") {
     e.preventDefault(); document.getElementById("btn-new-project").click(); return;
   }
-  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  // TEXTAREA и contenteditable раньше сюда проваливались: в редакторе формул
+  // пробел не набирался (preventDefault ниже), а Backspace ПАРАЛЛЕЛЬНО удалял
+  // выделенные объекты холста — правка текста молча уносила геометрию.
+  // BUTTON: пробел обязан активировать кнопку (WCAG 2.1.1), а Delete при
+  // фокусе на кнопке в модалке — не стирать объекты за её спиной.
+  const t = e.target;
+  if (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA"
+      || t.isContentEditable) return;
+  if (t.tagName === "BUTTON" &&
+      (e.code === "Space" || e.key === "Enter" || e.key === "Delete" || e.key === "Backspace")) return;
   if (e.key === "Shift") { shiftDown = true; if (state.drawing) draw(); return; }
   if (e.code === "Space") { spaceDown = true; e.preventDefault(); return; }
   if ((e.metaKey || e.ctrlKey) && e.code === "KeyZ") {
@@ -6935,6 +7042,22 @@ document.addEventListener("keydown", e => {
   }
   // набор при рисовании: длина (50), абсолют X Y (100 200 или 100;200),
   // полярно (длина<угол°). Разрешены цифры, разделители, знак, угол
+  // Начало фигуры С КЛАВИАТУРЫ. Набор координат гейтился уже начатым
+  // рисованием, а начиналось оно только в pointerdown холста — то есть первую
+  // точку можно было поставить исключительно мышью, хотя подпись холста
+  // обещает «Enter завершает фигуру» (WCAG 2.1.1 для основной функции
+  // приложения). Цифра при активном инструменте геометрии открывает набор:
+  // дальше работает уже существующий формат «100 200» (абсолютные X Y),
+  // которому предыдущая точка не нужна. Окружность не сеем — ей сначала нужен
+  // центр, а не радиус.
+  if (!state.drawing && !state.xf && TOOL_GEOM[state.tool] && state.tool !== "circle"
+      && /^[0-9]$/.test(e.key) && isDrawableLayer(activeLayer())) {
+    state.drawing = { pts: [] };
+    state.typed = e.key;
+    toast("Введите координаты «X Y» и нажмите Enter", "info");
+    draw();
+    return;
+  }
   if (state.drawing && /^[0-9.,;<> -]$/.test(e.key)) { state.typed += e.key; draw(); return; }
   if (state.drawing && e.key === "Backspace") {
     state.typed = state.typed.slice(0, -1); draw(); return;
@@ -7981,6 +8104,8 @@ window.afterExternalApply = function () {
   // сайта) — пробуем резервную копию на диске сервера
   applyPendingProjectName();
   fetch("/api/autosave").then(r => r.ok ? r.json() : null).then(d => {
+    // Отметка версии, поверх которой эта вкладка будет писать (см. autosaveBase)
+    if (d && d.saved_at) autosaveBase = d.saved_at;
     const saved = d && d.state && typeof d.state === "object" ? d.state : d;
     if (saved && Array.isArray(saved.features) && applyRestoredState(d)) {
       draw(); renderProps(); renderLayers(); renderSources(); refreshTep(); fitView();
