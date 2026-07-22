@@ -2861,26 +2861,121 @@ function drawMarkerGlyph(mk, px, py, tx, ty, nx, ny, s, period) {
 // против 27 мс без него). Правило размещения не изменилось: greedy, побеждает
 // первый занявший место; подпись задевает 1-4 ячейки и сравнивается только с
 // соседями по этим ячейкам — результат тот же, что у полного перебора.
-const LABEL_CELL = 64;               // px экрана; подпись заведомо мельче
-function labelGrid() {
-  const cells = new Map();
-  const each = (b, fn) => {
-    for (let cx = Math.floor(b[0] / LABEL_CELL); cx <= Math.floor(b[2] / LABEL_CELL); cx++)
-      for (let cy = Math.floor(b[1] / LABEL_CELL); cy <= Math.floor(b[3] / LABEL_CELL); cy++)
-        if (fn(cx + "_" + cy)) return true;
-    return false;
-  };
-  return {
-    hits: b => each(b, k => {
-      const a = cells.get(k);
-      return a ? a.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]) : false;
-    }),
-    add: b => { each(b, k => { let a = cells.get(k); if (!a) cells.set(k, a = []); a.push(b); }); },
-  };
+// Сетка и раскладка живут в app-labels.js (проверяются в Node); здесь — сборка
+// заданий и отрисовка. LABELS объявлен так, чтобы app.js оставался пригодным
+// для node-тестов, которые режут из него куски без модуля.
+const LABELS = (typeof window !== "undefined" && window.GRADO_LABELS) || null;
+
+// Точка подписи полигона — полюс недоступности, а не среднее вершин: у поймы,
+// зоны вдоль набережной и квартала подковой среднее лежит ВНЕ контура, и
+// подпись уезжала на соседа. Считается в мировых координатах и кешируется:
+// на 30 000 зданий пересчёт каждый кадр невозможен. Ключ кеша — сам массив
+// кольца плюс отпечаток (число вершин и крайние точки): правка вершины меняет
+// отпечаток, и точка пересчитывается.
+const _anchorCache = new WeakMap();
+function labelAnchor(f) {
+  const ring = f.ring;
+  if (!ring || ring.length < 3) return null;
+  const last = ring[ring.length - 1];
+  const stamp = `${ring.length}|${ring[0][0]},${ring[0][1]}|${last[0]},${last[1]}`;
+  const hit = _anchorCache.get(ring);
+  if (hit && hit.stamp === stamp) return hit.at;
+  const rings = [ring, ...(f.holes || [])];
+  const at = LABELS ? LABELS.poleOfInaccessibility(rings) : null;
+  if (at) _anchorCache.set(ring, { stamp, at });
+  return at;
+}
+
+// Экранный габарит объекта — для отсева подписей, которым негде поместиться.
+function featureScreenBox(f) {
+  const pts = f.ring || f.line || (f.point ? [f.point] : null)
+    || ((f.arc || f.circle) ? featurePts(f) : null);
+  if (!pts || !pts.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    const [px, py] = w2s(p[0], p[1]);
+    if (px < x0) x0 = px; if (px > x1) x1 = px;
+    if (py < y0) y0 = py; if (py > y1) y1 = py;
+  }
+  return [x0, y0, x1, y1];
+}
+
+// Задание на подпись: где хочет стоять, насколько важна, куда может подвинуться.
+function labelJob(f, st, text, layer) {
+  if (!LABELS) return null;
+  const lf = st.label_font || {};
+  const size = Math.min(72, Math.max(6, lf.size || 11));
+  const font = `${size}px ${LABEL_FONTS[lf.family] || "sans-serif"}`;
+  // Экранный габарит объекта считаем ДО измерения текста: на общем плане
+  // квартал занимает 2 px, подпись туда не влезет никогда, а собрать задание —
+  // это измерение, полюс недоступности и место в раскладке. Раньше на 20 000
+  // подписанных зданий кадр тратил 73 мс на задания, из которых не ставилось
+  // НИ ОДНО.
+  const fit = featureScreenBox(f);
+  if (!fit) return null;
+  // Порог — только для полигонов: у точки габарит нулевой, у горизонтальной
+  // линии нулевая высота, а подписывать их надо.
+  if (f.ring && (fit[2] - fit[0] < size || fit[3] - fit[1] < size)) return null;
+  const width = measureLabel(text, font);
+  if (!(width > 0)) return null;
+  const color = lf.color || cvColor("label", "#5c5a54");
+  // Важность: чем позже слой в LAYERS_V2, тем он выше на чертеже (порядок
+  // отрисовки), значит его подпись важнее. Внутри слоя крупный объект
+  // вытесняет мелкий. Раньше место занимал тот, кого раньше нарисовали, —
+  // подпись фонового слоя выигрывала у подписи верхнего.
+  const base = Math.max(0, LAYERS_V2.indexOf(layer)) * 1000;
+  if (f.ring) {
+    if (width > fit[2] - fit[0]) return null;      // строка шире объекта
+    const at = labelAnchor(f);
+    if (!at) return null;
+    const [sx, sy] = w2s(at[0], at[1]);
+    return { text, font, color, size, x: sx, y: sy, width, height: size,
+      fit, priority: base + Math.min(999, (fit[2] - fit[0]) * (fit[3] - fit[1]) / 400) };
+  }
+  if (f.point) {
+    const [sx, sy] = w2s(...f.point);
+    const marker = (st.marker && st.marker.size) || 4;
+    return { text, font, color, size, x: sx, y: sy, width, height: size,
+      candidates: LABELS.aroundPoint(marker), priority: base + 500 };
+  }
+  const pts = f.line || (f.arc || f.circle ? featurePts(f) : null);
+  if (pts && pts.length > 1) {
+    // у линии подпись садится в середину — вдоль линии подписывает знак ЛГР
+    const mid = pts[Math.floor(pts.length / 2)];
+    const [sx, sy] = w2s(mid[0], mid[1]);
+    return { text, font, color, size, x: sx, y: sy, width, height: size,
+      candidates: LABELS.aroundPoint(3), priority: base + 200 };
+  }
+  return null;
+}
+
+// Ореол вокруг текста: подпись читается и поверх заливки зоны, и поверх снимка.
+function drawLabelJobs(jobs, grid) {
+  if (!LABELS || !jobs.length) return;
+  const placed = LABELS.layout(jobs, { grid });
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  const halo = cvColor("bg", "#ffffff");
+  for (const job of placed) {
+    ctx.font = job.font;
+    ctx.lineWidth = Math.max(2, job.size / 4);
+    ctx.strokeStyle = halo;
+    ctx.globalAlpha = 0.85;
+    ctx.strokeText(job.text, job.x, job.y);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = job.color;
+    ctx.fillText(job.text, job.x, job.y);
+  }
+  ctx.restore();
 }
 // Ширина текста: measureText дорогой, а на городском слое подписи повторяются
 // (этажность «5» у тысяч зданий) — ключ «шрифт + строка» даёт высокий процент
-// попаданий. Сам ctx.font при этом ставится ВСЕГДА: его меняют и соседние
+// попаданий. Сам ctx.font ставится ЗДЕСЬ и только при промахе: присваивание
+// шрифта само по себе дорого, а при сборке подписей его делали на каждый объект
+// (20 000 присваиваний за кадр ради нескольких измерений). Перед РИСОВАНИЕМ
+// шрифт всё равно ставится заново: его меняют и соседние
 // рисовалки того же кадра (подпись линии, размерная линия), поэтому кешировать
 // шрифт нельзя — кеш разъехался бы с фактическим состоянием холста, и подпись
 // уехала бы чужим шрифтом.
@@ -2890,6 +2985,7 @@ function measureLabel(s, font) {
   let w = _measCache.get(key);
   if (w === undefined) {
     if (_measCache.size > 4000) _measCache.clear();   // страховка от роста
+    ctx.font = font;          // ставим только при промахе: присваивание шрифта дорого
     _measCache.set(key, w = ctx.measureText(s).width);
   }
   return w;
@@ -3116,7 +3212,7 @@ function drawDoubleLine(pts, gap, closed) {
 // и в QGIS-символике «line pattern», надпись повторяется вдоль линии с
 // оптимальным шагом. Раньше ставилась ОДНА на самом длинном отрезке — на
 // длинной красной линии терялась, на длинном контуре ЗОУИТ была одинока.
-function drawLineLabel(pts, text, color) {
+function drawLineLabel(pts, text, color, grid) {
   const scr = pts.map(p => w2s(...p));
   if (scr.length < 2) return;
   ctx.save();
@@ -3156,6 +3252,24 @@ function drawLineLabel(pts, text, color) {
       if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
       places.push({ x: (seg.ax + seg.bx) / 2, y: (seg.ay + seg.by) / 2, ang });
     }
+  }
+  // Подпись знака — часть условного знака, поэтому место занимает первой:
+  // подписи по полю раскладываются после и обходят её. Заодно отсеиваются
+  // наложения самих знаковых подписей друг на друга.
+  if (grid) {
+    const kept = [];
+    for (const p of places) {
+      // повёрнутый текст закрываем прямоугольником по его габариту
+      const cos = Math.abs(Math.cos(p.ang)), sin = Math.abs(Math.sin(p.ang));
+      const bw = textW * cos + 12 * sin, bh = textW * sin + 12 * cos;
+      const box = [p.x - bw / 2 - 2, p.y - bh / 2 - 2, p.x + bw / 2 + 2, p.y + bh / 2 + 2];
+      if (grid.hits(box)) continue;
+      grid.add(box);
+      kept.push(p);
+    }
+    places.length = 0;
+    places.push(...kept);
+    if (!places.length) { ctx.restore(); return; }
   }
   // ДВА ПРОХОДА: сперва все гало, потом все заливки — иначе белое гало
   // следующей подписи «съедает» буквы предыдущей (пропадали части букв)
@@ -3207,9 +3321,13 @@ function drawNow() {
     if (!layerDrawable(L) || _cull(f) || catOff(L, f)) continue;
     let arr = _byLayer.get(L); if (!arr) _byLayer.set(L, arr = []); arr.push(f);
   }
-  // занятые экранные bbox уже отрисованных подписей этого слоя за проход —
-  // greedy-фильтр наложения (простой вариант, не полноценный label placement)
-  const _placedLabels = new Map();
+  // Подписи собираются за кадр и раскладываются ПОСЛЕ отрисовки объектов
+  // (см. app-labels.js). Сетка занятости одна на кадр, а не на слой: раньше
+  // подписи разных слоёв садились друг на друга, потому что сеток было столько
+  // же, сколько слоёв. Подписи знака (вдоль линии) рисуются сразу — они часть
+  // условного знака — и занимают места первыми.
+  const _labelGrid = LABELS ? LABELS.createGrid() : null;
+  const _labelJobs = [];
   for (const layer of LAYERS_V2) {
     if (!layer.visible) continue;
     const _feats = _byLayer.get(layer); if (!_feats) continue;
@@ -3338,33 +3456,15 @@ function drawNow() {
         }
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
-          drawLineLabel(pts, st.line_label, st.stroke || cvColor("redline", "#d91a1a"));
+          drawLineLabel(pts, st.line_label, st.stroke || cvColor("redline", "#d91a1a"), _labelGrid);
         }
       }
       ctx.setLineDash([]);
-      if (st.label_field && f.ring) {
-        // центр кольца без reduce: тот возвращал НОВЫЙ массив на каждую вершину
-        let _cx = 0, _cy = 0;
-        for (const p of f.ring) { _cx += p[0]; _cy += p[1]; }
-        _cx /= f.ring.length; _cy /= f.ring.length;
+      if (st.label_field) {
         const v = labelOf(f);
         if (v !== undefined && v !== "" && v !== null) {
-          const lf = st.label_font || {};
-          const fsize = Math.min(72, Math.max(6, lf.size || 11));
-          const _font = `${fsize}px ${LABEL_FONTS[lf.family] || "sans-serif"}`;
-          ctx.font = _font;
-          const [sx, sy] = w2s(_cx, _cy);
-          const _s = String(v);
-          const tw = measureLabel(_s, _font);
-          const bbox = [sx - tw / 2, sy - fsize, sx + tw / 2, sy + fsize * 0.25];
-          let _placed = _placedLabels.get(layer);
-          if (!_placed) _placedLabels.set(layer, _placed = labelGrid());
-          if (!_placed.hits(bbox)) {
-            _placed.add(bbox);
-            ctx.fillStyle = lf.color || cvColor("label", "#5c5a54");
-            ctx.textAlign = "center";
-            ctx.fillText(_s, sx, sy);
-          }
+          const job = labelJob(f, st, String(v), layer);
+          if (job) _labelJobs.push(job);
         }
       }
       if (state.selectedIds.has(f.id)) {
@@ -3468,6 +3568,10 @@ function drawNow() {
       }
     }
   }
+
+  // подписи объектов: раскладка по одной сетке на кадр, важность решает, кто
+  // займёт спорное место
+  drawLabelJobs(_labelJobs, _labelGrid);
 
   // пикетаж красных линий: засечки поперёк + подписи ПК
   for (const f of state.features) {

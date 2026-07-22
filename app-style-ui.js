@@ -318,9 +318,12 @@ function openLayerStyle(layer, opts = {}) {
   const opt = (sel, v, lbl) => `<option value="${escHtml(v)}"${sel === v ? " selected" : ""}>${escHtml(lbl)}</option>`;
   // рабочая копия правил для режима «по значению поля»
   const fieldCols = attrColumns(layer).filter(c => !c.virtual);
-  // подпись объектов: поле + шрифт (кегль/цвет/семейство). Холст подписывает
-  // полигоны по центроиду (label_field), поэтому секция только для них.
+  // подпись объектов: поле + шрифт (кегль/цвет/семейство). Раньше секция была
+  // только у полигонов — холст умел подписывать лишь их. Теперь подписываются и
+  // точки (соцобъекты, номера домов), и линии, поэтому поле доступно всем, кроме
+  // размерных: у тех подпись — сама длина.
   const isPoly = layer.geometry_type === "polygon";
+  const canLabel = layer.kind !== "dim";
   const curLF = cur.label_field || "";
   const lfFont = cur.label_font || {};
   const labelCols = fieldCols.slice();
@@ -381,7 +384,7 @@ function openLayerStyle(layer, opts = {}) {
             </div>
           </section>
           <section class="style-section style-section-compact"><label class="style-check"><input type="checkbox" id="fmt-label" ${baseLabel ? "checked" : ""}><span><b>Подпись линии</b><small>Использовать подпись из знака ЛГР</small></span></label></section>
-          ${isPoly ? `<section class="style-section"><div class="style-section-head"><span><b>Подпись объектов</b><small>Поле и параметры текста</small></span></div>
+          ${canLabel ? `<section class="style-section"><div class="style-section-head"><span><b>Подпись объектов</b><small>Поле и параметры текста</small></span></div>
             <label>Поле подписи<select id="fmt-labelf"><option value="">— без подписи —</option>${labelCols.map(c => opt(curLF, c.name, c.label || c.name)).join("")}</select></label>
             <div class="fmt-body" id="fmt-labelf-fields" style="display:${curLF ? "" : "none"}"><div class="fmt-row">
               <label>Кегль, px<input type="number" id="fmt-lsize" value="${boundedNumber(lfFont.size, 6, 72, 11)}" min="6" max="72" step="0.5" required></label>
