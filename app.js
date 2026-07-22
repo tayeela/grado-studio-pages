@@ -1697,19 +1697,45 @@ function tileYToLat(ty, z) {
   return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
+// Кэш тайлов был безлимитным и чистился только при смене подложки. За долгую
+// сессию с панорамированием по городу он накапливал тысячи декодированных
+// Image (~256 КБ битмапа каждый) — сотни мегабайт, вкладка тяжелела.
+// Map хранит порядок вставки, поэтому LRU обходится переустановкой ключа при
+// обращении и удалением самого старого при переполнении.
+const TILE_CACHE_MAX = 800;   // ~200 МБ битмапов в худшем случае
 function tileImage(z, x, y) {
   const key = `${basemap.source}/${z}/${x}/${y}`;
   let e = basemap.cache.get(key);
-  if (!e) {
-    e = { img: new Image(), loaded: false, failed: false };
-    e.img.onload = () => { e.loaded = true; draw(); };
-    e.img.onerror = () => { e.failed = true; };
-    e.img.src = window.gradoTileUrl
-      ? window.gradoTileUrl(z, x, y, basemap.source)
-      : `/api/tiles/${z}/${x}/${y}.png?src=${basemap.source}`;
+  if (e) {
+    // обращение — освежаем позицию в порядке вытеснения
+    basemap.cache.delete(key);
     basemap.cache.set(key, e);
+    // неудачный тайл больше не «залипает» навсегда: даём повторную попытку
+    if (e.failed) {
+      e.failed = false; e.loaded = false;
+      e.img = new Image();
+      e.img.onload = () => { e.loaded = true; draw(); };
+      e.img.onerror = () => { e.failed = true; };
+      e.img.src = tileUrl(z, x, y);
+    }
+    return e;
+  }
+  e = { img: new Image(), loaded: false, failed: false };
+  e.img.onload = () => { e.loaded = true; draw(); };
+  e.img.onerror = () => { e.failed = true; };
+  e.img.src = tileUrl(z, x, y);
+  basemap.cache.set(key, e);
+  while (basemap.cache.size > TILE_CACHE_MAX) {
+    const oldest = basemap.cache.keys().next().value;
+    if (oldest === key) break;
+    basemap.cache.delete(oldest);
   }
   return e;
+}
+function tileUrl(z, x, y) {
+  return window.gradoTileUrl
+    ? window.gradoTileUrl(z, x, y, basemap.source)
+    : `/api/tiles/${z}/${x}/${y}.png?src=${basemap.source}`;
 }
 
 function drawBasemap(w, h) {
@@ -3860,8 +3886,9 @@ function applyPendingProjectName() {
 // полный снимок состояния студии (общий проектный + личный вид). Один
 // источник и для localStorage/autosave, и для веб-синхронизации (collab.js
 // берёт из него только «общие» ключи проекта).
-// skipHistory — для historySmallState(): иначе каждый снимок отмены заново
-// материализовал бы десяток записей истории в строки (O(10n) на жест).
+// Историю здесь НЕ материализуем: collectState() зовётся на каждую правку
+// (persist → afterChange), а превращение записей отмены в строки стоит дорого.
+// Её подшивает saveStateNow() — единственная точка реальной записи.
 function collectState(opts = {}) {
   return {
     schema_version: STATE_SCHEMA_VERSION,
@@ -3893,8 +3920,7 @@ function collectState(opts = {}) {
     // undo/redo — снимки всего проекта; у больших выгрузок их сериализация в
     // автосейв = главный фриз. Для них историю не персистим (в сессии undo
     // работает, после перезагрузки — сбрасывается). Малые — как прежде.
-    undo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.undo),
-    redo: opts.skipHistory || state.features.length > 8000 ? [] : historyStackToStrings(state.redo),
+    undo: [], redo: [],
     projectCustomKinds: state.projectCustomKinds || [],
     variants: state.variants || [],
     accessRadii: state.accessRadii,
@@ -4004,6 +4030,14 @@ async function saveStateRequest(payload, options = {}) {
   }
 }
 function saveStateNow(payload, options = {}) {
+  // История отмен сериализуется здесь, а не в collectState(): запись дебаунсится
+  // (1.5 с), а collectState() выполняется на каждую правку. Порог 8000 объектов
+  // прежний — у больших выгрузок историю на диск не пишем вовсе.
+  if (payload && typeof payload === "object" && Array.isArray(payload.features)) {
+    const heavy = payload.features.length > 8000;
+    payload.undo = heavy ? [] : historyStackToStrings(state.undo);
+    payload.redo = heavy ? [] : historyStackToStrings(state.redo);
+  }
   // Автосейв, контрольная копия и замена проекта обязаны завершаться в том
   // же порядке, в котором пользователь их запустил. ThreadingHTTPServer и
   // IndexedDB иначе могут последними записать более старый снимок.
@@ -4746,7 +4780,9 @@ function layerGeometryMeta(layer) {
   return { icon: "i-poly", label: "Полигоны" };
 }
 
-function renderLayerLegend(sampleByLayer = {}) {
+// statsByLayer — готовая статистика из renderLayers (счётчик и категории за
+// один проход). Без неё легенда снова сканировала бы все объекты на каждый слой.
+function renderLayerLegend(sampleByLayer = {}, statsByLayer = null) {
   const host = document.getElementById("layers-legend-body");
   if (!host) return;
   host.innerHTML = "";
@@ -4770,10 +4806,14 @@ function renderLayerLegend(sampleByLayer = {}) {
   Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupForKey);
   visibleLayers.forEach(layer => {
     const group = groupForKey(layerGroupKey(layer));
-    const cats = layerCatStats(layer).filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
+    const stat = statsByLayer && statsByLayer.get(layer.id);
+    const allCats = stat
+      ? [...stat.cats.values()].sort((a, b) => a.title.localeCompare(b.title, "ru"))
+      : layerCatStats(layer);
+    const cats = allCats.filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
     const items = cats.length > 1 ? cats : [{
       title: layer.title,
-      count: featuresOnLayer(layer.id).length,
+      count: stat ? stat.count : featuresOnLayer(layer.id).length,
       sample: sampleByLayer[layer.id],
     }];
     items.forEach(item => {
@@ -4797,6 +4837,16 @@ function renderLayers() {
   // слоя — общий контур, и превью рисовалось чёрной линией вместо знака (ООЗТ,
   // функц. зоны и т.п.). styleOf(объект) = ровно то, что нарисовано на холсте.
   const sampleByLayer = {};
+  // Счётчик и категории каждого слоя считаем ЗДЕСЬ же, одним проходом. Раньше
+  // цикл по слоям звал featuresOnLayer() и layerCatStats() — это два полных
+  // прохода по всем объектам НА КАЖДЫЙ слой, O(слои × объекты) на любую правку:
+  // 16 слоёв и 20 000 объектов давали ~640 000 итераций на перерисовку панели.
+  const statsByLayer = new Map();
+  const statFor = id => {
+    let s = statsByLayer.get(id);
+    if (!s) { s = { count: 0, cats: new Map() }; statsByLayer.set(id, s); }
+    return s;
+  };
   for (const f of state.features) {
     const lid = f.layer_id;
     if (!lid) continue;
@@ -4804,7 +4854,23 @@ function renderLayers() {
     // может быть без знака, и первый попавшийся дал бы пустой свотч
     const cur = sampleByLayer[lid];
     if (!cur || (!cur.style_id && f.style_id)) sampleByLayer[lid] = f;
+    // счётчик — по РЕАЛЬНОМУ слою объекта (layerOf учитывает правило 7:
+    // незарегистрированный layer_id уводит объект в слой по виду)
+    const L = layerOf(f);
+    if (!L) continue;
+    const stat = statFor(L.id);
+    stat.count++;
+    const cat = featCat(f);
+    if (!cat) continue;
+    let entry = stat.cats.get(cat);
+    if (!entry) {
+      entry = { id: cat, title: (STYLES_V2[cat] && STYLES_V2[cat].title) || cat, count: 0, sample: f };
+      stat.cats.set(cat, entry);
+    }
+    entry.count++;
   }
+  const catsOf = id => [...(statsByLayer.get(id)?.cats.values() || [])]
+    .sort((a, b) => a.title.localeCompare(b.title, "ru"));
   const groupHosts = new Map();
   let groupState = {};
   try { groupState = JSON.parse(localStorage.getItem("grado_layer_groups") || "{}"); } catch (_) {}
@@ -4856,10 +4922,10 @@ function renderLayers() {
   Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupHostForKey);
   for (const layer of displayedLayers) {
     const groupHost = groupHostForKey(layerGroupKey(layer));
-    const count = featuresOnLayer(layer.id).length;
+    const count = statsByLayer.get(layer.id)?.count || 0;
     // QGIS-логика: если в слое объекты с РАЗНЫМИ знаками — показываем подпункты
     // по каждому форматированию (функц. зоны → производственные/многофункц./…).
-    const cats = layerCatStats(layer);
+    const cats = catsOf(layer.id);
     const multiCat = cats.length > 1;
     const catOpen = multiCat && _catOpen.has(layer.id);
     const sample = sampleByLayer[layer.id];
@@ -5013,7 +5079,7 @@ function renderLayers() {
     const section = body.closest(".layer-stack-group");
     section.querySelector(".layer-group-count").textContent = body.querySelectorAll(":scope > .layer-row").length;
   });
-  renderLayerLegend(sampleByLayer);
+  renderLayerLegend(sampleByLayer, statsByLayer);
   updateLayerStatus();   // чип «куда я черчу» — синхрон с активным слоем
   updateStartExperience();
 }
@@ -6783,7 +6849,21 @@ cv.addEventListener("pointerdown", e => {
         }
       }
       const orig = feats.map(ff => featureMovablePts(ff).map(p => [p[0], p[1]]));
-      state.edit = { vi: "body", ids: movingIds, feats, orig, refOrig,
+      // Общие вершины покрытийных слоёв ищем ОДИН раз на жест. Раньше
+      // sharedCompanions() звался для каждой вершины на каждое движение мыши и
+      // сканировал все объекты проекта — O(вершин × объектов × вершин) на кадр,
+      // из-за чего перетаскивание функциональной зоны фризило. Топология
+      // совпадений за жест не меняется: компаньоны едут тем же офсетом.
+      const bodyComps = [];
+      for (const feat of feats) {
+        if (!isCoverageFeature(feat)) continue;
+        const pts = featurePts(feat);
+        for (let vi = 0; vi < pts.length; vi++) {
+          const comps = sharedCompanions(feat, vi);
+          if (comps.length) bodyComps.push({ feat, vi, comps });
+        }
+      }
+      state.edit = { vi: "body", ids: movingIds, feats, orig, refOrig, bodyComps,
                      grab: [wxr, wyr], moved: false };
       draw(); renderProps();
     } else {                                   // пустое место — рамка выделения
@@ -6892,6 +6972,11 @@ cv.addEventListener("pointermove", e => {
   }
   if (state.edit) {
     const ed = state.edit;
+    // Двигали ли объекты ВНЕ exclude-набора привязок. Индекс привязок строится
+    // по всем объектам, а исключения применяются на ЗАПРОСЕ — поэтому пока
+    // изменяется только то, что и так исключено, индекс остаётся корректным
+    // и перестраивать его на каждое движение мыши не нужно.
+    let snapDirty = false;
     if (!ed.moved) { snapshot(); ed.moved = true; }
     if (ed.edgeDrag) {
       applyEdgeDrag(ed, wx, wy);
@@ -6908,19 +6993,16 @@ cv.addEventListener("pointermove", e => {
         const pts = featureMovablePts(feat), o = ed.orig[fi];  // с дырами
         for (let i = 0; i < pts.length; i++) { pts[i][0] = o[i][0] + ox; pts[i][1] = o[i][1] + oy; }
       });
-      // joint edit for shared boundaries on coverage layers — one operation for common edge
-      ed.feats.forEach(feat => {
-        if (!isCoverageFeature(feat)) return;
+      // общие границы покрытийных слоёв: пары найдены один раз при pointerdown
+      for (const { feat, vi, comps } of (ed.bodyComps || [])) {
         const pts = featurePts(feat);
-        for (let vi = 0; vi < pts.length; vi++) {
-          const comps = sharedCompanions(feat, vi);
-          for (const c of comps) {
-            const cpts = featurePts(c.f);
-            cpts[c.vi][0] = pts[vi][0];
-            cpts[c.vi][1] = pts[vi][1];
-          }
+        for (const c of comps) {
+          const cpts = featurePts(c.f);
+          cpts[c.vi][0] = pts[vi][0];
+          cpts[c.vi][1] = pts[vi][1];
+          snapDirty = true;   // подвинули ЧУЖОЙ объект — индекс устарел
         }
-      });
+      }
     } else {
       // исключаем из привязок свою фигуру и всех компаньонов общей вершины
       const ex = new Set([ed.f.id]);
@@ -6965,7 +7047,14 @@ cv.addEventListener("pointermove", e => {
         }
       }
     }
-    state._ix = null; state._snapIndex = null;
+    state._ix = null;
+    // Раньше индекс привязок обнулялся здесь безусловно, и следующее же
+    // движение мыши строило его заново по ВСЕМ объектам проекта — O(все
+    // сегменты) на кадр, из-за чего перетаскивание на выгрузках ОГД лагало.
+    // При правке вершины всё изменяемое уже в exclude-наборе, поэтому сброс
+    // нужен только когда общие вершины покрытийных слоёв подвинули чужие
+    // объекты. По окончании жеста afterChange() всё равно сбрасывает индексы.
+    if (snapDirty) state._snapIndex = null;
     draw(); return;
   }
   const s = cursorPoint(wx, wy);
