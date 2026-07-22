@@ -193,6 +193,13 @@
     const playground = rounded(territoryMode === 2 ? populationThs * 1000 * 0.5 : 0);
     const adultRecreation = rounded(territoryMode === 2 ? populationThs * 1000 * 0.1 : 0);
     const parking = rounded(populationThs * 257 * kRail * kBa);
+    // Здания, у которых этажность подставлена дефолтом (см. upgradeFeature):
+    // их вклад в «СПП факт» держится на допущении, и планировщик обязан это
+    // видеть — иначе цифра уезжает в документацию как измеренная.
+    const assumedFloors = features.filter(feature => feature.kind === "building"
+      && feature.ring && feature.props && feature.props.floors_assumed);
+    const assumedSpp = assumedFloors.reduce((sum, feature) =>
+      sum + featureAreaM2(feature) * floorCount(feature.props && feature.props.floors) / 1000, 0);
     const factSpp = features.filter(feature => feature.kind === "building" && feature.ring)
       .reduce((sum, feature) => sum + featureAreaM2(feature) * floorCount(feature.props && feature.props.floors) / 1000, 0);
     const factDensity = calcArea > 0 ? factSpp / calcArea : 0;
@@ -237,6 +244,14 @@
     if (!hasTerritory && rawFeatures.some(feature => feature && feature.ring)) {
       checks.unshift({ title: "Граница территории", ok: false,
         msg: "не задана — ТЭП по всем объектам карты; начертите границу, чтобы считать внутри территории разработки" });
+    }
+    if (assumedFloors.length) {
+      const share = factSpp > 0 ? Math.round(assumedSpp / factSpp * 100) : 0;
+      checks.unshift({ title: "Этажность задана не везде", ok: false,
+        msg: `У ${assumedFloors.length} зданий этажность не указана — принято 9 этажей `
+          + `(${rounded(assumedSpp, 1)} тыс. м², ${share}% фактического СПП). `
+          + "Проставьте этажность, иначе «СПП факт» и «Плотность факт» опираются на допущение",
+      });
     }
     if (restrictOverflow) {
       checks.unshift({ title: "Ограничения превышают территорию", ok: false,

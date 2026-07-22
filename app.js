@@ -1145,7 +1145,18 @@ function upgradeFeature(f, resolveLayer = layerOf) {
   const L = resolveLayer(f);
   if (L) { f.layer_id = L.id; if (!f.kind) f.kind = L.kind; }
   if (!f.props || typeof f.props !== "object" || Array.isArray(f.props)) f.props = {};
-  if (f.kind === "building") f.props.floors = normalizedFloorCount(f.props.floors);
+  if (f.kind === "building") {
+    // Этажность вне 1..75 (пусто, 0, текст, мусор из импорта) подставляется
+    // девяткой. Само по себе это разумный планировочный дефолт, но он МОЛЧА
+    // попадал в «СПП факт» и «Плотность факт»: у выгрузки НСПД поле opt_floors
+    // часто пустое, и каждое такое здание считалось девятиэтажным. Помечаем
+    // допущение, чтобы ТЭП мог о нём сказать, а атрибутивная таблица — показать.
+    const raw = f.props.floors;
+    f.props.floors = normalizedFloorCount(raw);
+    const known = Math.trunc(Number(raw));
+    if (Number.isFinite(known) && known >= 1 && known <= 75) delete f.props.floors_assumed;
+    else f.props.floors_assumed = true;
+  }
   f.geometry_type = f.point ? "point" : f.line ? "polyline" : f.arc ? "arc" : f.circle ? "circle" : "polygon";
   return roundCoords(f);
 }
