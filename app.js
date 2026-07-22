@@ -4746,7 +4746,9 @@ function layerGeometryMeta(layer) {
   return { icon: "i-poly", label: "Полигоны" };
 }
 
-function renderLayerLegend(sampleByLayer = {}) {
+// statsByLayer — готовая статистика из renderLayers (счётчик и категории за
+// один проход). Без неё легенда снова сканировала бы все объекты на каждый слой.
+function renderLayerLegend(sampleByLayer = {}, statsByLayer = null) {
   const host = document.getElementById("layers-legend-body");
   if (!host) return;
   host.innerHTML = "";
@@ -4770,10 +4772,14 @@ function renderLayerLegend(sampleByLayer = {}) {
   Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupForKey);
   visibleLayers.forEach(layer => {
     const group = groupForKey(layerGroupKey(layer));
-    const cats = layerCatStats(layer).filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
+    const stat = statsByLayer && statsByLayer.get(layer.id);
+    const allCats = stat
+      ? [...stat.cats.values()].sort((a, b) => a.title.localeCompare(b.title, "ru"))
+      : layerCatStats(layer);
+    const cats = allCats.filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
     const items = cats.length > 1 ? cats : [{
       title: layer.title,
-      count: featuresOnLayer(layer.id).length,
+      count: stat ? stat.count : featuresOnLayer(layer.id).length,
       sample: sampleByLayer[layer.id],
     }];
     items.forEach(item => {
@@ -4797,6 +4803,16 @@ function renderLayers() {
   // слоя — общий контур, и превью рисовалось чёрной линией вместо знака (ООЗТ,
   // функц. зоны и т.п.). styleOf(объект) = ровно то, что нарисовано на холсте.
   const sampleByLayer = {};
+  // Счётчик и категории каждого слоя считаем ЗДЕСЬ же, одним проходом. Раньше
+  // цикл по слоям звал featuresOnLayer() и layerCatStats() — это два полных
+  // прохода по всем объектам НА КАЖДЫЙ слой, O(слои × объекты) на любую правку:
+  // 16 слоёв и 20 000 объектов давали ~640 000 итераций на перерисовку панели.
+  const statsByLayer = new Map();
+  const statFor = id => {
+    let s = statsByLayer.get(id);
+    if (!s) { s = { count: 0, cats: new Map() }; statsByLayer.set(id, s); }
+    return s;
+  };
   for (const f of state.features) {
     const lid = f.layer_id;
     if (!lid) continue;
@@ -4804,7 +4820,23 @@ function renderLayers() {
     // может быть без знака, и первый попавшийся дал бы пустой свотч
     const cur = sampleByLayer[lid];
     if (!cur || (!cur.style_id && f.style_id)) sampleByLayer[lid] = f;
+    // счётчик — по РЕАЛЬНОМУ слою объекта (layerOf учитывает правило 7:
+    // незарегистрированный layer_id уводит объект в слой по виду)
+    const L = layerOf(f);
+    if (!L) continue;
+    const stat = statFor(L.id);
+    stat.count++;
+    const cat = featCat(f);
+    if (!cat) continue;
+    let entry = stat.cats.get(cat);
+    if (!entry) {
+      entry = { id: cat, title: (STYLES_V2[cat] && STYLES_V2[cat].title) || cat, count: 0, sample: f };
+      stat.cats.set(cat, entry);
+    }
+    entry.count++;
   }
+  const catsOf = id => [...(statsByLayer.get(id)?.cats.values() || [])]
+    .sort((a, b) => a.title.localeCompare(b.title, "ru"));
   const groupHosts = new Map();
   let groupState = {};
   try { groupState = JSON.parse(localStorage.getItem("grado_layer_groups") || "{}"); } catch (_) {}
@@ -4856,10 +4888,10 @@ function renderLayers() {
   Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupHostForKey);
   for (const layer of displayedLayers) {
     const groupHost = groupHostForKey(layerGroupKey(layer));
-    const count = featuresOnLayer(layer.id).length;
+    const count = statsByLayer.get(layer.id)?.count || 0;
     // QGIS-логика: если в слое объекты с РАЗНЫМИ знаками — показываем подпункты
     // по каждому форматированию (функц. зоны → производственные/многофункц./…).
-    const cats = layerCatStats(layer);
+    const cats = catsOf(layer.id);
     const multiCat = cats.length > 1;
     const catOpen = multiCat && _catOpen.has(layer.id);
     const sample = sampleByLayer[layer.id];
@@ -5013,7 +5045,7 @@ function renderLayers() {
     const section = body.closest(".layer-stack-group");
     section.querySelector(".layer-group-count").textContent = body.querySelectorAll(":scope > .layer-row").length;
   });
-  renderLayerLegend(sampleByLayer);
+  renderLayerLegend(sampleByLayer, statsByLayer);
   updateLayerStatus();   // чип «куда я черчу» — синхрон с активным слоем
   updateStartExperience();
 }
