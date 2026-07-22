@@ -250,7 +250,9 @@
   // в IndexedDB; повторная выгрузка любой площадки берёт его из кэша.
   const GISOGD_TTL_MS = 7 * 24 * 3600 * 1000;
   const GISOGD_KEY_PREFIX = "gisogd_layer_";
+  const GISOGD_META_PREFIX = "gisogd_meta_";
   const gisogdCacheKey = code => `${GISOGD_KEY_PREFIX}${code}`;
+  const gisogdMetaKey = code => `${GISOGD_META_PREFIX}${code}`;
   // Слой качается целиком и это ДОЛГО (у красных линий УДС — сотня мегабайт).
   // Молчащий индикатор на такой загрузке неотличим от зависшего приложения,
   // поэтому читаем поток и сообщаем байты наверх. Портал отдаёт Content-Length
@@ -266,20 +268,24 @@
     if (!response.body || typeof response.body.getReader !== "function")
       return { text: await response.text(), bytes: total };
     const reader = response.body.getReader();
-    const chunks = [];
-    let loaded = 0, ping = 0;
+    // Расшифровываем по мере чтения. Копить куски и склеивать их в конце — это
+    // три копии слоя в памяти разом (куски, Blob, буфер), а слой бывает на сто
+    // мегабайт: на слабой машине вкладка этого не переживёт.
+    const decoder = new TextDecoder();
+    let text = "", loaded = 0, ping = 0;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       if (signal && signal.aborted) { reader.cancel().catch(() => {}); throwIfAborted(signal); }
-      chunks.push(value);
+      text += decoder.decode(value, { stream: true });
       loaded += value.length;
       // не чаще чем раз в четверть мегабайта: событие на каждый кусок — это
       // тысячи перерисовок индикатора на одном слое
       if (loaded - ping >= 262144) { ping = loaded; gisogdProgress(code, name, loaded, total); }
     }
+    text += decoder.decode();   // хвост многобайтового символа на границе кусков
     gisogdProgress(code, name, loaded, total || loaded);
-    return { text: new TextDecoder().decode(await new Blob(chunks).arrayBuffer()), bytes: loaded };
+    return { text, bytes: loaded };
   };
   async function gisogdLayerJson(code, notes, signal, name) {
     throwIfAborted(signal);
@@ -297,9 +303,15 @@
     throwIfAborted(signal);
     notes.push(`слой ${code} загружен целиком (${(data.features || []).length} об., `
       + `${formatBytes(bytes)}) — портал не фильтрует по области; дальше берётся из кэша браузера`);
-    // размер запоминаем при записи: считать его потом — значит развернуть
-    // сотню мегабайт в строку только ради строчки в списке
-    try { await databaseSet(gisogdCacheKey(code), { at: Date.now(), bytes, name: name || null, data }); }
+    // Рядом со слоем кладём КРОШЕЧНУЮ запись о нём. Без неё список кэша
+    // разворачивал каждый слой целиком, чтобы посчитать объекты: пять слоёв —
+    // 162 МБ чтения и секунда с лишним на каждое открытие окна выгрузки.
+    const at = Date.now();
+    try {
+      await databaseSet(gisogdCacheKey(code), { at, bytes, name: name || null, data });
+      await databaseSet(gisogdMetaKey(code),
+        { at, bytes, name: name || null, features: (data.features || []).length });
+    }
     catch (error) { notes.push(`слой ${code} не поместился в кэш — будет качаться заново`); }
     throwIfAborted(signal);
     return data;
@@ -317,13 +329,17 @@
     for (const key of keys || []) {
       if (typeof key !== "string" || !key.startsWith(GISOGD_KEY_PREFIX)) continue;
       const code = key.slice(GISOGD_KEY_PREFIX.length);
-      const hit = await databaseGet(key).catch(() => null);
-      if (!hit) continue;
-      const at = hit.at || 0;
-      out.push({ code, name: hit.name || null, at: at || null,
-        bytes: Number(hit.bytes) || null,
-        features: Array.isArray(hit.data && hit.data.features) ? hit.data.features.length : null,
-        stale: !at || (Date.now() - at) >= GISOGD_TTL_MS });
+      // читаем ТОЛЬКО запись о слое: сам слой — это до сотни мегабайт
+      const meta = await databaseGet(gisogdMetaKey(code)).catch(() => null);
+      const at = meta && meta.at || 0;
+      out.push({ code, name: meta && meta.name || null, at: at || null,
+        bytes: meta ? Number(meta.bytes) || null : null,
+        features: meta ? Number(meta.features) || null : null,
+        // Слой, скачанный прежней сборкой, записи о себе не оставил. Он ЖИВОЙ —
+        // срок годности проверяется по самому слою; неизвестен только его вес.
+        // Назвать его устаревшим значило бы соврать: перекачки не будет.
+        unknown: !meta,
+        stale: !!at && (Date.now() - at) >= GISOGD_TTL_MS });
     }
     return out.sort((a, b) => (b.at || 0) - (a.at || 0));
   };
@@ -498,10 +514,12 @@
         try {
           const keys = await databaseRequest("readonly", store => store.getAllKeys());
           let removed = 0;
-          for (const key of keys || [])
-            if (typeof key === "string" && key.startsWith(GISOGD_KEY_PREFIX)) {
-              await databaseDelete(key); removed += 1;
-            }
+          for (const key of keys || []) {
+            if (typeof key !== "string") continue;
+            // запись о слое уходит вместе со слоем, иначе список покажет то, чего нет
+            if (key.startsWith(GISOGD_KEY_PREFIX)) { await databaseDelete(key); removed += 1; }
+            else if (key.startsWith(GISOGD_META_PREFIX)) await databaseDelete(key);
+          }
           return json({ removed });
         } catch (error) { return json({ error: `кэш недоступен: ${error.message || error}` }, 500); }
       }
@@ -511,7 +529,11 @@
     if (path.startsWith("/api/gisogd-cache/") && method === "DELETE") {
       const code = decodeURIComponent(path.slice("/api/gisogd-cache/".length));
       if (!/^[A-Za-z0-9_.-]{1,40}$/.test(code)) return json({ error: "некорректный код слоя" }, 400);
-      try { await databaseDelete(gisogdCacheKey(code)); return json({ removed: 1, code }); }
+      try {
+        await databaseDelete(gisogdCacheKey(code));
+        await databaseDelete(gisogdMetaKey(code));
+        return json({ removed: 1, code });
+      }
       catch (error) { return json({ error: `кэш недоступен: ${error.message || error}` }, 500); }
     }
     if (path === "/api/initial-grado") return json(null);

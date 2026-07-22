@@ -67,9 +67,28 @@ const fakeResponse = (chunks, total) => ({
   await assert.rejects(readWithProgress(slow, "l1", "КЛ УДС", signal), /aborted/,
     "отмена обязана обрывать чтение потока");
 
-  // ---------- размер запоминается при записи ----------
-  assert.match(adapter, /databaseSet\(gisogdCacheKey\(code\), \{ at: Date\.now\(\), bytes, name: name \|\| null, data \}\)/,
-    "иначе размер пришлось бы считать разворачиванием сотни мегабайт в строку");
+  // ---------- размер и число объектов запоминаются при записи ----------
+  assert.match(adapter, /databaseSet\(gisogdCacheKey\(code\), \{ at, bytes, name: name \|\| null, data \}\)/,
+    "слой ложится в кэш вместе с размером");
+  assert.match(adapter, /databaseSet\(gisogdMetaKey\(code\),\s*\{ at, bytes, name: name \|\| null, features: \(data\.features \|\| \[\]\)\.length \}\)/,
+    "рядом обязана лежать крошечная запись о слое");
+  const listBody = adapter.slice(adapter.indexOf("const gisogdCacheList"), adapter.indexOf("// Каталог — 663"));
+  assert.match(listBody, /await databaseGet\(gisogdMetaKey\(code\)\)/,
+    "список обязан читать запись о слое");
+  assert.doesNotMatch(listBody, /hit\.data|\.data\.features/,
+    "разворачивать сотню мегабайт ради строчки списка нельзя");
+  // удаление обязано уносить и запись, иначе список покажет то, чего нет
+  assert.match(adapter, /await databaseDelete\(gisogdMetaKey\(code\)\);/, "удаление слоя уносит его запись");
+  assert.match(adapter, /key\.startsWith\(GISOGD_META_PREFIX\)\) await databaseDelete\(key\)/,
+    "полная чистка уносит и записи");
+
+  // ---------- чтение потока не держит три копии слоя ----------
+  const readBody = adapter.slice(adapter.indexOf("const readWithProgress"), adapter.indexOf("async function gisogdLayerJson"));
+  assert.doesNotMatch(readBody, /new Blob\(/,
+    "склейка кусков через Blob — это ещё две копии слоя в памяти");
+  assert.match(readBody, /decoder\.decode\(value, \{ stream: true \}\)/, "расшифровка по мере чтения");
+  assert.match(readBody, /text \+= decoder\.decode\(\);/,
+    "хвост многобайтового символа на границе кусков обязан дойти");
   assert.match(adapter, /слой \$\{code\} загружен целиком \(\$\{\(data\.features \|\| \[\]\)\.length\} об\., `\s*\+ `\$\{formatBytes\(bytes\)\}\)/,
     "объём обязан попадать в отчёт о выгрузке");
 
@@ -84,8 +103,14 @@ const fakeResponse = (chunks, total) => ({
   assert.match(adapter, /key\.startsWith\(GISOGD_KEY_PREFIX\)/,
     "чистка обязана трогать только слои портала, а не проект и копии");
   const list = adapter.slice(adapter.indexOf("const gisogdCacheList"), adapter.indexOf("// Каталог — 663"));
-  assert.match(list, /stale: !at \|\| \(Date\.now\(\) - at\) >= GISOGD_TTL_MS/,
+  assert.match(list, /stale: !!at && \(Date\.now\(\) - at\) >= GISOGD_TTL_MS/,
     "устаревший слой обязан быть виден: он всё равно перекачается");
+  // слой прежней сборки записи о себе не оставил, но он ЖИВОЙ: срок годности
+  // считается по самому слою. Назвать его устаревшим — соврать про перекачку.
+  assert.match(list, /unknown: !meta/, "неизвестный вес и устаревший слой — разные вещи");
+  const dataUi = fs.readFileSync(path.join(root, "app-data.js"), "utf8");
+  assert.match(dataUi, /item\.unknown\s*\r?\n?\s*\? "лежит в кэше, вес станет известен/,
+    "в списке это обязано читаться как «вес неизвестен», а не как «устарел»");
   assert.match(list, /sort\(\(a, b\) => \(b\.at \|\| 0\) - \(a\.at \|\| 0\)\)/, "свежие сверху");
 
   // ---------- окно выгрузки ----------
