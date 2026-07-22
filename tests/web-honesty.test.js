@@ -34,14 +34,15 @@ assert.match(album, /album\.classList\.remove\("primary"\)/,
 assert.match(album, /Печать в масштабе \(PDF\) — в настольной версии/,
   "куда идти за печатью — обязано быть сказано на самой кнопке");
 
-// ---------- 2. пример именует проект ----------
-const demo = app.slice(app.indexOf('const nameEl = document.getElementById("project-name");'),
-  app.indexOf('document.getElementById("panel-tab-tep")?.click();'));
-assert.match(demo, /!current \|\| current === "Новый проект"/,
-  "своё имя проекта пример перезаписывать не должен");
-assert.match(demo, /nameEl\.value = "Пример: жилой квартал"/, "у примера обязано быть имя");
-assert.match(app, /\/\/ На примере смотрят расчёт[\s\S]{0,120}panel-tab-tep/,
-  "на примере смотрят ТЭП, а не список объектов");
+// ---------- 2. демо-проекта больше нет ----------
+// Пример «жилой квартал» жил в коде приложения и уводил от настоящих данных:
+// выгрузка по области и файлы дают то же самое на реальной территории.
+for (const trace of ["btn-demo", "start-demo", "tep-open-demo"])
+  assert.ok(!app.includes(trace) && !html.includes(trace), `рудимент демо: ${trace}`);
+assert.ok(!html.includes("start-guide"), "экран-гид, загораживавший холст, удалён");
+assert.match(html, /id="cv-empty"/, "пустой холст объясняет себя строкой, а не окном");
+assert.match(shell, /\.cv-empty\{[^}]*pointer-events:none/,
+  "подсказка не должна перехватывать мышь — сквозь неё чертят");
 
 // ---------- 3. палитра команд честна в обе стороны ----------
 assert.match(cmdk, /\(!i\.available \|\| i\.available\(\) \|\| \(isWeb && i\.desktop\)\)/,

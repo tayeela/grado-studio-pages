@@ -308,6 +308,9 @@ const GENERIC_CODE = { point: "generic.point", polyline: "generic.line", polygon
 const CODE_TO_GEOM = Object.assign(Object.create(null),
   Object.fromEntries(Object.entries(GENERIC_CODE).map(([g, c]) => [c, g])));
 const GENERIC_STYLE = { point: "social.point", polyline: "boundary.line", polygon: "func_zone.fill", arc: "red.line.projected", circle: "red.line.projected" };
+// Имя слоя, который заводится сам при выборе инструмента в пустом проекте.
+const AUTO_LAYER_TITLE = { point: "Точки", polyline: "Линии", polygon: "Полигоны",
+  arc: "Дуги", circle: "Окружности" };
 function createGenericLayer({ title, geometry_type, styleId, id = null }) {
   const layerId = id || uniqueLayerId(title);
   const L = {
@@ -403,7 +406,6 @@ function toggleLayerLock(layer) {
       state.activeLayerId = fallback?.id || null;
       state.drawing = null;
       state.typed = "";
-      if (!fallback) startGuideDismissed = false;
     }
   }
   if (fallback && GEOM_OF_TOOL[state.tool] && !toolFitsLayer(state.tool, fallback))
@@ -1271,13 +1273,22 @@ function assertCompatibleImportedLayer(existing, incoming) {
 // (в тестовой площадке 63 группы вместо 130). Цепочку они не рвут, но и
 // выдумывать общую дату нельзя: разошлись — поля у склеенной линии не будет.
 const JOIN_SOFT_PROPS = new Set(["createdate", "changedate"]);
+// Номер документа тоже НЕ различает линию как объект чертежа. На площадке в
+// Медведково 3231 отрезок КЛ УДС: перекрёстков нет вовсе (все узлы степени 2),
+// но по номеру документа отрезки расходятся на 246 групп — и красная линия
+// одного проезда рассыпается на сотни кусков. Линию склеиваем, а номера
+// собираем списком: длинная линия и вправду задана несколькими документами.
+const JOIN_LIST_PROPS = new Set(["linerhanum"]);
+const JOIN_LIST_MAX = 4;
+const JOIN_LIST_EMPTY = new Set(["not_found", "none", "null", "-", "0"]);
 const joinNodeKey = p => `${Math.round(p[0] * 1e3)}|${Math.round(p[1] * 1e3)}`;
 function joinImportedRuns(features) {
   const runs = new Map();
   const out = [];
   for (const f of features) {
     if (!f.joinable || !Array.isArray(f.line) || f.line.length < 2) { out.push(f); continue; }
-    const identity = Object.entries(f.props || {}).filter(([k]) => !JOIN_SOFT_PROPS.has(k))
+    const identity = Object.entries(f.props || {})
+      .filter(([k]) => !JOIN_SOFT_PROPS.has(k) && !JOIN_LIST_PROPS.has(k))
       .sort(([a], [b]) => (a < b ? -1 : 1));
     const key = [f.layer_id, f.kind, f.style_id || "", JSON.stringify(identity)].join("\u0000");
     const list = runs.get(key) || runs.set(key, []).get(key);
@@ -1324,6 +1335,19 @@ function joinImportedRuns(features) {
         // (взять первую попавшуюся) значит соврать в атрибуте
         for (const k of JOIN_SOFT_PROPS)
           if (members.some(m => (m.props || {})[k] !== seed.props[k])) delete seed.props[k];
+        // номера документов собираем списком: это не выдумка, а перечисление
+        for (const k of JOIN_LIST_PROPS) {
+          // у части отрезков портала в поле лежит СПИСОК со своими заглушками
+          // («П206,NOT_FOUND,NOT_FOUND») — разбираем его, иначе номера склеенной
+          // линии выглядят как мусор
+          const values = [...new Set(members.flatMap(m => String((m.props || {})[k] ?? "")
+            .split(",").map(v => v.trim())
+            .filter(v => v && !JOIN_LIST_EMPTY.has(v.toLowerCase()))))];
+          if (!values.length) { delete seed.props[k]; continue; }
+          seed.props[k] = values.length <= JOIN_LIST_MAX
+            ? values.join(", ")
+            : `${values.slice(0, JOIN_LIST_MAX).join(", ")} и ещё ${values.length - JOIN_LIST_MAX}`;
+        }
         // ключи ВСЕХ склеенных отрезков остаются на объекте: по ним повторная
         // выгрузка той же территории узнаёт, что эти отрезки уже в проекте
         seed.srcKeys = members.flatMap(m => m.srcKeys || (m.srcKey ? [m.srcKey] : []));
@@ -3046,17 +3070,22 @@ function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
 
 // Знак засечки направлен внутрь зоны: выясняем сторону по центроиду кольца
 function inwardSign(ring) {
-  const [x1, y1] = ring[0], [x2, y2] = ring[1];
-  const d = Math.hypot(x2 - x1, y2 - y1) || 1;
-  // экранные нормали: w2s инвертирует y, поэтому знак согласован с canvas
-  const [sx1, sy1] = w2s(x1, y1), [sx2, sy2] = w2s(x2, y2);
-  const sd = Math.hypot(sx2 - sx1, sy2 - sy1) || 1;
-  const nx = -(sy2 - sy1) / sd, ny = (sx2 - sx1) / sd;
-  let cx = 0, cy = 0;
-  for (const p of ring) { cx += p[0] / ring.length; cy += p[1] / ring.length; }
-  const [scx, scy] = w2s(cx, cy);
-  const mx = (sx1 + sx2) / 2, my = (sy1 + sy2) / 2;
-  return (scx - mx) * nx + (scy - my) * ny > 0 ? 1 : -1;
+  // Сторона «внутрь» определяется ОБХОДОМ контура, а не первой его гранью.
+  // Прежняя версия брала нормаль первого ребра и сравнивала со СРЕДНИМ
+  // арифметическим вершин: у вытянутых и вогнутых контуров (пойма реки, ООЗТ,
+  // техзона вдоль улицы) эта точка лежит вне полигона, и засечки смотрели
+  // наружу. Знак площади в экранных координатах верен для любого простого
+  // контура: при положительной площади нормаль (-ty, tx) смотрит внутрь —
+  // ровно та, что рисует drawLineMarkers при inward = +1.
+  if (!ring || ring.length < 3) return 1;
+  let area2 = 0;
+  let prev = w2s(ring[ring.length - 1][0], ring[ring.length - 1][1]);
+  for (const point of ring) {
+    const cur = w2s(point[0], point[1]);
+    area2 += prev[0] * cur[1] - cur[0] * prev[1];
+    prev = cur;
+  }
+  return area2 > 0 ? 1 : -1;
 }
 
 // Двойная параллельная линия (защитные зоны ОКН): смещение по нормалям
@@ -4393,10 +4422,8 @@ function renderTep(data) {
     bodyEl.classList.add("muted");
     bodyEl.innerHTML = `<div class="tep-empty"><b>Нет границы территории</b>` +
       `ТЭП считается только внутри расчётного контура.` +
-      `<div class="tep-empty-actions"><button type="button" id="tep-start-boundary">Создать границу</button>` +
-      `<button type="button" id="tep-open-demo">Открыть пример</button></div></div>`;
+      `<div class="tep-empty-actions"><button type="button" id="tep-start-boundary">Создать границу</button></div></div>`;
     bodyEl.querySelector("#tep-start-boundary")?.addEventListener("click", startBoundaryFlow);
-    bodyEl.querySelector("#tep-open-demo")?.addEventListener("click", () => document.getElementById("btn-demo")?.click());
     return;
   }
   let zonesHtml = "";
@@ -5648,71 +5675,23 @@ function startBoundaryFlow() {
   const existing = LAYERS_V2.find(layer => layer.kind === "boundary" && !layer.import_only && !layer.annotation);
   if (existing) {
     if (existing.locked) {
-      startGuideDismissed = false;
       updateStartExperience();
       toast("Слой границы заблокирован — сначала разблокируйте его", "warn");
       return;
     }
-    startGuideDismissed = true;
     setActiveLayer(existing.id);
     setTool(naturalToolFor(existing), { keepLayer: true });
     toast("Слой границы активен. Поставьте первую точку на холсте.");
     return;
   }
-  startGuideDismissed = true;
   quickLayerByKind("boundary");
   toast("Слой границы готов. Поставьте первую точку на холсте.");
 }
-let startGuideDismissed = false;
 function updateStartExperience() {
-  const guide = document.getElementById("start-guide");
-  const projectLayers = LAYERS_V2.filter(layer => layer.user_created && !layer.import_only && !layer.annotation);
-  const drawableLayers = projectLayers.filter(isDrawableLayer);
-  const hasLayer = projectLayers.length > 0;
-  const hasFeatures = state.features.length > 0;
-  const emptyLayer = hasLayer && !hasFeatures;
-  if (guide) {
-    guide.hidden = hasFeatures || (emptyLayer && startGuideDismissed);
-    const current = activeLayer();
-    const layer = isDrawableLayer(current) ? current : drawableLayers[0];
-    const lockedLayer = !layer ? projectLayers.find(item => item.locked) : null;
-    const kicker = document.getElementById("start-guide-kicker");
-    const title = document.getElementById("start-guide-title");
-    const copy = document.getElementById("start-guide-copy");
-    const steps = document.getElementById("start-guide-steps");
-    const boundaryButton = document.getElementById("start-boundary");
-    const drawButton = document.getElementById("start-draw");
-    const unlockButton = document.getElementById("start-unlock");
-    const hint = document.getElementById("start-guide-hint");
-    if (emptyLayer && layer) {
-      if (kicker) kicker.textContent = "Проект готов к работе";
-      if (title) title.textContent = "Начертите первый объект";
-      if (copy) copy.textContent = `Активен слой «${layer.title}». Выберите инструмент и укажите точки на холсте — расчёты обновятся автоматически.`;
-      if (steps) steps.hidden = true;
-      if (boundaryButton) boundaryButton.hidden = true;
-      if (drawButton) drawButton.hidden = false;
-      if (unlockButton) unlockButton.hidden = true;
-      if (hint) hint.textContent = `Тип геометрии слоя: ${GEOM_LABEL[layer.geometry_type] || layer.geometry_type}. Escape отменяет действие.`;
-    } else if (emptyLayer && lockedLayer) {
-      if (kicker) kicker.textContent = "Слой защищён";
-      if (title) title.textContent = "Разблокируйте слой для рисования";
-      if (copy) copy.textContent = `Слой «${lockedLayer.title}» защищён от изменений. Разблокируйте его или создайте другой слой.`;
-      if (steps) steps.hidden = true;
-      if (boundaryButton) boundaryButton.hidden = true;
-      if (drawButton) drawButton.hidden = true;
-      if (unlockButton) unlockButton.hidden = false;
-      if (hint) hint.textContent = "После разблокировки Студия включит подходящий инструмент автоматически.";
-    } else {
-      if (kicker) kicker.textContent = "Новый проект";
-      if (title) title.textContent = "Начните с границы территории";
-      if (copy) copy.textContent = "Она задаёт расчётную площадь. После этого ТЭП будет обновляться автоматически по мере работы.";
-      if (steps) steps.hidden = false;
-      if (boundaryButton) boundaryButton.hidden = false;
-      if (drawButton) drawButton.hidden = true;
-      if (unlockButton) unlockButton.hidden = true;
-      if (hint) hint.textContent = "Подсказка: клавиша G создаёт или выбирает слой границы.";
-    }
-  }
+  // Пустой холст объясняет себя одной строкой. Прежний экран-гид загораживал
+  // чертёж и вёл через границу территории, хотя чертить можно с любого слоя.
+  const empty = document.getElementById("cv-empty");
+  if (empty) empty.hidden = state.features.length > 0;
   const active = activeLayer();
   const canDraw = isDrawableLayer(active);
   const drawBlockReason = !active ? "Сначала создайте слой"
@@ -5723,8 +5702,12 @@ function updateStartExperience() {
   document.querySelectorAll("#toolbar button[data-tool]").forEach(button => {
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
     if (drawingTools.has(button.dataset.tool)) {
-      button.disabled = !canDraw;
-      button.title = !canDraw ? drawBlockReason : button.dataset.defaultTitle;
+      // Инструмент черчения гасим ТОЛЬКО когда слой есть, но чертить в него
+      // нельзя (заблокирован или он импортный). Пустой проект больше не тупик:
+      // выбор инструмента сам заводит слой под нужную геометрию.
+      const blocked = !!active && !canDraw;
+      button.disabled = blocked;
+      button.title = blocked ? drawBlockReason : button.dataset.defaultTitle;
     } else if (editingTools.has(button.dataset.tool)) {
       button.disabled = !state.features.length;
       button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
@@ -5867,7 +5850,6 @@ function resetProjectState(name = "Новый проект") {
   state._fitted = false;
   state._ix = null;
   state._snapIndex = null;
-  startGuideDismissed = false;
   rebuildKinds();
   clearSelection();
   document.getElementById("project-name").value = name;
@@ -5914,18 +5896,18 @@ function openManageKinds() {
       <span class="mk-sw" style="background:${swatchOf(k.style_id)}"></span>
       <span class="mk-nm">${escHtml(k.label || k.kind)}</span>
       <span class="mk-meta">${GEOM_LABEL[k.geometry_type] || k.geometry_type}${cov}</span>
-      ${custom ? `<button class="mk-edit" data-kind="${escHtml(k.kind)}" title="Изменить"><svg class="ic"><use href="#ic-format"/></svg></button>
-        <button class="mk-del" data-kind="${escHtml(k.kind)}" title="Удалить"><svg class="ic"><use href="#ic-trash"/></svg></button>`
-      : `<span class="mk-builtin" title="встроенный тип — изменить нельзя">встроенный</span>`}
+      <button class="mk-edit" data-kind="${escHtml(k.kind)}" title="Изменить"><svg class="ic"><use href="#ic-format"/></svg></button>
+      <button class="mk-del" data-kind="${escHtml(k.kind)}" title="Удалить"><svg class="ic"><use href="#ic-trash"/></svg></button>
     </div>`;
   }
   function renderList() {
-    const builtins = BASE_KINDS.filter(k => !isCustomKind(k));
+    // Список встроенных ролей отсюда убран: менять их нельзя, а стоял он первым
+    // и занимал весь экран. Роль слоя выбирается при его создании; здесь —
+    // только СВОИ типы, ради которых окно и открывают.
     const customs = BASE_KINDS.filter(isCustomKind);
-    $("mk-list").innerHTML =
-      `<div class="mk-group-title">Встроенные</div>${builtins.map(rowHtml).join("")}` +
-      (customs.length ? `<div class="mk-group-title">Свои типы</div>${customs.map(rowHtml).join("")}`
-        : `<div class="mk-group-title">Свои типы</div><div class="muted" style="padding:4px var(--sp-4)">Пока нет — заполните форму ниже и «Добавить».</div>`);
+    $("mk-list").innerHTML = customs.length
+      ? customs.map(rowHtml).join("")
+      : `<div class="muted" style="padding:4px var(--sp-4)">Пока нет ни одного своего типа — заполните форму ниже и «Добавить».</div>`;
     overlay.querySelectorAll(".mk-edit").forEach(b => b.onclick = () => startEdit(b.dataset.kind));
     overlay.querySelectorAll(".mk-del").forEach(b => b.onclick = () => delKind(b.dataset.kind));
   }
@@ -5978,10 +5960,10 @@ function openManageKinds() {
     toast(editing ? "Тип слоя изменён" : "Тип слоя добавлен");
   }
   overlay.innerHTML = `<div class="modal fmt-modal-lg mk-modal">
-    <div class="modal-head">Типы слоёв
-      <button class="modal-x" aria-label="Закрыть типы слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-head">Свои типы слоёв
+      <button class="modal-x" aria-label="Закрыть свои типы слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
-      <div class="lib-hint">«Роль» нового слоя — считается в ТЭП и подхватывает знак. Встроенные типы менять нельзя, свои — добавляйте/правьте/удаляйте.</div>
+      <div class="lib-hint">Свой тип слоя — это роль в расчёте и знак по умолчанию. Готовые роли (граница, зона, здание, ограничение и прочие) выбираются прямо при создании слоя, отдельного списка для них не нужно.</div>
       <div id="mk-list" class="mk-list"></div>
       <div class="mk-form">
         <div class="fmt-sub" id="mk-form-title">Новый тип слоя</div>
@@ -7799,7 +7781,18 @@ function setTool(tool, opts = {}) {
     const fit = LAYERS_V2.find(l => isDrawableLayer(l) &&
                                     l.geometry_type === GEOM_OF_TOOL[tool]);
     if (fit) { state.activeLayerId = fit.id; renderLayers(); }
-    else if (!activeLayer()) toast("Создайте слой для рисования", "warn");
+    else {
+      // Пустой проект больше не тупик: слой под нужную геометрию заводится сам.
+      // Раньше здесь был тост «Создайте слой» и выключенные инструменты —
+      // человек упирался в экран-гид вместо того, чтобы чертить.
+      const geom = GEOM_OF_TOOL[tool];
+      const layer = createGenericLayer({ geometry_type: geom, title: AUTO_LAYER_TITLE[geom] });
+      if (layer) {
+        state.activeLayerId = layer.id;
+        renderLayers();
+        toast(`Слой «${layer.title}» создан — чертите`);
+      }
+    }
   }
   updateLayerStatus();
   document.querySelectorAll("#toolbar button[data-tool]").forEach(
@@ -8382,54 +8375,6 @@ async function fetchJsonProgress(url, opts, onProgress) {
 on("btn-data", "click", openDataFetch);
 
 // ---------- демо-наполнение ----------
-on("btn-demo", "click", () => {
-  snapshot();
-  const B = [[0, 0], [650, 0], [650, 180], [520, 180], [520, 420], [300, 420],
-             [300, 560], [60, 560], [60, 300], [0, 300]];
-  state.features = [];
-  state.nextId = 1;
-  // L2b: пресетов нет — демо само заводит нужные слои (создать-или-переиспользовать
-  // слой этого вида), объекты уходят в них по явному layer_id
-  const demoCache = {};
-  const demoLayer = (kind) => {
-    if (demoCache[kind]) return demoCache[kind];
-    let L = LAYERS_V2.find(l => l.kind === kind && !l.import_only && !l.annotation);
-    if (!L) L = createUserLayer({ kind, title: BASE_KIND_BY_KIND[kind].label });
-    return (demoCache[kind] = L);
-  };
-  const add = (kind, geom, props = {}) => {
-    const L = demoLayer(kind);
-    state.features.push(upgradeFeature(
-      { id: state.nextId++, layer_id: L.id, kind, props: { ...L.defaults(), ...props }, ...geom }));
-  };
-  add("boundary", { ring: B });
-  add("zone", { ring: [[60, 180], [520, 180], [520, 420], [60, 420]] }, { zone_title: "Ж-1" });
-  // вершина [60,180] делает границу с Ж-1 повершинно общей (покрытие)
-  add("zone", { ring: [[0, 0], [520, 0], [520, 180], [60, 180], [0, 180]] }, { zone_title: "О-1" });
-  add("restrict", { ring: [[520, 0], [650, 0], [650, 180], [520, 180]] });
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 5; c++)
-    add("building", { ring: [[90 + c * 82, 215 + r * 62], [120 + c * 82, 215 + r * 62],
-                             [120 + c * 82, 232 + r * 62], [90 + c * 82, 232 + r * 62]] },
-        { floors: [9, 12, 14, 12, 9][c] });
-  add("public", { ring: [[90, 40], [220, 40], [220, 130], [90, 130]] });
-  add("redline", { line: [[-30, 190], [400, 190], [400, 590]] }, { radius: 60 });
-  add("social", { point: [470, 350] });
-  state.selected = null;
-  const bd = demoCache["boundary"];
-  if (bd) state.activeLayerId = bd.id;   // после демо можно сразу чертить
-  // Проект назывался «Новый проект» с полноценным кварталом на холсте: после
-  // перезагрузки автосохранение показывало «Новый проект» с семью слоями.
-  // Имя даём только нетронутому листу — переименованный проект не трогаем.
-  const nameEl = document.getElementById("project-name");
-  const current = (nameEl?.value || "").trim();
-  if (nameEl && (!current || current === "Новый проект")) nameEl.value = "Пример: жилой квартал";
-  renderLayers();                        // созданные слои — в панель
-  afterChange();
-  fitView();
-  // На примере смотрят расчёт, а не список объектов: показываем ТЭП сразу.
-  document.getElementById("panel-tab-tep")?.click();
-});
-
 // ---------- старт ----------
 const RESTORED_GEOMETRY_TYPES = new Set(["point", "polyline", "polygon", "arc", "circle"]);
 let lastRestoreSkipped = 0;
@@ -8835,30 +8780,6 @@ window.studio = { state, addFeature, refreshTep, fitView, snapPoint, gridStep,
 on("btn-refresh-src", "click", fetchSources);
 on("btn-shortcuts", "click", openShortcuts);
 on("btn-new-layer", "click", openNewLayerDialog);
-on("start-boundary", "click", startBoundaryFlow);
-on("start-draw", "click", () => {
-  const current = activeLayer();
-  const layer = isDrawableLayer(current) ? current
-    : LAYERS_V2.find(item => item.user_created && isDrawableLayer(item));
-  if (!layer) return startBoundaryFlow();
-  startGuideDismissed = true;
-  setActiveLayer(layer.id);
-  setTool(naturalToolFor(layer), { keepLayer: true });
-  document.getElementById("start-guide")?.setAttribute("hidden", "");
-  document.getElementById("cv")?.focus();
-  toast(`Слой «${layer.title}» активен. Поставьте первую точку на холсте.`);
-});
-on("start-unlock", "click", () => {
-  const layer = LAYERS_V2.find(item => item.user_created && !item.import_only && !item.annotation && item.locked);
-  if (!layer) return updateStartExperience();
-  toggleLayerLock(layer);
-  setActiveLayer(layer.id);
-  startGuideDismissed = true;
-  setTool(naturalToolFor(layer), { keepLayer: true });
-  document.getElementById("start-guide")?.setAttribute("hidden", "");
-  document.getElementById("cv")?.focus();
-  toast(`Слой «${layer.title}» разблокирован. Поставьте первую точку на холсте.`);
-});
 // Подложку не включаем сами (это запросы к внешнему серверу тайлов), но и
 // молчать о ней нельзя: пустой холст читается как «карты тут нет».
 on("start-basemap", "click", () => {
@@ -8866,12 +8787,6 @@ on("start-basemap", "click", () => {
   if (!show) return;
   if (!show.checked) { show.checked = true; show.dispatchEvent(new Event("change", { bubbles: true })); }
   toast("Подложка включена. Источник и прозрачность — в панели «Подложка»");
-});
-on("start-demo", "click", () => {
-  document.getElementById("btn-demo")?.click();
-  if (window.matchMedia("(max-width: 900px)").matches && !document.body.classList.contains("panel-hidden")) {
-    window.setTimeout(() => document.getElementById("btn-panel-visibility")?.click(), 60);
-  }
 });
 on("btn-style-lib", "click", openStyleLibrary);
 on("btn-project-styles", "click", openProjectStyles);
@@ -8902,38 +8817,37 @@ initPanelResizer();
 // версия — в подсказке логотипа (для связи с поддержкой), не в статус-строке
 { const lg = document.getElementById("logo"); if (lg) lg.title = `ГРАДО Студия · v${VERSION}`; }
 
-function initPanelResizer() {
-  const resizer = document.getElementById('panel-resizer');
-  const panel = document.getElementById('panel');
+// Ширину тянут ОБЕ боковые панели: правая (инспектор) и левая (слои). Раньше
+// левая была намертво 320px, хотя именно в ней списки слоёв с длинными
+// названиями выгрузок портала. Логика одна, отличается сторона: у панели
+// слева перетаскивание вправо РАСШИРЯЕТ её, у панели справа — сужает.
+function initSidePanelResizer(config) {
+  const resizer = document.getElementById(config.resizerId);
+  const panel = document.getElementById(config.panelId);
   if (!resizer || !panel) return;
   const toolbar = document.getElementById('toolbar');
-  const layersPanel = document.getElementById('layers-panel');
-  const MIN_PANEL_WIDTH = 300;
-  const MAX_PANEL_WIDTH = 640;
-  const MIN_STAGE_WIDTH = 480;
-  let preferredWidth = 312;
-  // Restore the user's preferred desktop width. The effective width is
-  // clamped separately, so a temporarily narrow window does not destroy the
-  // preference and a wider window can restore it later.
+  const other = config.otherPanelId ? document.getElementById(config.otherPanelId) : null;
+  const MIN_WIDTH = config.min, MAX_WIDTH = config.max, MIN_STAGE_WIDTH = 420;
+  let preferredWidth = config.def;
   try {
-    const saved = localStorage.getItem('grado_panel_width');
+    const saved = localStorage.getItem(config.storageKey);
     if (saved) preferredWidth = parseInt(saved, 10) || preferredWidth;
   } catch (e) {}
 
   const effectiveMaxWidth = () => {
     const railWidth = toolbar?.offsetWidth || 76;
-    const layersWidth = layersPanel && getComputedStyle(layersPanel).visibility !== 'hidden'
-      ? layersPanel.offsetWidth : 0;
-    const available = window.innerWidth - railWidth - layersWidth - resizer.offsetWidth - MIN_STAGE_WIDTH;
+    const otherWidth = other && getComputedStyle(other).visibility !== 'hidden' ? other.offsetWidth : 0;
+    const available = window.innerWidth - railWidth - otherWidth - resizer.offsetWidth - MIN_STAGE_WIDTH;
     const viewportShare = Math.floor(window.innerWidth * 0.48);
-    return Math.max(MIN_PANEL_WIDTH,
-      Math.min(MAX_PANEL_WIDTH, viewportShare, Math.max(MIN_PANEL_WIDTH, available)));
+    return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, viewportShare, Math.max(MIN_WIDTH, available)));
   };
   const setWidth = (width, remember = false) => {
     const maxWidth = effectiveMaxWidth();
-    const value = Math.max(MIN_PANEL_WIDTH, Math.min(maxWidth, Math.round(width)));
+    const value = Math.max(MIN_WIDTH, Math.min(maxWidth, Math.round(width)));
     if (remember) preferredWidth = value;
     panel.style.flexBasis = value + 'px';
+    // левая панель уезжает за край отрицательным margin — он обязан совпасть
+    if (config.side === 'left') panel.style.setProperty('--layer-panel-width', value + 'px');
     resizer.setAttribute('aria-valuemax', String(maxWidth));
     resizer.setAttribute('aria-valuenow', String(value));
     resizer.setAttribute('aria-valuetext', `${value} пикселей`);
@@ -8947,13 +8861,14 @@ function initPanelResizer() {
     e.preventDefault();
     startX = e.clientX;
     startW = panel.offsetWidth;
-    resizer.setPointerCapture(e.pointerId);
+    // захват указателя — удобство (курсор не теряется за краем), но не условие:
+    // если браузер его не даёт, тянуть панель всё равно должно быть можно
+    try { resizer.setPointerCapture(e.pointerId); } catch (error) {}
     document.body.classList.add('panel-resizing');
     const pointerId = e.pointerId;
     const move = ev => {
       const dx = ev.clientX - startX;
-      // panel on the right: drag resizer right (dx>0) → narrower panel
-      setWidth(startW - dx, true);
+      setWidth(config.side === 'left' ? startW + dx : startW - dx, true);
     };
     let finished = false;
     const finish = () => {
@@ -8964,9 +8879,9 @@ function initPanelResizer() {
       resizer.removeEventListener('pointercancel', finish);
       resizer.removeEventListener('lostpointercapture', finish);
       window.removeEventListener('blur', finish);
-      if (resizer.hasPointerCapture(pointerId)) resizer.releasePointerCapture(pointerId);
+      try { if (resizer.hasPointerCapture(pointerId)) resizer.releasePointerCapture(pointerId); } catch (error) {}
       document.body.classList.remove('panel-resizing');
-      try { localStorage.setItem('grado_panel_width', preferredWidth); } catch (e) {}
+      try { localStorage.setItem(config.storageKey, preferredWidth); } catch (e) {}
       resize();
     };
     resizer.addEventListener('pointermove', move);
@@ -8977,14 +8892,22 @@ function initPanelResizer() {
   });
   resizer.addEventListener('keydown', e => {
     let width = parseInt(panel.style.flexBasis) || panel.offsetWidth;
-    if (e.key === 'ArrowLeft') width += 20;
-    else if (e.key === 'ArrowRight') width -= 20;
-    else if (e.key === 'Home') width = MIN_PANEL_WIDTH;
+    const grow = config.side === 'left' ? 'ArrowRight' : 'ArrowLeft';
+    const shrink = config.side === 'left' ? 'ArrowLeft' : 'ArrowRight';
+    if (e.key === grow) width += 20;
+    else if (e.key === shrink) width -= 20;
+    else if (e.key === 'Home') width = MIN_WIDTH;
     else if (e.key === 'End') width = effectiveMaxWidth();
     else return;
     e.preventDefault();
     width = setWidth(width, true);
-    try { localStorage.setItem('grado_panel_width', width); } catch (error) {}
+    try { localStorage.setItem(config.storageKey, width); } catch (error) {}
   });
   window.addEventListener('resize', () => setWidth(preferredWidth));
+}
+function initPanelResizer() {
+  initSidePanelResizer({ resizerId: 'panel-resizer', panelId: 'panel', otherPanelId: 'layers-panel',
+    side: 'right', min: 300, max: 640, def: 312, storageKey: 'grado_panel_width' });
+  initSidePanelResizer({ resizerId: 'layers-resizer', panelId: 'layers-panel', otherPanelId: 'panel',
+    side: 'left', min: 240, max: 520, def: 320, storageKey: 'grado_layers_width' });
 }

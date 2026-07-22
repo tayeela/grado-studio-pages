@@ -4,10 +4,10 @@
 .layers-panel-head{height:46px}
 .layers-panel-head .title{font-size:var(--fs-13)}
 .layers-view-tabs{display:flex;height:41px;padding:0 12px;border-bottom:1px solid var(--hairline);gap:20px}
-.layers-view-tabs button{position:relative;height:40px;color:var(--muted);font-size:var(--fs-12);font-weight:560}
+.layers-view-tabs button{position:relative;height:40px;padding-inline:8px;color:var(--muted);font-size:var(--fs-12);font-weight:560}
 .layers-view-tabs button[aria-selected="true"]{color:var(--accent);font-weight:700}
 .layers-view-tabs button[aria-selected="true"]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent-solid)}
-.layer-create-main{height:36px;margin:10px 12px 0;display:flex;align-items:center;justify-content:center;gap:7px;background:var(--accent-solid);border:1px solid var(--accent-solid);color:#fff;font-size:var(--fs-12);font-weight:650;border-radius:var(--r-sm)}
+.layer-create-main{height:36px;margin:10px 12px 0;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 12px;background:var(--accent-solid);border:1px solid var(--accent-solid);color:#fff;font-size:var(--fs-12);font-weight:650;border-radius:var(--r-sm)}
 .layer-create-main:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .layer-create-main .ic{width:15px;height:15px}.layer-create-main .caret{margin-left:auto}
 .layer-create-main span{margin-left:auto}
@@ -48,7 +48,7 @@ body[data-layer-view="legend"] .layer-create-main,body[data-layer-view="legend"]
 .layer-vis-toggle .ic{width:17px;height:17px;color:var(--accent)}
 .layer-vis-toggle:has(input:not(:checked)) .ic{color:var(--faint);opacity:.55}
 .layer-vis-toggle:has(input:not(:checked)) .ic use{opacity:.45}
-#layers-panel .layer-row .layer-select{gap:9px;padding:2px;align-items:center;min-height:32px}
+#layers-panel .layer-row .layer-select{gap:9px;padding:4px 6px;align-items:center;min-height:32px}
 #layers-panel .layer-row .sw-svg{width:54px;height:20px;border-radius:2px;background:color-mix(in srgb,var(--field-bg) 75%,transparent)}
 .layer-copy{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
 .layer-title-line{display:flex;align-items:center;gap:6px;min-width:0}
