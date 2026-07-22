@@ -19,6 +19,10 @@
   --accent-active:#1e40b9;
   --accent-weak:rgba(49,91,234,.09);
   --accent-line:rgba(49,91,234,.28);
+  /* Акцент работает в двух ролях, и на тёмной теме они расходятся: текстом на
+     панели нужен светлый синий, а под белым текстом — наоборот плотный.
+     На светлой теме роли совпадают. */
+  --accent-solid:#315bea;
   --text:#252a31;
   --text-2:#4c525b;
   --muted:#666d76;
@@ -72,6 +76,29 @@
   --faint:#8f8f89;   /* было 4.48:1 на #202327 — чуть ниже порога AA */
   --canvas-bg:#1d2023;
   --canvas-grid:rgba(231,227,214,.07);
+  /* Тёмная тема переопределяла только поверхности и текст. Акцент и весь холст
+     оставались светлыми: граница территории #303640 на холсте #1d2023 давала
+     1.35:1 — линию было почти не видно, а акцент 2.87:1 не дотягивал до AA.
+     Значения подобраны осветлением к белому до порога, оттенок сохранён. */
+  --accent:#718ef1;          /* текст и линии: 5.1:1 на панели, 4.5:1 на поле */
+  --accent-hover:#8ba3f4;
+  --accent-active:#a3b6f7;
+  --accent-weak:rgba(113,142,241,.16);
+  --accent-line:rgba(113,142,241,.42);
+  --accent-solid:#315bea;    /* заливка под белым текстом: 5.5:1 */
+  --canvas-boundary:#cdd0d4;  /* основная линия чертежа — как тушь по тёмному */
+  --canvas-selection:#718ef1;
+  --canvas-vertex:#718ef1;
+  --canvas-shared:#45d17c;
+  --canvas-redline:#ff5d7a;
+  --canvas-label:#b9b7b0;     /* подписи — это текст, нужен порог 4.5:1 */
+  --zone-a:rgba(220,168,61,.22);   --zone-a-line:#d9a33f;
+  --zone-b:rgba(130,127,198,.2);   --zone-b-line:#827fc6;
+  --zone-green:rgba(102,145,106,.2); --zone-green-line:#7aa87e;
+  /* тень цвета светлой темы на тёмном фоне не читается — нужен чистый чёрный */
+  --shadow-sm:0 1px 2px rgba(0,0,0,.5);
+  --shadow-md:0 8px 22px rgba(0,0,0,.55);
+  --shadow-lg:0 20px 52px rgba(0,0,0,.65);
 }
 
 body{letter-spacing:-.005em;background:var(--app-bg)}
@@ -91,7 +118,7 @@ header{
 .kbar>span,.kbar>kbd{display:none}
 header .btn{background:transparent;border-color:transparent;padding-inline:9px}
 header .btn:hover{background:var(--field-bg);border-color:var(--field-border)}
-header .btn.primary{background:var(--accent);border-color:var(--accent);padding-inline:12px}
+header .btn.primary{background:var(--accent-solid);border-color:var(--accent-solid);padding-inline:12px}
 header .hsep{margin-inline:0}
 
 /* min-width:0 + overflow:hidden — страховка: если подписи всё же не помещаются
@@ -102,7 +129,7 @@ header .hsep{margin-inline:0}
 .workspace-modes button+button{border-left:1px solid var(--hairline)}
 .workspace-modes button:hover{background:var(--field-bg);color:var(--text)}
 .workspace-modes button[aria-pressed="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent-weak) 72%,var(--panel));font-weight:650}
-.workspace-modes button[aria-pressed="true"]::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent)}
+.workspace-modes button[aria-pressed="true"]::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent-solid)}
 .workspace-modes .ic{width:16px;height:16px}
 
 #main{background:var(--canvas-bg)}
@@ -162,7 +189,7 @@ body.layers-panel-hidden #toolbar{left:12px}
 #toolbar .rail-group,#toolbar .more-tools{display:none!important}
 #toolbar .tool{width:34px;height:34px;min-height:34px;padding:0;border-radius:var(--r-sm);display:flex;justify-content:center;font-size:0;gap:0}
 #toolbar .tool .ic{width:18px;height:18px}
-#toolbar .tool.active{background:var(--accent);color:var(--on-accent);box-shadow:none}
+#toolbar .tool.active{background:var(--accent-solid);color:var(--on-accent);box-shadow:none}
 #toolbar #btn-snap{margin-top:3px;border-top:1px solid var(--hairline);border-radius:0 0 var(--r-sm) var(--r-sm)}
 #toolbar #btn-snap.active{background:var(--accent-weak);color:var(--accent)}
 body[data-workspace-mode="draw"] #toolbar [data-workspace-tool]:not([data-workspace-tool="draw"]),
