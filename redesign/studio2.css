@@ -951,6 +951,12 @@ input[type=range].range-op:focus-visible{outline:2px solid var(--accent);outline
 .attr-scroll{overflow:auto;flex:1;max-height:58vh;border:1px solid var(--hairline);
   border-radius:var(--r-md);background:var(--panel)}
 .attr-modal .modal-actions .muted{font-size:var(--fs-11);line-height:1.4}
+/* В DOM только видимое окно строк; высоту прокрутки держат распорки. Рамки и
+   отступы им не нужны — иначе на месте невидимых строк рисуются линии. */
+.attr-modal .attr-table tr.at-pad td{padding:0;border:0}
+/* Шапка обязана оставаться на виду: таблица на десятки тысяч строк без неё
+   через экран прокрутки превращается в набор чисел без названий колонок. */
+.attr-modal .attr-table thead th{position:sticky;top:0;z-index:1;background:var(--panel)}
 
 /* ---- Совместная работа: тот же каркас и те же внутренние карточки ---- */
 #collab-bar{display:flex;align-items:center;gap:8px;margin-left:8px;min-width:0}
