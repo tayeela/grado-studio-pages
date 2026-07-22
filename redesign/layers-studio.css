@@ -77,7 +77,7 @@ body[data-layer-view="legend"] .layer-create-main,body[data-layer-view="legend"]
 body.layers-panel-hidden .layer-style-overlay{left:0}
 .layer-style-overlay .layer-style-studio{position:relative;pointer-events:auto;width:min(980px,100%);min-width:0;max-width:980px;flex:0 1 980px;height:min(720px,calc(100vh - 90px));max-height:calc(100vh - 90px);border:1px solid var(--hairline-2);border-radius:var(--r-lg);box-shadow:var(--shadow-lg);padding:0;background:var(--glass-strong)}
 .layer-style-studio .modal-head{height:48px;min-height:48px;padding:0 400px 0 16px;border-bottom:1px solid var(--hairline)}
-.layer-style-studio .modal-x{top:9px;right:12px}
+.layer-style-studio .modal-x{top:9px;right:12px;transform:none}
 .layer-style-studio .style-editor-body{flex:1;min-height:0;overflow:hidden;padding:0!important;display:block;gap:0!important}
 .layer-style-studio #ls-mode{position:absolute;top:6px;right:56px;width:320px;height:36px;margin:0;z-index:2;box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .layer-style-studio #ls-mode .seg-btn{width:100%;min-width:0;height:28px;margin:0;padding:0 10px;white-space:nowrap}

@@ -265,11 +265,11 @@ function openLayerStyle(layer, opts = {}) {
     const patch = categoryStyles[catId] || {};
     const refId = patch.style_ref || catId;
     const base = state.projectStyles[refId] || STYLES_V2[refId] || {};
-    const layerFmt = { ...(layer.fmt || {}) };
-    delete layerFmt.cats_off;
-    delete layerFmt.cat_styles;
+    const layerFmt = typeof categoryLayerVisualFormat === "function"
+      ? categoryLayerVisualFormat(layer) : {};
     return { ...base, ...layerFmt, ...patch };
   };
+  let uniformStyleDirty = false;
   // Категории слоя: слой повторяет слой-источник, поэтому классы объектов
   // (дороги OSM по тегу highway, знаки ОГД по LineCode/имени) живут ВНУТРИ него
   // и гасятся здесь, а не отдельными слоями-знаками. Список — по РЕАЛЬНО
@@ -459,7 +459,11 @@ function openLayerStyle(layer, opts = {}) {
     state._snapIndex = null;
     draw();
   }));
-  const onColor = () => { $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview(); syncOpUI(); };
+  const onColor = () => {
+    uniformStyleDirty = true;
+    $("fmt-preset").value = "";
+    layer.fmt = collect(); draw(); updateDashPreview(); syncOpUI();
+  };
   const fillCF = makeColorField($("fmt-fill"), toHexColor(cur.fill, "#faf0bf"), onColor);
   syncOpUI = () => syncOpacityRange($("fmt-opacity"), $("fmt-opacity-out"), fillCF.get());
   $("fmt-opacity").addEventListener("input", syncOpUI);
@@ -652,16 +656,34 @@ function openLayerStyle(layer, opts = {}) {
   // они не зависят от режима «единый стиль / по значению поля»
   const catsOffNow = () => [...overlay.querySelectorAll(".fmt-cat")]
     .filter(cb => !cb.checked).map(cb => cb.value);
-  const collect = () => {
-    const fmt = {
-      cats_off: catsOffNow(),
+  const collect = ({ forceUniform = false } = {}) => {
+    const includeUniform = forceUniform || uniformStyleDirty;
+    const fmt = includeUniform ? {
       stroke: strokeCF.get(),
       width: boundedNumber($("fmt-width").value, 0.2, 8, 1),
       fill: $("fmt-hasfill").checked ? fillCF.get() : null,
       fillOpacity: (parseInt($("fmt-opacity").value) || 100) / 100,
       dash: currentDash(),
-    };
+      uniform_style: true,
+    } : (clone(origFmt) || {});
+
+    const off = catsOffNow();
+    if (off.length) fmt.cats_off = off; else delete fmt.cats_off;
     if (Object.keys(categoryStyles).length) fmt.cat_styles = clone(categoryStyles);
+    else delete fmt.cat_styles;
+
+    // Проекты, сохранённые короткой регрессивной версией редактора, могли
+    // получить одинаковый визуальный layer.fmt одновременно с cat_styles.
+    // Без явного uniform_style эти ключи удаляются, возвращая нативные знаки.
+    if (!includeUniform && Object.keys(categoryStyles).length &&
+        !(origFmt && origFmt.uniform_style === true)) {
+      const staleVisual = typeof layerVisualFormat === "function"
+        ? layerVisualFormat({ fmt }) : {};
+      Object.keys(staleVisual).forEach(key => delete fmt[key]);
+      delete fmt.uniform_style;
+    }
+
+    if (!includeUniform) return fmt;
     if ($("fmt-hatch").checked) {
       const av = $("fmt-hangle").value;
       fmt.hatch = { angle: av === "cross" ? 45 : +av, cross: av === "cross",
@@ -700,14 +722,15 @@ function openLayerStyle(layer, opts = {}) {
         const sel = $("fmt-preset");
         sel.innerHTML = stylePickerOptions(newId);
         sel.value = newId;
-        if (!layer.fmt) layer.fmt = {};
-        layer.fmt.style_ref = newId;
+        uniformStyleDirty = true;
+        layer.fmt = collect();
         draw();
       } else {
         $("fmt-preset").value = (layer.fmt && layer.fmt.style_ref) || "";
       }
       return;
     }
+    uniformStyleDirty = true;
     if (ref && (state.projectStyles[ref] || STYLES_V2[ref])) {
       const p = state.projectStyles[ref] || STYLES_V2[ref];
       $("fmt-hasfill").checked = !!p.fill;
@@ -739,15 +762,17 @@ function openLayerStyle(layer, opts = {}) {
     layer.fmt = collect(); draw(); updateDashPreview();
   });
   $("ls-single").querySelectorAll("input, select").forEach(el => {
-    if (el.id === "fmt-preset" || el.id === "fmt-copy-to") return;
+    if (el.id === "fmt-preset" || el.id === "fmt-copy-to" ||
+        el.classList.contains("fmt-cat")) return;
     for (const ev of ["input", "change"])
       el.addEventListener(ev, () => {
+        uniformStyleDirty = true;
         $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview();
       });
   });
   if ($("fmt-copy")) $("fmt-copy").addEventListener("click", () => {
     if (!validateSingleStyle()) return;
-    const fmt = collect(); layer.fmt = fmt;
+    const fmt = collect({ forceUniform: true }); layer.fmt = fmt;
     const to = $("fmt-copy-to").value;
     const dest = to === "__all__" ? targets : targets.filter(l => l.id === to);
     for (const l of dest) { l.fmt = clone(fmt); copiedTargets.add(l); }

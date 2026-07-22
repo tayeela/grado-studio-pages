@@ -538,7 +538,21 @@ function layerVisualFormat(L) {
   const fmt = { ...((L && L.fmt) || {}) };
   delete fmt.cats_off;
   delete fmt.cat_styles;
+  delete fmt.uniform_style;
   return fmt;
+}
+
+// Категории импортированного слоя уже несут собственные библиотечные знаки.
+// Как только появляются точечные правки категорий, старый layer.fmt без
+// явного флага uniform_style считаем служебным наследием редактора, а не
+// намерением перекрасить все категории одинаково. Явная правка блока
+// «Единый стиль» ставит uniform_style=true и снова применяет общий формат.
+function categoryLayerVisualFormat(L) {
+  if (!L || !L.fmt) return {};
+  const hasCategoryOverrides = !!(L.fmt.cat_styles &&
+    Object.keys(L.fmt.cat_styles).length);
+  return hasCategoryOverrides && L.fmt.uniform_style !== true
+    ? {} : layerVisualFormat(L);
 }
 
 // условное форматирование: первое правило слоя, чьё поле совпадает со
@@ -624,14 +638,14 @@ function styleOf(f) {
   // (напр. выключить штриховку/подпись у импортированных зон ОГД) просто не
   // применялись — объект молча оставался с библиотечным знаком.
   // Порядок остаётся: знак → оформление слоя → оформление объекта.
-  if ((sid || gsid) && L && L.fmt) base = { ...base, ...layerVisualFormat(L) };
+  if ((sid || gsid) && L && L.fmt) base = { ...base, ...categoryLayerVisualFormat(L) };
   const categoryId = sid || gsid;
   const categoryPatch = categoryId && L && L.fmt && L.fmt.cat_styles
     ? L.fmt.cat_styles[categoryId] : null;
   if (categoryPatch) {
     const refId = categoryPatch.style_ref;
     const refStyle = refId && (state.projectStyles[refId] || STYLES_V2[refId]);
-    base = { ...(refStyle || base), ...layerVisualFormat(L), ...categoryPatch };
+    base = { ...(refStyle || base), ...categoryLayerVisualFormat(L), ...categoryPatch };
   }
   return f.fmt ? { ...base, ...f.fmt } : base;   // f.fmt — оформление отдельного объекта
 }
