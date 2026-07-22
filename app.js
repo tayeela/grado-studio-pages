@@ -3944,13 +3944,24 @@ function afterChange() {
 let tepTimer = null;
 let tepRequestVersion = 0;
 let tepAbortController = null;
+// «+value || fallback» подменял ЛЮБОЙ falsy результат, в том числе легитимный
+// ноль: «доля жилья 0 %» (полностью нежилая застройка — редактор её разрешает,
+// min="0") молча превращалась в 80 %, и ТЭП считал население, ДОО, школы и
+// парковки для несуществующих жителей. Ядро ноль принимает корректно
+// (bounded(params.ratio_zh, 0, 100, 80)), поэтому фолбэк нужен только для
+// пустого/нечислового поля.
+function numParam(id, fallback) {
+  const el = document.getElementById(id);
+  const value = el ? Number.parseFloat(el.value) : NaN;
+  return Number.isFinite(value) ? value : fallback;
+}
 function params() {
-  return { density: +document.getElementById("p-density").value || 25,
-           ratio_zh: +document.getElementById("p-ratio").value || 80,
-           education_zone: +document.getElementById("p-education-zone").value === 2 ? 2 : 1,
-           territory_mode: +document.getElementById("p-territory-mode").value === 2 ? 2 : 1,
-           k_rail: +document.getElementById("p-krail").value || 1,
-           k_ba: +document.getElementById("p-kba").value || 0.5 };
+  return { density: numParam("p-density", 25),
+           ratio_zh: numParam("p-ratio", 80),
+           education_zone: numParam("p-education-zone", 1) === 2 ? 2 : 1,
+           territory_mode: numParam("p-territory-mode", 1) === 2 ? 2 : 1,
+           k_rail: numParam("p-krail", 1),
+           k_ba: numParam("p-kba", 0.5) };
 }
 const TEP_AUTO_MAX = 8000;   // выше — авто-ТЭП выключен: иначе на КАЖДУЮ правку
                              // стрингуется и уходит на сервер весь проект (десятки

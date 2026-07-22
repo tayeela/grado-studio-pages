@@ -157,7 +157,13 @@
       .reduce((sum, feature) => sum + featureAreaM2(feature), 0) / 10000;
     const terrArea = rounded(rawTerrArea, 4);
     const restrictArea = rounded(rawRestrictArea, 4);
-    const calcArea = terrArea - restrictArea;
+    // Площади ЗОУИТ суммируются без объединения геометрий: пересекающиеся зоны
+    // (СЗЗ + водоохранная над одним местом — норма) вычитаются дважды и могут
+    // увести расчётную площадь в минус, а за ней и всю нормативную часть ТЭП
+    // (население, ДОО, школы, машино-места). Клампим и предупреждаем явно,
+    // вместо того чтобы показывать отрицательные показатели как факт.
+    const restrictOverflow = restrictArea > terrArea;
+    const calcArea = Math.max(0, terrArea - restrictArea);
     // Диапазоны совпадают с moscow_krt.json и настольным studio_core.
     // Иначе вручную отредактированный веб-проект мог получить расчёт,
     // который невозможно задать через интерфейс.
@@ -231,6 +237,14 @@
     if (!hasTerritory && rawFeatures.some(feature => feature && feature.ring)) {
       checks.unshift({ title: "Граница территории", ok: false,
         msg: "не задана — ТЭП по всем объектам карты; начертите границу, чтобы считать внутри территории разработки" });
+    }
+    if (restrictOverflow) {
+      checks.unshift({ title: "Ограничения превышают территорию", ok: false,
+        msg: `Сумма площадей ЗОУИТ (${rounded(restrictArea, 2)} га) больше площади территории `
+          + `(${rounded(terrArea, 2)} га) — расчётная площадь принята равной 0. `
+          + "Обычная причина — пересекающиеся зоны: их площади складываются без объединения, "
+          + "поэтому перекрытие вычитается дважды. Проверьте наложения слоёв ограничений",
+      });
     }
     return {
       inputs: { terr_area: rounded(terrArea, 4), restrict_area: rounded(restrictArea, 4) },
@@ -874,11 +888,40 @@
       categories: spec.categories.map(id => ({ id })) };
   }
 
+  // «ЗОУИТ (все виды)» — это ПЯТЬ разных категорий НСПД (охранные зоны ОКН,
+  // СЗЗ, водоохранные и т.д.). Раньше все они падали в один слой
+  // source.nspd.zouit с общим названием «ЗОУИТ»: разные по смыслу и знаку зоны
+  // оказывались в одном разворачивающемся слое и различались только атрибутом.
+  // Теперь категория = слой-источник, как у ГИС ОГД (один слой портала — один
+  // слой проекта); знак внутри по-прежнему задаётся стилем слоя.
+  const nspdZouitLayer = categoryName => {
+    const title = String(categoryName || "").trim() || "ЗОУИТ (вид не указан)";
+    const normalized = identityText(title);
+    const ascii = [...normalized].map(ch => CYRILLIC_TO_LAT[ch] ?? ch).join("");
+    const slug = ascii.replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "") || "zouit";
+    return { title,
+      layer_id: `source.nspd.zouit.${slug.slice(0, 64)}.${identityHash(normalized)}` };
+  };
+
   function importNspdExtent(payload = {}, source, bbox = []) {
     const spec = EXTENT_SPECS[source];
     if (!spec || !spec.categories || !Array.isArray(payload.features))
       throw new Error("НСПД вернула некорректный ответ");
-    const group = newExtentGroup(source);
+    const splitByCategory = source === "nspd.zouit";
+    const groupsById = new Map();
+    const groupFor = categoryName => {
+      if (!splitByCategory) {
+        if (!groupsById.has(spec.layer_id)) groupsById.set(spec.layer_id, newExtentGroup(source));
+        return groupsById.get(spec.layer_id);
+      }
+      const { layer_id: layerId, title } = nspdZouitLayer(categoryName);
+      if (!groupsById.has(layerId)) {
+        groupsById.set(layerId, { source, title, layer_id: layerId, kind: spec.kind,
+          source_code: `nspd:${layerId}`, source_name: title,
+          features: [], fields: [], count: 0 });
+      }
+      return groupsById.get(layerId);
+    };
     let skipped = 0;
     payload.features.forEach((item, itemIndex) => {
       const geometry = item && item.geometry;
@@ -903,12 +946,28 @@
       let parts = [];
       try { parts = geometryParts(wgsGeometry); } catch (error) { skipped += 1; return; }
       const key = item.id ?? raw.opt_cad_num ?? raw.label ?? itemIndex;
-      parts.forEach((part, partIndex) => group.features.push({ kind: spec.kind, layer_id: spec.layer_id,
-        ...part, props: { ...props }, srcKey: `${spec.layer_id}:${key}#${partIndex}` }));
+      const group = groupFor(raw.categoryName);
+      const layerId = group.layer_id;
+      parts.forEach((part, partIndex) => group.features.push({ kind: spec.kind, layer_id: layerId,
+        ...part, props: { ...props }, srcKey: `${layerId}:${key}#${partIndex}` }));
       addFields(group, props);
     });
-    const result = finishExtentGroup(group, "НСПД (nspd.gov.ru), выгрузка по экстенту",
-      { bbox, source, keys: group.features.map(feature => feature.srcKey) });
+    const groups = [...groupsById.values()];
+    if (!groups.length) groups.push(newExtentGroup(source));
+    const sourceDoc = "НСПД (nspd.gov.ru), выгрузка по экстенту";
+    const result = { groups: [], notes: [], snapshots: [], layers: [] };
+    for (const group of groups) {
+      const part = finishExtentGroup(group, sourceDoc,
+        { bbox, source, layer_id: group.layer_id,
+          keys: group.features.map(feature => feature.srcKey) });
+      result.groups.push(...part.groups);
+      result.snapshots.push(...part.snapshots);
+      // Динамические слои категорий фронт не знает статически — регистрируем их
+      // так же, как слои ГИС ОГД, иначе объекты уедут в слой по ВИДУ (правило 7).
+      if (splitByCategory) result.layers.push({ id: group.layer_id, title: group.title,
+        code: "generic.polygon", kind: group.kind, style_id: null, stage: "existing",
+        source_kind: "nspd", source_code: group.source_code, source_name: group.source_name });
+    }
     if (skipped) result.notes.push(`повреждённых объектов НСПД пропущено: ${skipped}`);
     return result;
   }
