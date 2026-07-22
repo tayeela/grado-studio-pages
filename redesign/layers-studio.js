@@ -92,6 +92,17 @@
     if (!modal || !grid || !preset) return;
     modal.classList.add('layer-style-studio');
 
+    const head = modal.querySelector('.modal-head');
+    const mode = modal.querySelector('#ls-mode');
+    const controls = grid.querySelector('.style-controls');
+    const presetLabel = preset.closest('.style-preset-label');
+    if (head && mode) head.insertBefore(mode, head.querySelector('.modal-x'));
+    if (controls && presetLabel) controls.prepend(presetLabel);
+
+    // The full standards catalogue remains available from the project toolbar.
+    // Inside layer styling, a compact preset selector keeps the task focused.
+    return;
+
     const panel = document.createElement('aside');
     panel.className = 'style-library-panel';
     panel.setAttribute('aria-label', 'Каталог знаков');
