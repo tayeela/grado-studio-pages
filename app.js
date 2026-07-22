@@ -2717,6 +2717,18 @@ function measureLabel(s, font) {
 // обзоре выходил «пунктир с узкими галками» (правка юзера).
 const LGR_DETAIL_MAX_DENOM = 10000;
 function lgrDenom() { return 3779.5 / state.view.k; }
+// Масштабная видимость слоя — как «Видимость слоёв» во FlexGIS и
+// scale-dependent visibility в QGIS. Выгрузка ОГД/ОСМ по городу — это десятки
+// тысяч объектов, которые на обзорном масштабе не нужны и только жгут кадр.
+// Порог живёт в fmt слоя (там же, где cats_off), поэтому сохраняется с проектом.
+// Скрываем при ОТДАЛЕНИИ: знаменатель масштаба больше порога.
+function layerInScale(L) {
+  const max = L && L.fmt && L.fmt.scale_max;
+  return !(max > 0) || lgrDenom() <= max;
+}
+// Рисуем/ловим курсором только то, что и видно, и попадает в масштаб.
+// layer.visible остаётся «сырым» для панели, экспорта и «Вписать всё».
+function layerDrawable(L) { return !!L && L.visible && layerInScale(L); }
 // «Читаемый режим» (переключатель в «Сетка и привязки») — ТОЛЬКО для экрана.
 // По эталону знак задан в метрах, поэтому на рабочих 1:4000+ засечка ~3 px:
 // в QGIS так же, но чертить неудобно. В читаемом режиме коэффициент = 1, т.е.
@@ -2982,7 +2994,7 @@ function draw() {
   const _byLayer = new Map();
   for (const f of state.features) {
     const L = layerOf(f);
-    if (!L || !L.visible || _cull(f) || catOff(L, f)) continue;
+    if (!layerDrawable(L) || _cull(f) || catOff(L, f)) continue;
     let arr = _byLayer.get(L); if (!arr) _byLayer.set(L, arr = []); arr.push(f);
   }
   // занятые экранные bbox уже отрисованных подписей этого слоя за проход —
@@ -6445,7 +6457,7 @@ function hitCandidates(wx, wy, tolW) {
         seen.add(it);
         if (it.x1 < wx - tolW || it.x0 > wx + tolW ||
             it.y1 < wy - tolW || it.y0 > wy + tolW) continue;
-        if (!it.L.visible || it.L.locked || catOff(it.L, it.f)) continue;
+        if (!layerDrawable(it.L) || it.L.locked || catOff(it.L, it.f)) continue;
         out.push(it);
       }
     }
