@@ -52,19 +52,19 @@ async function pollInbox() {
   } catch (e) {
     if (!serverDown) {
       serverDown = true;
-      document.getElementById("st-core").textContent = "⚠ нет связи с сервером — переподключение…";
+      // Раньше сообщение уходило в #st-core — скрытый инлайн-стилем узел,
+      // который никто не видел; он удалён. Пишем в статус-строку.
+      toast("Нет связи с сервером — переподключение…", "warn");
     }
   }
 }
 setInterval(pollInbox, 2500);
 pollInbox();
-document.getElementById("st-core").onclick = () => {
-  serverDown = false;
-  document.getElementById("st-core").textContent = "";
-  pollInbox();
-  refreshTep();
-  toast("Переподключение к серверу...");
-};
+// Ручного «переподключиться» больше нет: опрос и так повторяется каждые 2.5 с,
+// а восстановление связи обрабатывается выше по ветке serverDown — с
+// досасыванием стилей, источников и ТЭП. Прежний обработчик висел на #st-core,
+// невидимом узле, и после его удаления падал ПРИ ЗАГРУЗКЕ, обрывая файл: ниже
+// объявлены привязки кнопок НСПД и ФГИС ТП, и они переставали работать.
 
 // импорт захвата НСПД (JSON браузерного моста GRADO)
 on("btn-nspd", "click", () => document.getElementById("nspd-file").click());
