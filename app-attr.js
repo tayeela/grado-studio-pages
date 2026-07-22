@@ -168,14 +168,74 @@ function openAttributeTable(layer) {
     const all = featuresOnLayer(layer.id);
     return filter === "selected" ? all.filter(f => state.selectedIds.has(f.id)) : all;
   };
+  // Таблица показывает ТОЛЬКО видимое окно строк. Раньше строились все сразу
+  // и на каждую вешалось по два обработчика: на слое в 20 тыс. объектов это
+  // 100 тыс. узлов, 1.3 с на вход в режим правки и 0.8 с на один клик по
+  // строке (клик перерисовывал таблицу целиком). Высоту прокрутки держат две
+  // пустые строки-распорки, обработчики — делегированные, по одному на
+  // контейнер.
+  const AT_OVERSCAN = 6;      // запас строк сверху и снизу, чтобы не мигало
+  const AT_ROW_GUESS = 24;    // до первого замера реальной высоты строки
+  let cols = [], feats = [], rowH = 0, winFrom = -1, winTo = -1;
+  const scrollBox = () => $("at-scroll");
+  const featById = id => state.features.find(x => x.id === id);
+
+  function cellHtml(f, c) {
+    const val = attrValue(f, c);
+    if (editMode && !c.virtual) {
+      if (c.type === "bool")
+        return `<td><input type="checkbox" data-fid="${f.id}" data-col="${escHtml(c.name)}" ${(val === true || val === "true") ? "checked" : ""}></td>`;
+      const it = c.type === "int" || c.type === "real" ? "number" : c.type === "date" ? "date" : "text";
+      return `<td><input class="at-cell" type="${it}" data-fid="${f.id}" data-col="${escHtml(c.name)}" value="${escHtml(String(val))}"></td>`;
+    }
+    return `<td>${escHtml(String(val))}</td>`;
+  }
+  function rowHtml(f, i) {
+    return `<tr data-fid="${f.id}"${state.selectedIds.has(f.id) ? ' class="sel"' : ""}>` +
+      `<td class="at-num">${i + 1}</td>${cols.map(c => cellHtml(f, c)).join("")}</tr>`;
+  }
+  function padHtml(px) {
+    return `<tr class="at-pad" style="height:${Math.max(0, Math.round(px))}px"><td colspan="${cols.length + 1}"></td></tr>`;
+  }
+  // force=true — состав строк изменился (правка, фильтр, выделение);
+  // иначе окно перерисовывается только при реальном сдвиге прокрутки
+  function renderWindow(force, remeasure = true) {
+    const box = scrollBox();
+    const body = box && box.querySelector("#at-body");
+    if (!body) return;
+    if (!rowH) rowH = AT_ROW_GUESS;
+    const view = box.clientHeight || 420;
+    const first = Math.max(0, Math.floor(box.scrollTop / rowH) - AT_OVERSCAN);
+    const last = Math.min(feats.length, first + Math.ceil(view / rowH) + AT_OVERSCAN * 2);
+    if (!force && first === winFrom && last === winTo) return;
+    winFrom = first; winTo = last;
+    const rows = [];
+    for (let i = first; i < last; i++) rows.push(rowHtml(feats[i], i));
+    body.innerHTML = padHtml(first * rowH) + rows.join("") + padHtml((feats.length - last) * rowH);
+    // настоящая высота строки известна только после вставки, а в режиме правки
+    // она другая (ячейки с полями ввода выше). Замеряем и, если разошлось с
+    // предположением, пересобираем окно один раз — уже по факту.
+    if (!remeasure) return;
+    const probe = body.querySelector("tr[data-fid]");
+    if (!probe) return;
+    const h = probe.offsetHeight;
+    if (h && Math.abs(h - rowH) > 0.5) { rowH = h; renderWindow(true, false); }
+  }
+  function paintSelection() {
+    const box = scrollBox();
+    if (!box) return;
+    for (const tr of box.querySelectorAll("tr[data-fid]"))
+      tr.classList.toggle("sel", state.selectedIds.has(+tr.dataset.fid));
+  }
   function renderTable() {
-    const cols = attrColumns(layer), feats = filtered();
+    cols = attrColumns(layer); feats = filtered();
     $("at-count").textContent = `(${feats.length})`;
     $("at-addf").hidden = !editMode;
     $("at-fields").hidden = !editMode;
     $("at-edit").classList.toggle("active", editMode);
     if (!feats.length) {
-      $("at-scroll").innerHTML = `<div class="muted" style="padding:14px">Нет объектов${filter === "selected" ? " в выделении" : ""}</div>`;
+      scrollBox().innerHTML = `<div class="muted" style="padding:14px">Нет объектов${filter === "selected" ? " в выделении" : ""}</div>`;
+      winFrom = winTo = -1;
       return;
     }
     const head = `<tr><th class="at-num">#</th>${cols.map(c => {
@@ -183,51 +243,49 @@ function openAttributeTable(layer) {
         ? `<span class="at-delcol" data-col="${escHtml(c.name)}" title="Удалить поле">✕</span>` : "";
       return `<th title="тип: ${FIELD_TYPES[c.type] || c.type}${c.virtual ? " · вычисляется" : ""}">${escHtml(c.label)}${del}</th>`;
     }).join("")}</tr>`;
-    const body = feats.map((f, i) => {
-      const cells = cols.map(c => {
-        const val = attrValue(f, c);
-        if (editMode && !c.virtual) {
-          if (c.type === "bool")
-            return `<td><input type="checkbox" data-fid="${f.id}" data-col="${escHtml(c.name)}" ${(val === true || val === "true") ? "checked" : ""}></td>`;
-          const it = c.type === "int" || c.type === "real" ? "number" : c.type === "date" ? "date" : "text";
-          return `<td><input class="at-cell" type="${it}" data-fid="${f.id}" data-col="${escHtml(c.name)}" value="${escHtml(String(val))}"></td>`;
-        }
-        return `<td>${escHtml(String(val))}</td>`;
-      }).join("");
-      return `<tr data-fid="${f.id}"${state.selectedIds.has(f.id) ? ' class="sel"' : ""}><td class="at-num">${i + 1}</td>${cells}</tr>`;
-    }).join("");
-    $("at-scroll").innerHTML = `<table class="attr-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
-    // правка ячеек
-    $("at-scroll").querySelectorAll("input[data-col]").forEach(inp =>
-      inp.addEventListener("change", () => {
-        const f = state.features.find(x => x.id === +inp.dataset.fid); if (!f) return;
-        const col = cols.find(c => c.name === inp.dataset.col);
-        snapshot(); f.props = f.props || {};
-        f.props[inp.dataset.col] = inp.type === "checkbox" ? inp.checked : castField(col.type, inp.value);
-        draw(); refreshTep(); persist();
-      }));
-    // удаление своего поля (крестик в шапке)
-    $("at-scroll").querySelectorAll(".at-delcol").forEach(x =>
-      x.addEventListener("click", ev => {
-        ev.stopPropagation();
-        snapshot(); deleteLayerFieldFrom(layer, x.dataset.col); persist(); renderTable();
-        toast(`Поле «${x.dataset.col}» удалено`, "warn");
-      }));
-    // выбор строки ↔ выделение на холсте
-    $("at-scroll").querySelectorAll("tbody tr").forEach(tr => {
-      tr.addEventListener("click", ev => {
-        if (ev.target.closest("input")) return;
-        const f = state.features.find(x => x.id === +tr.dataset.fid); if (!f) return;
-        if (ev.shiftKey || ev.ctrlKey || ev.metaKey) toggleSelection(f.id); else selectOne(f.id);
-        draw(); renderProps(); renderTable();
-      });
-      tr.addEventListener("dblclick", () => {
-        const f = state.features.find(x => x.id === +tr.dataset.fid); if (!f) return;
-        if (!layer.visible) { layer.visible = true; renderLayers(); }
-        zoomToFeature(f);
-      });
-    });
+    scrollBox().innerHTML =
+      `<table class="attr-table"><thead>${head}</thead><tbody id="at-body"></tbody></table>`;
+    rowH = 0; winFrom = winTo = -1;
+    renderWindow(true);
   }
+  // Обработчики висят на контейнере, а не на строках: строки приходят и уходят
+  // при прокрутке, и переподписка съела бы весь выигрыш.
+  scrollBox().addEventListener("scroll", () => renderWindow(false));
+  scrollBox().addEventListener("change", ev => {
+    const inp = ev.target.closest("input[data-col]");
+    if (!inp) return;
+    const f = featById(+inp.dataset.fid); if (!f) return;
+    const col = cols.find(c => c.name === inp.dataset.col); if (!col) return;
+    snapshot(); f.props = f.props || {};
+    f.props[inp.dataset.col] = inp.type === "checkbox" ? inp.checked : castField(col.type, inp.value);
+    draw(); refreshTep(); persist();
+  });
+  scrollBox().addEventListener("click", ev => {
+    // удаление своего поля (крестик в шапке)
+    const del = ev.target.closest(".at-delcol");
+    if (del) {
+      ev.stopPropagation();
+      snapshot(); deleteLayerFieldFrom(layer, del.dataset.col); persist(); renderTable();
+      toast(`Поле «${del.dataset.col}» удалено`, "warn");
+      return;
+    }
+    // выбор строки ↔ выделение на холсте
+    const tr = ev.target.closest("tr[data-fid]");
+    if (!tr || ev.target.closest("input")) return;
+    const f = featById(+tr.dataset.fid); if (!f) return;
+    if (ev.shiftKey || ev.ctrlKey || ev.metaKey) toggleSelection(f.id); else selectOne(f.id);
+    draw(); renderProps();
+    // перекрашиваем видимые строки вместо перестроения таблицы; при фильтре
+    // «выделенные» состав строк меняется — там нужна полная перерисовка
+    if (filter === "selected") renderTable(); else paintSelection();
+  });
+  scrollBox().addEventListener("dblclick", ev => {
+    const tr = ev.target.closest("tr[data-fid]");
+    if (!tr) return;
+    const f = featById(+tr.dataset.fid); if (!f) return;
+    if (!layer.visible) { layer.visible = true; renderLayers(); }
+    zoomToFeature(f);
+  });
   $("at-edit").addEventListener("click", () => { editMode = !editMode; renderTable(); });
   $("at-flt").addEventListener("change", () => { filter = $("at-flt").value; renderTable(); });
   $("at-addf").addEventListener("click", () => openAddFieldDialog(layer, () => { persist(); renderTable(); }));
