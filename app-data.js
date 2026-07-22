@@ -505,12 +505,13 @@ async function openDataFetch() {
         toast(`Данные: всё уже загружено (${plan.dup} объектов — без дубликатов)`); return;
       }
       if (!plan.added) throw new Error("Нет корректных объектов для импорта");
-      const { added, dup, invalid } = commitPreparedSourceImport(plan);
+      const { added, dup, invalid, joinedFrom } = commitPreparedSourceImport(plan);
       importing = false; loadController = null; close();
+      const joinNote = joinedFrom ? ` · склеено из ${joinedFrom} отрезков` : "";
       const duplicateNote = dup ? ` · ${dup} уже были` : "";
       const invalidNote = invalid ? ` · ${invalid} поврежд. пропущено` : "";
       const notes = (data.notes || []).filter(Boolean);
-      toast(`Данные: +${plObjects(added)}${duplicateNote}${invalidNote}${notes.length ? ` · ${notes.join(" · ")}` : ""}`,
+      toast(`Данные: +${plObjects(added)}${joinNote}${duplicateNote}${invalidNote}${notes.length ? ` · ${notes.join(" · ")}` : ""}`,
         invalid || notes.length ? "warn" : undefined);
     } catch (error) {
       importing = false; loadController = null; step = 3;
@@ -825,14 +826,17 @@ async function openDataFetchLegacy() {
         return;
       }
       if (!plan.added) throw new Error("Нет корректных объектов для импорта");
-      const { added: addedAll, dup: dupAll, invalid: invalidAll } = commitPreparedSourceImport(plan);
+      const { added: addedAll, dup: dupAll, invalid: invalidAll, joinedFrom } =
+        commitPreparedSourceImport(plan);
       const parts = groups.map(g => `${g.title} ${plan.addedByLayer[g.layer_id] || 0}`);
       close();
+      // склейка меняет число объектов — молчать об этом нельзя
+      const joinNote = joinedFrom ? ` · склеено из ${joinedFrom} отрезков` : "";
       const dupNote = dupAll ? ` · ${dupAll} уже были` : "";
       const invalidNote = invalidAll ? ` · ${invalidAll} поврежд. пропущено` : "";
       const sourceNotes = (data.notes || []).filter(Boolean);
       const note = sourceNotes.length ? ` · ${sourceNotes.join(" · ")}` : "";
-      toast(`Данные: +${plObjects(addedAll)} (${parts.join(" · ")})${dupNote}${invalidNote}${note}`,
+      toast(`Данные: +${plObjects(addedAll)} (${parts.join(" · ")})${joinNote}${dupNote}${invalidNote}${note}`,
         invalidAll || sourceNotes.length ? "warn" : undefined);
       if (sourceNotes.length) console.info("Данные по области:", sourceNotes.join("\n"));
     } catch (err) {

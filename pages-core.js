@@ -1395,6 +1395,9 @@
         addFields(group, props, GISOGD_PROP_LABELS);
       });
     });
+    // Портал режет линию на отрезки (медиана — 3 точки); фронт склеит цепочки
+    // с одинаковыми атрибутами, но только у линий и только у выгрузки портала
+    for (const f of group.features) if (Array.isArray(f.line)) f.joinable = true;
     group.count = group.features.length;
     const manifest = snapshot("gisogd", `ГИС ОГД Москвы (gisogd.mos.ru), слой «${name}»`,
       group.features, { bbox, code: layer.code });

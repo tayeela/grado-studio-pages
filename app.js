@@ -1258,6 +1258,82 @@ function assertCompatibleImportedLayer(existing, incoming) {
   if (existing.geometry_type && incoming.geometry_type && existing.geometry_type !== incoming.geometry_type)
     throw new Error(`Коллизия слоя «${incoming.id}»: разные типы геометрии`);
 }
+// Портал отдаёт красную линию НАРЕЗАННОЙ: медиана — 3 точки на объект, один
+// проезд превращается в сотни записей. Работать с этим нельзя: выбрать линию,
+// посмотреть её длину, обрезать по ней — всё рассыпается на куски, а
+// атрибутивная таблица идёт на десятки тысяч строк.
+// Склеиваем цепочки: соседние отрезки соединяются, только если у них совпадают
+// слой, знак и ВСЕ атрибуты (иначе склеим линии разных документов и режимов).
+// Через перекрёсток (в узле сходятся 3+ конца) цепочка не идёт — выбор
+// продолжения там произволен, а произвол в чертеже хуже дробности.
+// Даты правки записи линию не различают: один и тот же проезд по одному
+// документу портал правил в разные дни, и отрезки расходились по группам
+// (в тестовой площадке 63 группы вместо 130). Цепочку они не рвут, но и
+// выдумывать общую дату нельзя: разошлись — поля у склеенной линии не будет.
+const JOIN_SOFT_PROPS = new Set(["createdate", "changedate"]);
+const joinNodeKey = p => `${Math.round(p[0] * 1e3)}|${Math.round(p[1] * 1e3)}`;
+function joinImportedRuns(features) {
+  const runs = new Map();
+  const out = [];
+  for (const f of features) {
+    if (!f.joinable || !Array.isArray(f.line) || f.line.length < 2) { out.push(f); continue; }
+    const identity = Object.entries(f.props || {}).filter(([k]) => !JOIN_SOFT_PROPS.has(k))
+      .sort(([a], [b]) => (a < b ? -1 : 1));
+    const key = [f.layer_id, f.kind, f.style_id || "", JSON.stringify(identity)].join("\u0000");
+    const list = runs.get(key) || runs.set(key, []).get(key);
+    list.push(f);
+  }
+  for (const segments of runs.values()) {
+    const ends = new Map();
+    for (const s of segments) {
+      const a = joinNodeKey(s.line[0]), b = joinNodeKey(s.line[s.line.length - 1]);
+      if (a === b) continue;                      // замкнутый контур — цепочка уже целая
+      (ends.get(a) || ends.set(a, []).get(a)).push([s, 0]);
+      (ends.get(b) || ends.set(b, []).get(b)).push([s, 1]);
+    }
+    const used = new Set();
+    // продолжение есть только в узле РОВНО с двумя концами: один конец — тупик,
+    // три и больше — перекрёсток
+    const nextAt = node => {
+      const list = ends.get(node) || [];
+      if (list.length !== 2) return null;
+      for (const [s, end] of list) if (!used.has(s)) return [s, end];
+      return null;
+    };
+    for (const seed of segments) {
+      if (used.has(seed)) continue;
+      used.add(seed);
+      let pts = seed.line;
+      const members = [seed];
+      for (;;) {
+        const next = nextAt(joinNodeKey(pts[pts.length - 1]));
+        if (!next) break;
+        const [s, end] = next; used.add(s); members.push(s);
+        pts = pts.concat(end === 0 ? s.line.slice(1) : s.line.slice(0, -1).reverse());
+      }
+      for (;;) {
+        const prev = nextAt(joinNodeKey(pts[0]));
+        if (!prev) break;
+        const [s, end] = prev; used.add(s); members.push(s);
+        pts = (end === 1 ? s.line.slice(0, -1) : s.line.slice(1).reverse()).concat(pts);
+      }
+      delete seed.joinable;
+      if (members.length > 1) {
+        seed.line = pts;
+        // дата правки у отрезков разная — общей у линии нет, и придумывать её
+        // (взять первую попавшуюся) значит соврать в атрибуте
+        for (const k of JOIN_SOFT_PROPS)
+          if (members.some(m => (m.props || {})[k] !== seed.props[k])) delete seed.props[k];
+        // ключи ВСЕХ склеенных отрезков остаются на объекте: по ним повторная
+        // выгрузка той же территории узнаёт, что эти отрезки уже в проекте
+        seed.srcKeys = members.flatMap(m => m.srcKeys || (m.srcKey ? [m.srcKey] : []));
+      }
+      out.push(seed);
+    }
+  }
+  // порядок объектов в подборке — порядок выдачи источника; склейка его не меняет
+  return out.sort((a, b) => a.id - b.id);
+}
 function normalizeImportFields(fieldsByLayer) {
   const normalized = {};
   for (const [layerId, fields] of Object.entries(fieldsByLayer || {})) {
@@ -1294,7 +1370,12 @@ function prepareSourceImport(input = {}) {
       throw new Error(`Схема полей ссылается на неизвестный слой «${layerId}»`);
 
   const existingKeys = new Set();
-  for (const feature of state.features) if (feature.srcKey) existingKeys.add(feature.srcKey);
+  // у склеенной линии ключи всех её отрезков — иначе повторная выгрузка той же
+  // территории посчитала бы их новыми и положила поверх
+  for (const feature of state.features) {
+    if (feature.srcKey) existingKeys.add(feature.srcKey);
+    for (const key of feature.srcKeys || []) existingKeys.add(key);
+  }
   const batchKeys = new Set();
   const stagedFeatures = [];
   const addedByLayer = Object.create(null);
@@ -1330,8 +1411,15 @@ function prepareSourceImport(input = {}) {
     if (upgraded.srcKey) batchKeys.add(upgraded.srcKey);
     touchedLayerIds.add(targetLayer.id);
     stagedFeatures.push(upgraded);
-    addedByLayer[targetLayer.id] = (addedByLayer[targetLayer.id] || 0) + 1;
     nextId++;
+  }
+  const joined = joinImportedRuns(stagedFeatures);
+  const segments = stagedFeatures.length;
+  stagedFeatures.length = 0;
+  stagedFeatures.push(...joined);
+  for (const feature of stagedFeatures) {
+    const layer = resolveImportLayer(feature);
+    if (layer) addedByLayer[layer.id] = (addedByLayer[layer.id] || 0) + 1;
   }
   const newLayers = [...stagedLayerById.values()].filter(layer => !LAYER_BY_ID[layer.id]);
   return {
@@ -1347,6 +1435,7 @@ function prepareSourceImport(input = {}) {
     touchedLayerIds,
     snapshots: Array.isArray(input.snapshots) ? input.snapshots : [],
     added: stagedFeatures.length,
+    joinedFrom: segments > stagedFeatures.length ? segments : 0,
     dup,
     invalid,
     invalidDetails,
@@ -1404,7 +1493,7 @@ function commitPreparedSourceImport(plan) {
     state.selected = null;
     renderSources();
     afterChange();
-    return { added: plan.added, dup: plan.dup, invalid: plan.invalid };
+    return { added: plan.added, dup: plan.dup, invalid: plan.invalid, joinedFrom: plan.joinedFrom || 0 };
   } catch (error) {
     state.features.length = featureLength;
     state.nextId = nextId;
