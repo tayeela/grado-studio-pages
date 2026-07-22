@@ -1161,6 +1161,13 @@
                     title: layer.layer_id ? name : `ГИС ОГД: ${name}`,
                     layer_id: layerId, kind, features: [], fields: [], count: 0 };
     let skipped = 0;
+    // Набор «Границы улично-дорожной сети (красные линии)» портала везёт не
+    // только КЛ УДС: там же природный комплекс, полосы отвода железных дорог и
+    // технические зоны инженерных сетей. Они приезжали в тот же слой и мешались
+    // с красными линиями. Из набора красных линий берём только объекты с кодами
+    // ЛГР красных линий; остальные не загружаем и сообщаем сколько.
+    const redlineOnly = kind === "redline";
+    let dropped = 0;
     payload.features.forEach((f, i) => {
       const fb = geomBbox(f && f.geometry);
       if (!fb || !bboxHit(fb, bbox)) return;
@@ -1171,7 +1178,12 @@
       const key = gisogdKey(f.properties || {}, f, i);
       // LineCode из объекта важнее маршрута по имени слоя: на каждый код —
       // СВОЙ объект в СВОЙ слой со своим знаком; знак кода = сторона линии
-      const routes = lineCodeRoutes(f.properties || {});
+      const allRoutes = lineCodeRoutes(f.properties || {});
+      const routes = redlineOnly
+        ? allRoutes.filter(([code]) => REDLINE_CODES.has(code)) : allRoutes;
+      // объект набора красных линий, у которого НИ ОДИН код не красная линия —
+      // это чужая линия (природный комплекс, полоса отвода, техзона)
+      if (redlineOnly && allRoutes.length && !routes.length) { dropped += 1; return; }
       parts.forEach((part, pi) => {
         if (routes.length) {
           for (const [code, side, csid] of routes) {
@@ -1219,8 +1231,10 @@
                     source_code: layer.source_code || layer.code,
                     source_name: layer.source_name || name });
     }
-    return { groups: [group], notes: skipped ? [`пропущено повреждённых: ${skipped}`] : [],
-             snapshots: [manifest], layers };
+    const notes = [];
+    if (skipped) notes.push(`пропущено повреждённых: ${skipped}`);
+    if (dropped) notes.push(`не красные линии, не загружены: ${dropped}`);
+    return { groups: [group], notes, snapshots: [manifest], layers };
   }
 
   return { setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
