@@ -3658,6 +3658,9 @@ function drawNow() {
     }
   }
   xfDrawOverlay(ctx);
+  // находки проверки топологии поверх всего: app-topo.js грузится позже app.js,
+  // поэтому обращение защищено (как и в node-тестах, где модуля нет вовсе)
+  if (typeof topoDrawOverlay === "function") topoDrawOverlay(ctx);
   drawSnapMarker();
   updateOverlay();
 }
