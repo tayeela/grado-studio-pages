@@ -132,6 +132,19 @@ header{
 .cv-zoom button{width:38px;height:36px;display:grid;place-items:center;color:var(--text-2);font-size:17px;transition:background .12s,color .12s}
 .cv-zoom button:hover{background:var(--field-bg);color:var(--text)}
 .cv-zoom button+button{border-top:1px solid var(--hairline)}
+/* Обзор объектов с клавиатуры: вне фокуса не занимает места и не мешает
+   мыши, по фокусу — обычная плашка поверх холста. Скрывать через display:none
+   нельзя, иначе элемент выпадает из порядка обхода Tab. */
+.cv-reader{position:absolute;left:16px;bottom:46px;z-index:var(--z-panel);
+  max-width:min(560px,calc(100% - 32px));display:flex;flex-direction:column;gap:2px;
+  padding:8px 12px;border-radius:var(--r-md);font-size:var(--fs-12);
+  background:var(--glass-strong);backdrop-filter:var(--glass-blur);
+  box-shadow:var(--glass-hi),var(--shadow-md);
+  clip-path:inset(50%);pointer-events:none;opacity:0}
+.cv-reader:focus,.cv-reader:focus-visible{clip-path:none;pointer-events:auto;opacity:1;
+  outline:2px solid var(--accent);outline-offset:2px}
+.cv-reader b{font-weight:600;color:var(--text)}
+.cv-reader span{color:var(--muted);white-space:normal}
 .statusbar{
   position:absolute;left:0;right:0;bottom:0;height:34px;display:flex;align-items:center;gap:var(--sp-4);
   padding:0 var(--sp-4);font-size:var(--fs-12);color:var(--muted);
