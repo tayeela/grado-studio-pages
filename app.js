@@ -4179,7 +4179,7 @@ function maybeRefreshStations() {
 }
 
 function afterChange() {
-  state._ix = null; state._snapIndex = null;
+  state._ix = null; state._snapIndex = null; cvReader.order = null;
   syncHistoryControls();
   // страховка: убрать из выделения id несуществующих объектов (после
   // импорта/очистки/undo, где features заменяются целиком)
@@ -4602,9 +4602,13 @@ function renderGroupProps(el, ids) {
 // выбранного объекта не сообщалась никак. Пишем краткое описание в живую
 // область; повтор того же текста подавляем, иначе AT тараторит на каждый кадр.
 let _srLastSelection = "";
+// Обзор объектов (см. cvReader ниже) говорит подробнее и с номером позиции:
+// пока ведёт он, обычное озвучивание выделения молчит, иначе живая область
+// получает две записи подряд и скринридер читает объект дважды.
+let _srSuppress = false;
 function announceSelection() {
   const node = document.getElementById("sr-selection");
-  if (!node) return;
+  if (!node || _srSuppress) return;
   const ids = selectionIds();
   let text;
   if (!ids.length) text = "";
@@ -4627,6 +4631,192 @@ function announceSelection() {
   if (text === _srLastSelection) return;
   _srLastSelection = text;
   node.textContent = text;
+}
+function srSay(text) {
+  const node = document.getElementById("sr-selection");
+  if (!node) return;
+  _srLastSelection = text;
+  node.textContent = text;
+}
+
+// ---------- обзор объектов холста с клавиатуры ----------
+// Чертёж живёт в canvas: без указателя объектов нет вовсе — ни в дереве
+// доступности, ни в порядке обхода. Живая область (announceSelection) сообщала
+// только о том, что уже выбрано мышью; здесь появляется сама навигация.
+// Списком в DOM это не делается: городская выгрузка — десятки тысяч объектов,
+// столько узлов убьют и скринридер, и вкладку. Поэтому в разметке одна
+// строка-курсор, а порядок объектов считается одним проходом и кэшируется.
+const cvReader = { order: null, pos: -1 };
+function cvReaderOrder() {
+  if (cvReader.order) return cvReader.order;
+  const byLayer = new Map();
+  for (const f of state.features) {
+    const L = layerOf(f);
+    if (!L || !layerDrawable(L)) continue; // скрытое и вне масштаба не читаем
+    let bucket = byLayer.get(L.id);
+    if (!bucket) byLayer.set(L.id, bucket = []);
+    bucket.push(f.id);
+  }
+  // порядок как в панели слоёв — сверху вниз, внутри слоя порядок черчения
+  const order = [];
+  for (const L of layerRowsTopFirst(new Set(byLayer.keys()))) {
+    const bucket = byLayer.get(L.id);
+    if (!bucket) continue;
+    for (const id of bucket) order.push({ id, layerId: L.id, layerTitle: L.title });
+  }
+  return (cvReader.order = order);
+}
+function featureAttrText(f) {
+  const L = layerOf(f);
+  const out = [];
+  for (const field of (L && ATTR_FIELDS[L.semantic_class]) || []) {
+    if (field.type === "computed") { out.push(field.compute(f)); continue; }
+    if (!field.key) continue;
+    const v = f.props ? f.props[field.key] : undefined;
+    if (v === undefined || v === "" || v === null) continue;
+    out.push(`${field.title}: ${v}`);
+  }
+  for (const cf of (L && L.fields) || []) {
+    const v = f.props ? f.props[cf.name] : undefined;
+    if (v === undefined || v === "" || v === null) continue;
+    out.push(`${cf.name}: ${cf.type === "bool" ? (v ? "да" : "нет") : v}`);
+  }
+  if (f.prov) out.push(`источник: ${f.prov.source}`);
+  return out;
+}
+// Название слоя не повторяем: оно уже прозвучало в строке позиции.
+function featureReadText(f, withAttrs) {
+  const parts = [];
+  if (f.ring) parts.push(`площадь ${fmtAreaHa(featureArea(f))}`);
+  else if (f.circle) parts.push(`окружность радиусом ${fmtLen(f.circle.r)}`);
+  else if (f.arc) parts.push(`дуга радиусом ${fmtLen(f.arc.r)}`);
+  else if (f.line) parts.push(`длина ${fmtLen(lineLen(f.line))}`);
+  else if (f.point) parts.push("точка");
+  if (withAttrs) parts.push(...featureAttrText(f));
+  return parts.length ? parts.join(", ") : "объект";
+}
+// Объект, до которого дошёл курсор, обязан быть виден: иначе зрячий с
+// клавиатуры слышит выбор, но не видит его. Масштаб не трогаем, пока объект
+// в него вписывается — прыгающий зум теряет контекст квартала.
+function cvReaderReveal(f) {
+  const box = featureViewBox(f);
+  const cv = document.getElementById("cv");
+  if (!box || !cv) return;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  const [x1, y1] = w2s(box.minx, box.maxy);
+  const [x2, y2] = w2s(box.maxx, box.miny);
+  if (x1 >= 0 && y1 >= 0 && x2 <= w && y2 <= h) return;
+  if (x2 - x1 > w * 0.9 || y2 - y1 > h * 0.9) { zoomToFeature(f); return; }
+  const [cxs, cys] = w2s(box.cx, box.cy);
+  state.view.tx += w / 2 - cxs;
+  state.view.ty += h / 2 - cys;
+}
+function cvReaderStatus(head, body) {
+  const posNode = document.getElementById("cv-reader-pos");
+  const textNode = document.getElementById("cv-reader-text");
+  if (posNode) posNode.textContent = head;
+  if (textNode) textNode.textContent = body;
+}
+function cvReaderGoto(pos, withAttrs) {
+  const order = cvReaderOrder();
+  if (!order.length) {
+    cvReader.pos = -1;
+    cvReaderStatus("Обзор объектов", "На видимых слоях нет объектов");
+    srSay("На видимых слоях нет объектов");
+    return;
+  }
+  const next = Math.min(order.length - 1, Math.max(0, pos));
+  const entry = order[next];
+  const f = state.features.find(x => x.id === entry.id);
+  if (!f) { cvReader.order = null; return; } // список устарел — пересоберём
+  cvReader.pos = next;
+  selectOne(f.id);
+  cvReaderReveal(f);
+  // renderProps сам объявляет выделение; здесь текст подробнее и с позицией,
+  // поэтому обычное объявление на время правки панели молчит
+  _srSuppress = true;
+  try { draw(); renderProps(); } finally { _srSuppress = false; }
+  const head = `${next + 1} из ${order.length} · ${entry.layerTitle}`;
+  const body = featureReadText(f, withAttrs);
+  cvReaderStatus(head, body);
+  srSay(`${head}. ${body}`);
+}
+function cvReaderStep(delta, withAttrs) {
+  const order = cvReaderOrder();
+  if (!order.length) return cvReaderGoto(0, false);
+  // курсор мог отстать от выделения мышью — подхватываем выбранный объект
+  let from = cvReader.pos;
+  if (state.selected != null) {
+    const at = order.findIndex(e => e.id === state.selected);
+    if (at >= 0) from = at;
+  }
+  if (from < 0) return cvReaderGoto(delta > 0 ? 0 : order.length - 1, withAttrs);
+  const next = from + delta;
+  if (next < 0 || next >= order.length) {
+    srSay(next < 0 ? "Это первый объект" : "Это последний объект");
+    return;
+  }
+  cvReaderGoto(next, withAttrs);
+}
+// PageUp/PageDown — к первому объекту соседнего слоя: на выгрузке в тысячи
+// объектов перебирать их по одному бессмысленно
+function cvReaderLayerStep(delta) {
+  const order = cvReaderOrder();
+  if (!order.length) return cvReaderGoto(0, false);
+  const from = Math.max(0, cvReader.pos);
+  const layerId = order[from].layerId;
+  let i = from;
+  if (delta > 0) {
+    while (i < order.length && order[i].layerId === layerId) i++;
+    if (i >= order.length) { srSay("Это последний слой с объектами"); return; }
+  } else {
+    while (i >= 0 && order[i].layerId === layerId) i--;
+    if (i < 0) { srSay("Это первый слой с объектами"); return; }
+    const prevId = order[i].layerId;
+    while (i > 0 && order[i - 1].layerId === prevId) i--;
+  }
+  cvReaderGoto(i, false);
+}
+{
+  const reader = document.getElementById("cv-reader");
+  if (reader) {
+    reader.addEventListener("focus", () => {
+      const order = cvReaderOrder();
+      if (!order.length) {
+        cvReaderStatus("Обзор объектов", "На видимых слоях нет объектов");
+        return;
+      }
+      cvReaderStatus(`Обзор объектов: ${order.length}`,
+        "↑↓ объекты · PgUp/PgDn слои · Enter атрибуты · Esc на холст");
+    });
+    // Обработчик свой, не общий по документу: там стрелки двигают выделенные
+    // объекты, а Delete их удаляет — в режиме чтения это недопустимо.
+    reader.addEventListener("keydown", event => {
+      const key = event.key;
+      const handled = {
+        ArrowDown: () => cvReaderStep(1, false),
+        ArrowUp: () => cvReaderStep(-1, false),
+        PageDown: () => cvReaderLayerStep(1),
+        PageUp: () => cvReaderLayerStep(-1),
+        Home: () => cvReaderGoto(0, false),
+        End: () => cvReaderGoto(cvReaderOrder().length - 1, false),
+        Enter: () => cvReaderGoto(Math.max(0, cvReader.pos), true),
+      }[key];
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+        handled();
+        return;
+      }
+      if (key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        document.getElementById("cv")?.focus();
+      }
+      // остальные клавиши уходят наверх: Tab обязан выводить из обзора,
+      // иначе это ловушка фокуса (WCAG 2.1.2)
+    });
+  }
 }
 function renderProps() {
   announceSelection();
