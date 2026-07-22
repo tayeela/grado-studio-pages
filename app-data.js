@@ -43,6 +43,12 @@ const DATA_SOURCE_GROUPS = [
       { key: "gisogd.func_zones_tinao", label: "Функц. зоны (Новая Москва, ТиНАО)", def: false },
       { key: "gisogd.szz", label: "Санитарно-защитные зоны", def: false },
       { key: "gisogd.vodookhr", label: "Водоохранные зоны", def: false },
+      // Красные линии — четыре отдельных набора: линия портала несёт коды
+      // обеих своих сторон, и выбор набора определяет, какой из них грузить.
+      { key: "gisogd.kl_uds", label: "Красные линии УДС (КЛ УДС)", def: false },
+      { key: "gisogd.kl_top", label: "Красные линии ТОП (КЛ ТОП)", def: false },
+      { key: "gisogd.kl_lo", label: "Красные линии линейных объектов (КЛ ЛО)", def: false },
+      { key: "gisogd.kl_odms", label: "Красные линии ОДМС (КЛ ОДМС)", def: false },
     ]},
 ];
 

@@ -447,34 +447,132 @@
         local[0][1] === local[local.length - 1][1]) local.pop();
     return local.length >= 3 ? local : null;
   };
+  // ---------- починка геометрии на импорте ----------
+  // Источники отдают контуры «как есть»: повторяющиеся подряд точки, иглы
+  // (A-B-A нулевой площади), вырожденные части и самопересечения. Дальше на
+  // этом считается ТЭП, строятся привязки и офсеты — мусор в геометрии
+  // всплывает уже в чертеже, где чинить его вручную дорого. Чиним ОДИН раз,
+  // на входе, одинаково для всех источников: geometryParts — общий шлюз
+  // GeoJSON, НСПД, ОСМ и ГИС ОГД.
+  const GEOM_EPS = 1e-3;          // 1 мм — ниже точности любого из источников
+  const GEOM_MIN_AREA = 1e-3;     // 0.001 м² — часть меньше миллиметра квадратного
+  const geomFix = { dupes: 0, spikes: 0, dropped: 0, selfFixed: 0, selfLeft: 0 };
+  const geomFixReset = () => { for (const key of Object.keys(geomFix)) geomFix[key] = 0; };
+  const geomFixNotes = () => {
+    const notes = [];
+    const cleaned = geomFix.dupes + geomFix.spikes;
+    if (cleaned) notes.push(`геометрия исправлена: убрано лишних точек ${cleaned}`);
+    if (geomFix.selfFixed) notes.push(`самопересечений исправлено: ${geomFix.selfFixed}`);
+    if (geomFix.selfLeft) notes.push(`самопересечений осталось: ${geomFix.selfLeft}`);
+    if (geomFix.dropped) notes.push(`вырожденных частей отброшено: ${geomFix.dropped}`);
+    return notes;
+  };
+  const samePoint = (a, b) =>
+    Math.abs(a[0] - b[0]) < GEOM_EPS && Math.abs(a[1] - b[1]) < GEOM_EPS;
+  // closed=true — кольцо: замыкающая точка не хранится, поэтому совпадение
+  // первой и последней тоже считается дубликатом
+  const cleanPath = (points, closed) => {
+    const out = [];
+    for (const p of points) {
+      if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+      if (out.length && samePoint(out[out.length - 1], p)) { geomFix.dupes += 1; continue; }
+      out.push([p[0], p[1]]);
+    }
+    while (closed && out.length > 1 && samePoint(out[0], out[out.length - 1])) {
+      out.pop(); geomFix.dupes += 1;
+    }
+    // Игла: путь уходит в точку и возвращается ровно назад (A-B-A). Площади не
+    // даёт, зато ломает офсет и привязку к «ребру», которого нет.
+    for (let pass = 0; pass < 4; pass++) {
+      let cut = false;
+      for (let i = out.length - 1; i >= 0; i--) {
+        const n = out.length;
+        if (n < 3) break;
+        const prev = out[(i - 1 + n) % n], next = out[(i + 1) % n];
+        if ((!closed && (i === 0 || i === n - 1)) || !samePoint(prev, next)) continue;
+        out.splice(i, 1);
+        const j = i % out.length;
+        out.splice(j, 1);
+        geomFix.spikes += 1; cut = true;
+      }
+      if (!cut) break;
+    }
+    return out;
+  };
+  // Самопересекающийся контур чиним объединением с самим собой (тот же приём,
+  // что makeValid): библиотека клиппинга грузится позже и в Node-тестах её нет,
+  // поэтому ищем лениво и при отсутствии честно считаем контур неисправленным.
+  const repairPolygonPart = (ring, holes) => {
+    if (!ringSelfIntersects(ring)) return [holes.length ? { ring, holes } : { ring }];
+    const pc = typeof window !== "undefined" && window.polygonClipping;
+    if (!pc || typeof pc.union !== "function") {
+      geomFix.selfLeft += 1;
+      return [holes.length ? { ring, holes } : { ring }];
+    }
+    try {
+      const polygon = [closedRing(ring), ...holes.map(closedRing).filter(Boolean)];
+      const fixed = pc.union([polygon]);
+      const parts = [];
+      for (const poly of (fixed || [])) {
+        if (!Array.isArray(poly) || !Array.isArray(poly[0])) continue;
+        const outer = cleanPath(poly[0], true);
+        if (outer.length < 3 || ringArea(outer) < GEOM_MIN_AREA) continue;
+        const inner = poly.slice(1)
+          .map(h => cleanPath(h, true))
+          .filter(h => h.length >= 3 && ringArea(h) >= GEOM_MIN_AREA);
+        parts.push(inner.length ? { ring: outer, holes: inner } : { ring: outer });
+      }
+      if (!parts.length) { geomFix.selfLeft += 1; return [holes.length ? { ring, holes } : { ring }]; }
+      geomFix.selfFixed += 1;
+      return parts;
+    } catch (error) {
+      geomFix.selfLeft += 1;
+      return [holes.length ? { ring, holes } : { ring }];
+    }
+  };
   const geometryParts = geometry => {
     if (!geometry || typeof geometry !== "object") return [];
     const coordinates = geometry.coordinates;
     if (geometry.type === "Point") return [{ point: wgs84ToLocal(coordinates) }];
     if (geometry.type === "MultiPoint")
       return Array.isArray(coordinates) ? coordinates.map(point => ({ point: wgs84ToLocal(point) })) : [];
-    if (geometry.type === "LineString")
-      return Array.isArray(coordinates) && coordinates.length >= 2
-        ? [{ line: coordinates.map(wgs84ToLocal) }] : [];
+    const cleanLine = line => {
+      if (!Array.isArray(line)) return null;
+      const pts = cleanPath(line.map(wgs84ToLocal), false);
+      if (pts.length >= 2) return { line: pts };
+      geomFix.dropped += 1;
+      return null;
+    };
+    if (geometry.type === "LineString") {
+      const part = cleanLine(coordinates);
+      return part ? [part] : [];
+    }
     if (geometry.type === "MultiLineString")
-      return Array.isArray(coordinates) ? coordinates.filter(line => Array.isArray(line) && line.length >= 2)
-        .map(line => ({ line: line.map(wgs84ToLocal) })) : [];
+      return Array.isArray(coordinates) ? coordinates.map(cleanLine).filter(Boolean) : [];
     const polygons = geometry.type === "Polygon" ? [coordinates]
       : geometry.type === "MultiPolygon" ? coordinates : [];
     if (!Array.isArray(polygons)) return [];
     // polygon[0] — внешний контур, polygon[1:] — ДЫРЫ. Прежде дыры молча
     // отбрасывались и выколотый полигон грузился сплошным (как и на сервере).
-    return polygons.map(polygon => {
-      if (!Array.isArray(polygon) || !Array.isArray(polygon[0])) return null;
-      const ring = closeRing(polygon[0]);
-      if (!ring) return null;
-      const part = { ring };
+    const out = [];
+    for (const polygon of polygons) {
+      if (!Array.isArray(polygon) || !Array.isArray(polygon[0])) continue;
+      const ring = cleanPath((closeRing(polygon[0]) || []), true);
+      if (ring.length < 3) { geomFix.dropped += 1; continue; }
       const holes = polygon.slice(1)
-        .map(h => (Array.isArray(h) ? closeRing(h) : null))
-        .filter(h => h && h.length >= 3);
-      if (holes.length) part.holes = holes;
-      return part;
-    }).filter(Boolean);
+        .map(h => (Array.isArray(h) ? cleanPath(closeRing(h) || [], true) : []))
+        .filter(h => h.length >= 3 && ringArea(h) >= GEOM_MIN_AREA);
+      // Порядок важен: у «бабочки» доли взаимно уничтожаются и площадь по
+      // формуле шнурования равна нулю. Отбрось её как вырожденную — и объект
+      // исчезнет вместо того, чтобы починиться.
+      for (const part of repairPolygonPart(ring, holes)) {
+        if (ringArea(part.ring) < GEOM_MIN_AREA && !ringSelfIntersects(part.ring)) {
+          geomFix.dropped += 1; continue;
+        }
+        out.push(part);
+      }
+    }
+    return out;
   };
   const stableHash = value => {
     const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -518,6 +616,7 @@
   });
 
   function importNspd(payload = {}) {
+    geomFixReset();
     if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
         !Array.isArray(payload.features)) throw new Error("Файл НСПД должен быть GeoJSON FeatureCollection");
     if (payload.grado_source && payload.grado_source !== "nspd")
@@ -554,6 +653,7 @@
     const notes = [];
     if (duplicates) notes.push(`дубликатов по геометрии отброшено: ${duplicates}`);
     if (skipped) notes.push(`неполигональных или повреждённых объектов пропущено: ${skipped}`);
+    notes.push(...geomFixNotes());
     return { features: normalized, notes, source_doc: manifest.source_doc,
       snapshot: manifest, diff: null };
   }
@@ -718,6 +818,7 @@
   const genericCodeForGeometry = geometry => `generic.${geometry === "polyline" ? "line" : geometry}`;
 
   function importGeoJson(payload = {}, filename = "layer.geojson") {
+    geomFixReset();
     if (!payload || typeof payload !== "object" || Array.isArray(payload))
       throw new Error("Файл не содержит объект GeoJSON");
     const inputFeatures = payload.type === "FeatureCollection" ? payload.features
@@ -816,6 +917,7 @@
     }
     if (kind === "generic") notes.push(`«${member}»: тип не распознан — добавлен в слой «прочие»`);
     if (skipped) notes.push(`неподдерживаемых или повреждённых объектов пропущено: ${skipped}`);
+    notes.push(...geomFixNotes());
     const sourceDoc = `ГИС ОГД / GeoJSON, файл ${filename}`;
     const manifest = snapshot("gisogd", sourceDoc, features, { filename, payload });
     const prov = provenance(manifest);
@@ -934,6 +1036,7 @@
   }
 
   function importOsmExtent(payload = {}, sources = [], bbox = []) {
+    geomFixReset();
     if (!payload || !Array.isArray(payload.elements)) throw new Error("Overpass вернул некорректный ответ");
     const selected = new Set(sources.filter(source => EXTENT_SPECS[source]?.set));
     const groups = Object.fromEntries([...selected].map(source => [source, newExtentGroup(source)]));
@@ -989,7 +1092,8 @@
       group.count = group.features.length;
       group.features.forEach(feature => { feature.prov = { ...prov }; });
     });
-    return { groups: Object.values(groups), notes: skipped ? [`пропущено вырожденных геометрий: ${skipped}`] : [],
+    return { groups: Object.values(groups),
+      notes: [...(skipped ? [`пропущено вырожденных геометрий: ${skipped}`] : []), ...geomFixNotes()],
       snapshots: [manifest] };
   }
 
@@ -1021,6 +1125,7 @@
   };
 
   function importNspdExtent(payload = {}, source, bbox = []) {
+    geomFixReset();
     const spec = EXTENT_SPECS[source];
     if (!spec || !spec.categories || !Array.isArray(payload.features))
       throw new Error("НСПД вернула некорректный ответ");
@@ -1086,6 +1191,7 @@
         source_kind: "nspd", source_code: group.source_code, source_name: group.source_name });
     }
     if (skipped) result.notes.push(`повреждённых объектов НСПД пропущено: ${skipped}`);
+    result.notes.push(...geomFixNotes());
     return result;
   }
 
@@ -1137,16 +1243,32 @@
     ["virtual1965", "Сельскохозяйственная зона"]];
   const curatedLayer = (code, name, kind) => ({ code, name, kind,
     layer_id: `source.gisogd.${code}`, source_code: code, source_name: name });
+  // набор красных линий: слой портала + код ЛГР, который из него берут
+  const redlineLayer = (code, lineCode, name) => ({
+    ...curatedLayer(code, name, "redline"), line_code: lineCode });
+  // Наборы красных линий портала → код ЛГР, который в них запрашивают.
+  // Коды берутся из moscow_lgr.json: 1 — КЛ УДС, 2 — КЛ ТОП, 3 — КЛ ЛО,
+  // 4 — КЛ ОДМС. Линия несёт коды обеих своих сторон, поэтому без этой
+  // привязки набор УДС привозил и всё, что к нему примыкает.
+  const GISOGD_LAYER_LINE_CODE = { l1: 1, l2: 2, l3: 3, l4: 4 };
   const GISOGD_WEB_LAYERS = {
     "gisogd.func_zones": [curatedLayer("virtual1742", "Функциональные зоны", "zone")],
     "gisogd.func_zones_tinao": _TINAO_FZ.map(([code, name]) => curatedLayer(code, name, "zone")),
     "gisogd.szz": [["virtual1743", "СЗЗ установленная"], ["virtual1746", "СЗЗ ориентировочная"],
       ["virtual1745", "СЗЗ расчётная"]].map(([code, name]) => curatedLayer(code, name, "restrict")),
     "gisogd.vodookhr": [curatedLayer("virtual1747", "Водоохранная зона", "restrict")],
+    // Красные линии — четыре разных набора портала, каждый со своим кодом ЛГР.
+    // В каталоге они лежат в четырёх подпапках с длинными именами; здесь они
+    // рядом и названы так, как их называют в работе.
+    "gisogd.kl_uds": [redlineLayer("l1", 1, "Красные линии УДС (КЛ УДС)")],
+    "gisogd.kl_top": [redlineLayer("l2", 2, "Красные линии ТОП (КЛ ТОП)")],
+    "gisogd.kl_lo": [redlineLayer("l3", 3, "Красные линии линейных объектов (КЛ ЛО)")],
+    "gisogd.kl_odms": [redlineLayer("l4", 4, "Красные линии ОДМС (КЛ ОДМС)")],
   };
 
   // layer = {code, name, kind?, layer_id?}; payload — сырой GeoJSON слоя целиком
   function importGisogdExtent(payload = {}, layer = {}, bbox = []) {
+    geomFixReset();
     if (!payload || !Array.isArray(payload.features))
       throw new Error(`ГИС ОГД: слой ${layer.code} — не FeatureCollection`);
     const name = layer.name || layer.code || "";
@@ -1161,6 +1283,19 @@
                     title: layer.layer_id ? name : `ГИС ОГД: ${name}`,
                     layer_id: layerId, kind, features: [], fields: [], count: 0 };
     let skipped = 0;
+    // Каждая красная линия портала несёт СПИСОК кодов со знаками (linelineco:
+    // «1», «-1,18,29»): линия — граница сразу нескольких режимов, знак
+    // показывает сторону. Поэтому набор l1 («Границы УДС») кроме кода 1 везёт
+    // 18, 29, 45, 6 …, и раньше каждый код давал СВОЙ объект: пользователь
+    // просил красные линии УДС, а получал ещё природный комплекс, полосы
+    // отвода железных дорог и техзоны инженерных сетей.
+    // Правило: выбран набор — грузим ровно его код. l1 → КЛ УДС, l2 → КЛ ТОП,
+    // l3 → КЛ ЛО, l4 → КЛ ОДМС. Остальные коды объекта — это соседний режим по
+    // другую сторону линии, он приедет со своим набором.
+    const wantCode = layer.line_code != null ? Number(layer.line_code)
+      : GISOGD_LAYER_LINE_CODE[layer.code];
+    const redlineOnly = kind === "redline";
+    let dropped = 0;
     payload.features.forEach((f, i) => {
       const fb = geomBbox(f && f.geometry);
       if (!fb || !bboxHit(fb, bbox)) return;
@@ -1171,7 +1306,15 @@
       const key = gisogdKey(f.properties || {}, f, i);
       // LineCode из объекта важнее маршрута по имени слоя: на каждый код —
       // СВОЙ объект в СВОЙ слой со своим знаком; знак кода = сторона линии
-      const routes = lineCodeRoutes(f.properties || {});
+      const allRoutes = lineCodeRoutes(f.properties || {});
+      const routes = wantCode != null
+        ? allRoutes.filter(([code]) => code === wantCode)
+        : redlineOnly ? allRoutes.filter(([code]) => REDLINE_CODES.has(code)) : allRoutes;
+      // объект набора, в котором нет запрошенного кода (или ни одного кода
+      // красной линии) — чужая линия: природный комплекс, полоса отвода, техзона
+      if ((wantCode != null || redlineOnly) && allRoutes.length && !routes.length) {
+        dropped += 1; return;
+      }
       parts.forEach((part, pi) => {
         if (routes.length) {
           for (const [code, side, csid] of routes) {
@@ -1219,8 +1362,11 @@
                     source_code: layer.source_code || layer.code,
                     source_name: layer.source_name || name });
     }
-    return { groups: [group], notes: skipped ? [`пропущено повреждённых: ${skipped}`] : [],
-             snapshots: [manifest], layers };
+    const notes = [];
+    if (skipped) notes.push(`пропущено повреждённых: ${skipped}`);
+    if (dropped) notes.push(`линий другого назначения не загружено: ${dropped}`);
+    notes.push(...geomFixNotes());
+    return { groups: [group], notes, snapshots: [manifest], layers };
   }
 
   return { setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,

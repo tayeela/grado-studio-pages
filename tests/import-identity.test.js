@@ -54,7 +54,7 @@ assert.equal(mixed.layers.length, 2,
 assert.equal(new Set(mixed.features.map(feature => feature.layer_id)).size, 2);
 
 const curated = Object.values(core.GISOGD_WEB_LAYERS).flat();
-assert.equal(curated.length, 20);
+assert.equal(curated.length, 24);   // + четыре набора красных линий (l1…l4)
 assert.equal(new Set(curated.map(layer => layer.layer_id)).size, curated.length,
   "каждый кураторский слой портала должен иметь собственную идентичность");
 

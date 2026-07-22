@@ -1456,6 +1456,10 @@ const state = {
   xf: null,                       // { kind:'rotate'|'scale'|'mirror', phase:'base'|'act', pivot, orig, ref, val, p2 } — интерактивные преобразования
   hoverLayerId: null,             // ховер строки в панели «Слои» — подсветка объектов на холсте
   gridShow: true, gridSnap: true, osnap: true, gridMode: "auto",
+  // Совместная правка общих границ (см. isCoverageFeature). По умолчанию
+  // ВЫКЛЮЧЕНА: пока её не ждут, перемещение зоны утаскивает соседнюю за
+  // совпадающие вершины, и это читается как поломка, а не как помощь.
+  topoEdit: false,
   accessRadii: { on: false, r: 300 },        // радиусы доступности соцобъектов (визуальная помощь)
   layers: LAYER_BY_ID, styles: STYLES_V2,   // модель v2 (видимость — layer.visible)
   activeLayerId: null,            // куда чертят геом-инструменты (L2b: пусто до создания слоя)
@@ -1589,7 +1593,11 @@ function vertexAt(f, wx, wy) {
 // совпадающие с данной, двигаются вместе с ней — общая граница остаётся
 // общей, дырки и нахлёсты не возникают (инвариант coverage ядра).
 // Кто участвует — решает флаг слоя topology="coverage", не тип объекта.
+// Режим включается кнопкой «Общие границы» и по умолчанию выключен: границы,
+// зоны и ограничения помечены покрытием почти все, поэтому невыключаемое
+// поведение утаскивало соседний полигон при любом перемещении.
 function isCoverageFeature(f) {
+  if (!state.topoEdit) return false;
   const L = layerOf(f);
   return !!L && L.topology === "coverage";
 }
@@ -3811,6 +3819,7 @@ function restoreHistoryEntry(entry) {
     accessRadii: state.accessRadii,
     albumConfig: state.albumConfig,
     osnap: state.osnap,
+    topoEdit: state.topoEdit,
     gridSnap: state.gridSnap,
     basemapSource: basemap.source,
     exportStyle: exportStyleMode(),
@@ -5436,6 +5445,7 @@ const SHORTCUTS = [
   ["Вид и привязки", [
     ["F", "Вписать всё в экран"], ["колесо мыши", "Масштаб"],
     ["пробел + тянуть", "Сдвинуть холст"], ["X", "Привязка к объектам"], ["C", "Привязка к сетке"],
+    ["Y", "Общие границы: двигать соседние зоны вместе"],
   ]],
   ["История", [
     [modKeyLabel("Z"), "Отменить"], [modKeyLabel("Shift+Z"), "Вернуть"], ["?", "Эта справка"],
@@ -7616,6 +7626,7 @@ document.addEventListener("keydown", e => {
   }
   if (e.key === "?" || (e.shiftKey && e.code === "Slash")) { openShortcuts(); return; }
   if (e.code === "KeyX") { setOsnap(!state.osnap); return; }
+  if (e.code === "KeyY") { setTopoEdit(!state.topoEdit); return; }
   if (e.code === "KeyC" && !e.metaKey && !e.ctrlKey) { setGridSnap(!state.gridSnap); return; }
   if (e.code === "KeyF") { fitView(); return; }
   if (e.code === "KeyR") { rotateSelected(); return; }
@@ -7769,6 +7780,19 @@ function setOsnap(v) {
   updateSnapStatus();
   draw();
 }
+function setTopoEdit(v, quiet = false) {
+  state.topoEdit = !!v;
+  const button = document.getElementById("btn-topo");
+  if (button) {
+    button.classList.toggle("active", state.topoEdit);
+    button.setAttribute("aria-pressed", String(state.topoEdit));
+  }
+  if (!quiet)
+    toast(state.topoEdit
+      ? "Общие границы: вершины соседних зон двигаются вместе"
+      : "Общие границы выключены: объекты двигаются по отдельности");
+  draw();
+}
 function updateSnapStatus(hit = null) {
   const status = document.getElementById("st-snap");
   if (!status) return;
@@ -7797,6 +7821,7 @@ on("basemap-source", "change", e => {
   if (basemap.on && basemap.originLon == null) initBasemap().then(draw);
 });
 on("btn-snap", "click", () => setOsnap(!state.osnap));
+on("btn-topo", "click", () => setTopoEdit(!state.topoEdit));
 on("btn-zoom-in", "click", () => zoomBy(1.25));
 on("btn-zoom-out", "click", () => zoomBy(0.8));
 on("btn-zoom-fit", "click", fitView);
@@ -8436,6 +8461,7 @@ function normalizeRestoredState(payload) {
     albumConfig,
     accessRadii,
     osnap: restored.osnap !== false,
+    topoEdit: restored.topoEdit === true,
     gridSnap: restored.gridSnap !== false,
     name: typeof restored.name === "string" ? restored.name.slice(0, 240) : "Проект",
     density: numberInRange(restored.density, 0, 1000, 25),
@@ -8612,6 +8638,7 @@ function applyRestoredState(d) {
     state.albumConfig = d.albumConfig;
   }
   state.osnap = d.osnap !== false;
+  setTopoEdit(d.topoEdit === true, true);
   state.gridSnap = d.gridSnap !== false;
   const snapButton = document.getElementById("btn-snap");
   if (snapButton) {
