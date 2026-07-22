@@ -106,6 +106,10 @@ header{
 #stage{flex:1 1 0;position:relative;min-width:0;min-height:0;overflow:hidden;container-type:inline-size}
 #scene{width:100%;height:100%;display:block;background:var(--canvas-bg)}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;background:var(--canvas-bg)}
+/* Холст берёт фокус с клавиатуры (Tab, обзор объектов, горячие клавиши), но
+   единственный не показывал этого. Рамка внутренняя: снаружи её съели бы
+   панели, а рядом с краем чертежа она читается и так. */
+#cv:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
 #scene .pick{cursor:pointer}
 .start-guide{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-54%);
   width:min(430px,calc(100% - 48px));padding:24px;border:1px solid var(--glass-border);
@@ -180,6 +184,8 @@ header{
   background:transparent;transition:background var(--dur-1) var(--ease-out);touch-action:none;user-select:none;-webkit-user-select:none}
 #panel-resizer::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;background:var(--hairline)}
 #panel-resizer:hover{background:var(--accent-weak)}
+/* Границу панели двигают и стрелками — значит, она обязана быть видна с клавиатуры */
+#panel-resizer:focus-visible{outline:2px solid var(--accent);outline-offset:-1px;background:var(--accent-weak)}
 #panel-resizer:hover::after{background:var(--accent-line);width:2px;left:2.5px}
 body.panel-resizing,body.panel-resizing *{cursor:col-resize!important;user-select:none!important;-webkit-user-select:none!important}
 body.panel-resizing iframe{pointer-events:none!important}
