@@ -147,11 +147,15 @@
     trigger?.setAttribute("aria-expanded", "true");
     q.value = "";
     render("");
+    q.setAttribute("aria-expanded", "true");
     q.focus();
   }
   function close() {
     cmdk.hidden = true;
     trigger?.setAttribute("aria-expanded", "false");
+    // combobox закрыт — список больше не развёрнут. В разметке стояло статичное
+    // aria-expanded="true", и скринридер сообщал о раскрытом списке всегда.
+    q.setAttribute("aria-expanded", "false");
     q.removeAttribute("aria-activedescendant");
     if (previousFocus && previousFocus.isConnected) previousFocus.focus();
   }
@@ -162,6 +166,11 @@
     if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(flat.length - 1, sel + 1); hi(); scrollSel(); }
     else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); hi(); scrollSel(); }
     else if (e.key === "Enter") { e.preventDefault(); run(sel); }
+    // Палитра объявлена aria-modal="true", то есть фон для скринридера скрыт.
+    // Без перехвата Tab фокус уходил именно туда — незрячий пользователь
+    // «проваливался» в невидимое для него окружение (WCAG 2.4.3). Фокус живёт
+    // в поле ввода (паттерн combobox), поэтому просто держим его здесь.
+    else if (e.key === "Tab") { e.preventDefault(); }
   });
   cmdk.addEventListener("click", e => { if (e.target === cmdk) close(); });
   addEventListener("keydown", e => {

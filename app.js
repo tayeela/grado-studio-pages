@@ -4581,7 +4581,38 @@ function renderGroupProps(el, ids) {
   bindTransformControls();
 }
 
+// Озвучивание выделения: холст — canvas, для скринридера он немой, и смена
+// выбранного объекта не сообщалась никак. Пишем краткое описание в живую
+// область; повтор того же текста подавляем, иначе AT тараторит на каждый кадр.
+let _srLastSelection = "";
+function announceSelection() {
+  const node = document.getElementById("sr-selection");
+  if (!node) return;
+  const ids = selectionIds();
+  let text;
+  if (!ids.length) text = "";
+  else if (ids.length > 1) text = `Выбрано объектов: ${ids.length}`;
+  else {
+    const f = selectedFeature();
+    if (!f) text = "";
+    else {
+      const layer = layerOf(f);
+      // слой пользователь узнаёт лучше внутреннего kind: «Здание», «Граница
+      // территории» — это и есть названия слоёв
+      const parts = [layer ? `объект слоя «${layer.title}»` : "объект"];
+      if (f.ring) parts.push(`площадь ${fmtAreaHa(featureArea(f))}`);
+      else if (f.line) parts.push(`длина ${fmtLen(lineLen(f.line))}`);
+      else if (f.circle) parts.push(`окружность радиусом ${fmtLen(f.circle.r)}`);
+      else if (f.arc) parts.push(`дуга радиусом ${fmtLen(f.arc.r)}`);
+      text = `Выбран ${parts.join(", ")}`;
+    }
+  }
+  if (text === _srLastSelection) return;
+  _srLastSelection = text;
+  node.textContent = text;
+}
 function renderProps() {
+  announceSelection();
   const el = document.getElementById("props-body");
   const selIds = selectionIds();
   if (selIds.length > 1) { renderGroupProps(el, selIds); return; }
@@ -7330,11 +7361,24 @@ function updateLayerStatus() {
     const col = st.stroke || st.fill || cvColor("boundary", "#8a8a8a");
     chip.className = "cv-activelayer";
     chip.onclick = null;
+    // в неинтерактивном состоянии чип — обычная подпись, из табуляции убираем
+    chip.removeAttribute("role"); chip.removeAttribute("tabindex");
+    chip.removeAttribute("aria-label"); chip.onkeydown = null;
     chip.innerHTML = `<span class="al-dot" style="background:${escHtml(col)}"></span>` +
                      `<span class="al-cap">черчу в:</span>&nbsp;${escHtml(L.title)}`;
   } else {
     chip.className = "cv-activelayer empty";
+    // Пустое состояние делает чип КНОПКОЙ (клик создаёт слой), но он оставался
+    // обычным div: с клавиатуры и из скринридера действие было недостижимо.
     chip.onclick = () => openNewLayerDialog();
+    chip.setAttribute("role", "button");
+    chip.setAttribute("tabindex", "0");
+    chip.setAttribute("aria-label", "Нет активного слоя — создать слой");
+    chip.onkeydown = event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openNewLayerDialog();
+    };
     chip.innerHTML = `<span class="al-dot" style="background:var(--warning)"></span>` +
                      `нет активного слоя — создайте (+)`;
   }
