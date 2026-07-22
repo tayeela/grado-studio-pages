@@ -53,6 +53,7 @@ header{
 .kbar kbd{font-family:var(--font-mono);font-size:var(--fs-10);background:var(--glass);border:1px solid var(--hairline);
   border-radius:5px;padding:1px 5px;color:var(--text-2)}
 .iconbtn{
+  flex:0 0 auto;   /* в тесной шапке кнопка сжималась до 17px — иконка упиралась в края */
   width:32px;height:32px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--text-2);
   transition:background var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out);
 }
@@ -60,7 +61,7 @@ header{
 .iconbtn:active{transform:scale(.97)}
 .hsep{width:1px;height:22px;background:var(--hairline-2);margin:0 2px}
 .btn{
-  height:32px;padding:0 13px;border-radius:var(--r-sm);font-size:var(--fs-12);font-weight:500;
+  flex:0 0 auto;height:32px;padding:0 13px;border-radius:var(--r-sm);font-size:var(--fs-12);font-weight:500;
   color:var(--text-2);background:var(--field-bg);border:1px solid var(--field-border);
   display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
   transition:background var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out);
@@ -111,25 +112,16 @@ header{
    панели, а рядом с краем чертежа она читается и так. */
 #cv:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
 #scene .pick{cursor:pointer}
-.start-guide{position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-54%);
-  width:min(430px,calc(100% - 48px));padding:24px;border:1px solid var(--glass-border);
-  border-radius:var(--r-lg);background:color-mix(in srgb,var(--glass-strong) 96%,var(--panel));
-  backdrop-filter:var(--glass-blur);box-shadow:var(--shadow-lg),var(--glass-hi)}
-.start-guide-kicker{font-size:var(--fs-10);line-height:1;text-transform:uppercase;letter-spacing:.08em;
-  color:var(--accent);font-weight:650;margin-bottom:8px}
-.start-guide h1{font-size:19px;line-height:1.22;letter-spacing:-.02em;margin:0 0 8px}
-.start-guide>p{font-size:var(--fs-12);line-height:1.5;color:var(--muted);max-width:38em}
-.start-guide ol{list-style:none;display:grid;gap:10px;margin:18px 0;counter-reset:start-step}
-.start-guide li{position:relative;display:flex;flex-direction:column;gap:2px;padding-left:28px;counter-increment:start-step}
-.start-guide li::before{content:counter(start-step);position:absolute;left:0;top:0;width:19px;height:19px;
-  display:grid;place-items:center;border-radius:6px;background:var(--accent-weak);color:var(--accent);
-  font-family:var(--font-mono);font-size:var(--fs-9);font-weight:650}
-.start-guide li b{font-size:var(--fs-12);font-weight:650}
-.start-guide li span{font-size:var(--fs-11);line-height:1.4;color:var(--muted)}
-.start-guide-actions{display:flex;gap:8px;align-items:center;margin-top:4px}
-.start-guide-actions .btn{justify-content:center}
-.start-guide>small{display:block;margin-top:12px;color:var(--faint);font-size:var(--fs-10)}
-#start-guide-basemap{margin-top:6px}
+/* Пустой холст: одна строка по центру, для мыши прозрачна — чертить можно
+   прямо сквозь неё. Прежний экран-гид перекрывал чертёж и вёл через границу
+   территории, хотя чертить можно с любого слоя. */
+.cv-empty{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;
+  pointer-events:none;color:var(--muted);font-size:var(--fs-12);max-width:min(420px,72%)}
+.cv-empty[hidden]{display:none}
+.cv-empty b{font-size:var(--fs-13);font-weight:600;color:var(--text-2)}
+.cv-empty span{line-height:1.5}
+.cv-empty .linkbtn{pointer-events:auto}
 /* ссылка-действие внутри подсказки: не кнопка по виду, но кнопка по сути */
 .linkbtn{padding:0;border:0;background:none;color:var(--accent);font:inherit;font-size:inherit;
   text-decoration:underline;text-underline-offset:2px;cursor:pointer}
@@ -185,6 +177,18 @@ header{
 .scalebar .bar{width:64px;height:6px;border:1px solid var(--text-2);border-top:none;position:relative}
 .scalebar .bar::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--text-2)}
 
+/* ==== РЕСАЙЗЕРЫ ПАНЕЛЕЙ ====
+   Ширину тянули только у правой панели: левая была намертво 320px, хотя именно
+   в ней списки слоёв с длинными названиями выгрузок портала. Оба разделителя
+   ведут себя одинаково. */
+#layers-resizer{flex:0 0 auto;width:7px;cursor:col-resize;z-index:var(--z-panel);position:relative;
+  background:transparent;transition:background var(--dur-1) var(--ease-out);touch-action:none;user-select:none;-webkit-user-select:none}
+#layers-resizer::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;background:var(--hairline)}
+#layers-resizer:hover{background:var(--accent-weak)}
+#layers-resizer:hover::after{background:var(--accent-line);width:2px;left:2.5px}
+#layers-resizer:focus-visible{outline:2px solid var(--accent);outline-offset:-1px;background:var(--accent-weak)}
+body.layers-panel-hidden #layers-resizer{display:none}
+
 /* ==== РЕСАЙЗЕР ПРАВОЙ ПАНЕЛИ (движок тянет ширину, 300–640) ==== */
 #panel-resizer{flex:0 0 auto;width:7px;cursor:col-resize;z-index:var(--z-panel);position:relative;
   background:transparent;transition:background var(--dur-1) var(--ease-out);touch-action:none;user-select:none;-webkit-user-select:none}
@@ -228,7 +232,7 @@ body.panel-hidden #panel,body.panel-hidden #panel-resizer{display:none}
 
 .card{background:var(--panel);border:1px solid var(--hairline);border-radius:var(--r-md);box-shadow:var(--shadow-sm);overflow:hidden;flex:0 0 auto}
 .card-h{display:flex;align-items:center;gap:8px;padding:0 var(--sp-3);min-height:40px;font-size:var(--fs-12);font-weight:600;color:var(--text);user-select:none;transition:background var(--dur-1) var(--ease-out)}
-.card-toggle{display:flex;align-items:center;gap:8px;align-self:stretch;flex:1;min-width:0;text-align:left;color:inherit;font:inherit}
+.card-toggle{display:flex;align-items:center;gap:8px;padding-inline:10px;align-self:stretch;flex:1;min-width:0;text-align:left;color:inherit;font:inherit}
 .card-h:hover{background:var(--field-bg)}
 .card-h:active{background:var(--glass)}
 .card-h:hover .cc{color:var(--text-2)}
@@ -409,10 +413,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     background:var(--panel);backdrop-filter:none;-webkit-backdrop-filter:none;
     box-shadow:var(--shadow-lg),-1px 0 0 var(--hairline);transition:transform var(--dur-2) var(--ease-out),visibility var(--dur-2) var(--ease-out)}
   body.panel-hidden #panel{display:flex;transform:translateX(102%);visibility:hidden;pointer-events:none}
-  body:not(.panel-hidden) .start-guide{left:12px;right:calc(min(340px,calc(100vw - 72px)) + 12px);
     width:auto;transform:translateY(-54%)}
-  body:not(.panel-hidden) .start-guide-actions{flex-direction:column;align-items:stretch}
-  body:not(.panel-hidden) .start-guide-actions .btn{width:100%}
   .phbtn.panel-close{display:grid}
   .statusbar{gap:var(--sp-3);padding-inline:var(--sp-3)}
   #st-coords,#st-grid,.cv-scale{display:none!important}
@@ -425,9 +426,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   #btn-album{padding-inline:10px}
   #toolbar{width:64px}
   .tool{width:52px}
-  .start-guide{width:min(410px,calc(100% - 24px));padding:20px}
-  .start-guide-actions{flex-direction:column;align-items:stretch}
-  .start-guide-actions .btn{width:100%}
 }
 @media (max-height:900px){
   #toolbar:not(.expanded) .advanced-tool{display:none}

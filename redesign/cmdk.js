@@ -80,7 +80,7 @@
       { t: "Новый слой", run: () => click("btn-new-layer") },
       { t: "Оформление активного слоя…", run: styleActive, available: () => has("activeLayer") && !!activeLayer() },
       { t: "Библиотека знаков", run: () => click("btn-style-lib") },
-      { t: "Типы слоёв", run: () => click("btn-manage-kinds") },
+      { t: "Свои типы слоёв", run: () => click("btn-manage-kinds") },
       { t: "Варианты концепции", run: () => click("btn-variants") },
     ]},
     { sec: "Вид и проект", items: [

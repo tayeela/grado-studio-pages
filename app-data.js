@@ -78,12 +78,19 @@ function ogdCountOf(n) {
   return n.layers.length + [...n.kids.values()].reduce((s, k) => s + ogdCountOf(k), 0);
 }
 // depth: отступ обычным padding'ом (направляющие линии рвутся на стыках строк).
-function ogdTreeHtml(node, gi, saved, disabled, open, depth = 0) {
+// openPaths — раскрытые папки каталога. Окно перерисовывается на каждый выбор
+// слоя, и без этого дерево схлопывалось целиком: выбрал один слой — ищи папку
+// заново, а из одного раздела обычно нужно сразу несколько слоёв.
+function ogdTreeHtml(node, gi, saved, disabled, open, depth = 0, path = "", openPaths = null) {
   const p = 12 + depth * 16;
-  const folders = [...node.kids].map(([name, kid]) => `<details class="ogdc-folder"${open ? " open" : ""}>
+  const folders = [...node.kids].map(([name, kid]) => {
+    const kidPath = path ? `${path} / ${name}` : name;
+    const isOpen = open || (openPaths && openPaths.has(kidPath));
+    return `<details class="ogdc-folder" data-path="${escHtml(kidPath)}"${isOpen ? " open" : ""}>
     <summary style="padding-left:${p}px"><span class="ogdc-tw">▶</span><span class="ogdc-fname">${escHtml(name)}</span>
       <span class="ogdc-fcount">${ogdCountOf(kid)}</span></summary>
-    ${ogdTreeHtml(kid, gi, saved, disabled, open, depth + 1)}</details>`).join("");
+    ${ogdTreeHtml(kid, gi, saved, disabled, open, depth + 1, kidPath, openPaths)}</details>`;
+  }).join("");
   const rows = node.layers.map(l => {
     const src = `gisogd:${l.code}`;
     const on = !!saved[src] && !disabled;
@@ -195,6 +202,7 @@ async function openDataFetch() {
   let query = "", activeTopic = "";
   let ogdCatalog = [], ogdError = null, ogdLoading = true, importing = false;
   let cacheLayers = [], cacheTtlDays = 7, cacheOpen = false;
+  const ogdOpenPaths = new Set();   // раскрытые папки каталога переживают перерисовку
   let catalogController = null, loadController = null, loadMessage = "";
   const loadProgress = new Map();
   const groupUi = [
@@ -222,6 +230,15 @@ async function openDataFetch() {
   </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener("click", event => event.stopPropagation());
+  // <details> не всплывает toggle — слушаем на фазе перехвата
+  overlay.addEventListener("toggle", event => {
+    const folder = event.target;
+    if (!folder.matches?.(".ogdc-folder")) return;
+    const path = folder.dataset.path;
+    if (!path) return;
+    if (folder.open) ogdOpenPaths.add(path); else ogdOpenPaths.delete(path);
+  }, true);
+
   const close = () => {
     catalogController?.abort();
     loadController?.abort();
@@ -337,7 +354,7 @@ async function openDataFetch() {
       ${topics.map(([topic, count]) => `<button class="${activeTopic === topic ? "active" : ""}" data-topic="${escHtml(topic)}">${escHtml(topic)} <span>${count}</span></button>`).join("")}</div>
       ${quickRows}${cacheHtml()}<div class="data-catalog-head"><span>Каталог портала</span><b>${catalog.length}</b></div>
       <div class="ogdc-list ogd-tree">${catalog.length
-        ? ogdTreeHtml(ogdBuildTree(catalog), gi, selectedMap, false, !!low || !!activeTopic)
+        ? ogdTreeHtml(ogdBuildTree(catalog), gi, selectedMap, false, !!low || !!activeTopic, 0, "", ogdOpenPaths)
         : `<div class="data-empty">Ничего не найдено</div>`}</div>`;
   }
 

@@ -148,7 +148,7 @@ body.layers-panel-hidden #layers-panel{margin-left:calc(var(--layer-panel-width)
 .layers-panel-head{height:48px;display:flex;align-items:center;gap:2px;padding:0 12px;border-bottom:1px solid var(--hairline)}
 .layers-panel-head .title{flex:1;font-size:var(--fs-13);font-weight:700;letter-spacing:.01em}
 .layers-panel-head .lcount{margin-left:5px;color:var(--muted);font-family:var(--font-mono);font-size:var(--fs-10);font-weight:500}
-.layers-panel-head .h3-btn{width:32px;height:32px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted)}
+.layers-panel-head .h3-btn{flex:0 0 auto;width:32px;height:32px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted)}
 .layers-panel-head .h3-btn:hover{background:var(--field-bg);color:var(--text)}
 .layers-panel-head .h3-btn .ic{width:17px;height:17px}
 .layer-search{height:36px;margin:10px 12px;display:flex;align-items:center;gap:7px;padding:0 9px;background:var(--field-bg);border:1px solid var(--field-border);border-radius:var(--r-sm);color:var(--muted)}
