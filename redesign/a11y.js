@@ -314,6 +314,22 @@
       return;
     }
 
+    // Поповеры панели («Подложка», «Сетка и привязки», «Источники») закрывались
+    // только кликом снаружи: Escape проваливался в глобальный обработчик и
+    // снимал выделение на холсте вместо закрытия окна, а фокус оставался внутри
+    // уже закрытого поповера. Ведём себя как немодальный диалог: закрываем и
+    // возвращаем фокус на кнопку-триггер.
+    const pop = document.activeElement?.closest?.('.pop');
+    if (event.key === 'Escape' && pop && visible(pop)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pop.hidden = true;
+      const trigger = document.querySelector(`[data-pop="${pop.id}"]`);
+      syncPopupState();
+      trigger?.focus();
+      return;
+    }
+
     const menu = document.activeElement?.closest?.('.menu, .ctx-menu');
     if (menu && visible(menu)) {
       if (event.key === 'ArrowDown') { event.preventDefault(); moveMenuFocus(menu, 1); }
