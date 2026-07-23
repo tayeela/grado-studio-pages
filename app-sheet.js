@@ -342,29 +342,48 @@
     const fontBytes = await sheetFontBytes();
     const doc = PDF.createDocument();
     doc.addFont("SheetFont", fontBytes);
-    const view = sheetView(sheet);
+    const list = options.sheets && options.sheets.length ? options.sheets : [sheet];
+    const rasters = [];
+    for (let i = 0; i < list.length; i++) {
+      const current = list[i];
+      options.onSheet?.({ index: i, total: list.length, sheet: current });
+      const raster = await addSheetPage(doc, PDF, current, {
+        ...options,
+        onRaster: options.onRaster
+          ? progress => options.onRaster({ ...progress, index: i, total: list.length })
+          : null,
+      });
+      rasters.push(raster);
+    }
+    return { bytes: doc.build(), raster: rasters[0], rasters, pages: list.length };
+  }
+
+  // Один лист альбома — страница документа. Шрифт и растры общие для всего
+  // файла, поэтому альбом из десяти листов весит не в десять раз больше.
+  async function addSheetPage(doc, PDF, current, options) {
+    const view = sheetView(current);
     const page = doc.addPage(view.widthMm, view.heightMm);
     const context = PDF.createContext(doc, page, { scale: 96 / 72, fontName: "SheetFont" });
     // Подложка кладётся ПЕРВОЙ: вектор чертежа обязан лежать поверх снимка.
-    const raster = await sheetRaster(doc, context, view, options);
+    const raster = await sheetRaster(doc, context, view, options, current);
     renderSceneTo(context, view.width, view.height, { k: view.k, tx: view.tx, ty: view.ty });
-    drawSheetColumn(context, sheet, view);
+    drawSheetColumn(context, current, view);
     if (raster) drawAttribution(context, view, raster);
-    return { bytes: doc.build(), raster };
+    return raster;
   }
 
   // Растр вкладывается ровно в чертёжную полосу листа: рамка листа и есть его
   // охват, поэтому снимок не нужно ни двигать, ни подрезать на месте.
-  async function sheetRaster(doc, context, view, options) {
-    const config = sheet.raster || {};
+  async function sheetRaster(doc, context, view, options, current = sheet) {
+    const config = current.raster || {};
     if (!config.on || !root.buildSheetRaster) return null;
     if (typeof localToLonLat !== "function") return null;
-    const [x0, y0, x1, y1] = sheetExtent(sheet);
+    const [x0, y0, x1, y1] = sheetExtent(current);
     const sw = localToLonLat(x0, y0), ne = localToLonLat(x1, y1);
     const bbox = [Math.min(sw[0], ne[0]), Math.min(sw[1], ne[1]),
                   Math.max(sw[0], ne[0]), Math.max(sw[1], ne[1])];
     const built = await root.buildSheetRaster({ source: config.source || "esri", bbox,
-      scale: sheet.scale, dpi: Number(config.dpi) || 300,
+      scale: current.scale, dpi: Number(config.dpi) || 300,
       signal: options.signal, onProgress: options.onRaster });
     const image = doc.addJpeg(built.bytes, built.width, built.height);
     context.drawImage({ __pdfImage: image }, 0, 0, view.drawWidth, view.height);
@@ -390,16 +409,97 @@
     context.restore();
   }
 
-  // Пока свой шрифт не заведён, лист идёт на Onest из репозитория: он лежит
-  // рядом и лицензия позволяет встраивание. Century Gothic человек положит
-  // отдельно — тогда подставится он.
+  // ---------- шрифт листа ----------
+  // Century Gothic — шрифт Monotype: раздавать его файл с сайта нельзя, а
+  // встраивать в СВОЙ выпущенный PDF можно. Поэтому человек кладёт файл один
+  // раз со своей машины, тот остаётся в браузере (IndexedDB) и наружу не
+  // уходит. Пока файла нет, лист идёт на Onest из репозитория: он лежит рядом
+  // и его лицензия встраивание разрешает.
+  const FONT_DB = "grado-sheet-font";
+  const FALLBACK_FONT = { name: "Onest", url: "./fonts/Onest-Variable.ttf" };
   let fontCache = null;
-  async function sheetFontBytes() {
+
+  function fontStore(mode) {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(FONT_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("fonts");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction("fonts", mode);
+        resolve({ store: tx.objectStore("fonts"), done: new Promise(ok => { tx.oncomplete = ok; }) });
+      };
+    });
+  }
+
+  async function savedFont() {
+    if (typeof indexedDB === "undefined") return null;
+    try {
+      const { store } = await fontStore("readonly");
+      return await new Promise((resolve, reject) => {
+        const request = store.get("sheet");
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) { return null; }
+  }
+
+  async function storeFont(name, bytes) {
+    const { store, done } = await fontStore("readwrite");
+    store.put({ name, bytes, at: Date.now() }, "sheet");
+    await done;
+    fontCache = { name, bytes };
+  }
+
+  async function forgetFont() {
+    const { store, done } = await fontStore("readwrite");
+    store.delete("sheet");
+    await done;
+    fontCache = null;
+  }
+
+  // Файл шрифта проверяем СРАЗУ при выборе: разбираем таблицы и убеждаемся, что
+  // в нём есть кириллица. Иначе человек узнал бы о подмене только по готовому
+  // листу с пустыми прямоугольниками вместо букв.
+  function checkFont(bytes) {
+    const PDF = root.GRADO_PDF;
+    if (!PDF) throw new Error("модуль PDF не загружен");
+    const font = PDF.readFont(bytes);
+    const missing = [];
+    for (const char of "АБВЯабвя№")
+      if (!font.glyphOf(char.codePointAt(0))) missing.push(char);
+    if (missing.length)
+      throw new Error(`в шрифте нет кириллицы (${missing.join("")}) — лист им не набрать`);
+    return font;
+  }
+
+  async function sheetFont() {
     if (fontCache) return fontCache;
-    const response = await fetch("./fonts/Onest-Variable.ttf");
+    const saved = await savedFont();
+    if (saved && saved.bytes) {
+      fontCache = { name: saved.name, bytes: new Uint8Array(saved.bytes) };
+      return fontCache;
+    }
+    const response = await fetch(FALLBACK_FONT.url);
     if (!response.ok) throw new Error("не найден шрифт листа");
-    fontCache = new Uint8Array(await response.arrayBuffer());
+    fontCache = { name: FALLBACK_FONT.name, bytes: new Uint8Array(await response.arrayBuffer()) };
     return fontCache;
+  }
+  root.sheetFontInfo = async () => {
+    const saved = await savedFont();
+    return saved ? { name: saved.name, own: true, size: saved.bytes.byteLength || saved.bytes.length }
+      : { name: FALLBACK_FONT.name, own: false };
+  };
+  root.setSheetFont = async file => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    checkFont(bytes);
+    await storeFont(file.name.replace(/\.(ttf|otf)$/i, ""), bytes);
+    return fontCache;
+  };
+  root.clearSheetFont = forgetFont;
+
+  async function sheetFontBytes() {
+    return (await sheetFont()).bytes;
   }
 
   function saveFile(name, bytes) {
@@ -457,10 +557,20 @@
           </div>
           <div class="sheet-raster-note" id="sheet-raster-note"></div>
         </div>
+        <div class="sheet-font" id="sheet-font-row">
+          <span id="sheet-font-name">Шрифт листа: проверяем…</span>
+          <span class="spacer"></span>
+          <label class="sheet-font-pick">Выбрать файл<input type="file" id="sheet-font-file" accept=".ttf,.otf" hidden></label>
+          <button type="button" id="sheet-font-clear" hidden>Убрать</button>
+        </div>
+        <div class="sheet-album" id="sheet-album"></div>
         <div class="sheet-summary" id="sheet-summary" role="status" aria-live="polite"></div>
       </div>
-      <div class="modal-actions"><button type="button" id="sheet-center">По центру вида</button><span class="spacer"></span>
-        <button type="button" id="sheet-cancel">Закрыть</button><button type="button" id="sheet-run" class="primary">Выпустить лист</button></div>
+      <div class="modal-actions"><button type="button" id="sheet-center">По центру вида</button>
+        <button type="button" id="sheet-album-add">Добавить в альбом</button><span class="spacer"></span>
+        <button type="button" id="sheet-cancel">Закрыть</button>
+        <button type="button" id="sheet-album-run">Выпустить альбом</button>
+        <button type="button" id="sheet-run" class="primary">Выпустить лист</button></div>
     </div>`;
     document.body.appendChild(overlay);
 
@@ -522,6 +632,111 @@
       sheet.cx = wx; sheet.cy = wy;
       save(); draw();
     });
+    const showFont = async () => {
+      const info = await root.sheetFontInfo();
+      $("sheet-font-name").textContent = info.own
+        ? `Шрифт листа: ${info.name} (ваш файл, ${Math.round(info.size / 1024)} КБ)`
+        : `Шрифт листа: ${info.name} — запасной. Положите свой файл, чтобы лист набирался им.`;
+      $("sheet-font-clear").hidden = !info.own;
+    };
+    showFont();
+    $("sheet-font-file").addEventListener("change", async event => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      try {
+        await root.setSheetFont(file);
+        summary.classList.remove("error");
+        await showFont();
+      } catch (error) {
+        summary.classList.add("error");
+        summary.innerHTML = `<b>Файл шрифта не подошёл.</b><span>${escHtml(String(error.message || error))}</span>`;
+      }
+      event.target.value = "";
+    });
+    $("sheet-font-clear").addEventListener("click", async () => {
+      await root.clearSheetFont();
+      await showFont();
+    });
+
+    let album = loadAlbum();
+    const renderAlbum = () => {
+      const box = $("sheet-album");
+      if (!album.length) {
+        box.innerHTML = `<span class="muted">Альбом пуст. «Добавить в альбом» запомнит текущую рамку — ` +
+          `формат, масштаб, охват, заголовок и номер.</span>`;
+        $("sheet-album-run").disabled = true;
+        return;
+      }
+      $("sheet-album-run").disabled = false;
+      box.innerHTML = album.map((item, index) =>
+        `<div class="sheet-album-row">
+          <span class="sheet-album-no">${escHtml(item.column && item.column.number || index + 1)}</span>
+          <span class="sheet-album-title">${escHtml(albumTitle(item, index))}</span>
+          <span class="sheet-album-meta">${escHtml(item.format)} 1:${item.scale.toLocaleString("ru-RU")}</span>
+          <button type="button" data-album-open="${index}" title="Показать эту рамку на чертеже">Показать</button>
+          <button type="button" data-album-drop="${index}" title="Убрать лист из альбома">×</button>
+        </div>`).join("");
+      box.querySelectorAll("[data-album-open]").forEach(button =>
+        button.addEventListener("click", () => {
+          const item = album[Number(button.dataset.albumOpen)];
+          sheet = JSON.parse(JSON.stringify(item));
+          save();
+          overlay.remove();
+          openSheetDialog();
+        }));
+      box.querySelectorAll("[data-album-drop]").forEach(button =>
+        button.addEventListener("click", () => {
+          album.splice(Number(button.dataset.albumDrop), 1);
+          saveAlbum(album);
+          renderAlbum();
+        }));
+    };
+
+    $("sheet-album-add").addEventListener("click", () => {
+      update();
+      const copy = JSON.parse(JSON.stringify(sheet));
+      // Номер по умолчанию — место в альбоме. Ручной номер уважаем, но
+      // повторяться он не может: два листа с одним номером — это брак выпуска.
+      const taken = new Set(album.map(item => String(item.column && item.column.number || "")));
+      if (!copy.column.number || taken.has(String(copy.column.number))) {
+        let next = album.length + 1;
+        while (taken.has(String(next))) next += 1;
+        copy.column.number = String(next);
+      }
+      album.push(copy);
+      saveAlbum(album);
+      renderAlbum();
+      summary.classList.remove("error");
+      summary.innerHTML = `<b>Лист добавлен в альбом.</b><span>всего листов: ${album.length}</span>`;
+    });
+
+    $("sheet-album-run").addEventListener("click", async () => {
+      if (!album.length) return;
+      const button = $("sheet-album-run");
+      button.disabled = true;
+      try {
+        const { bytes, pages } = await buildSheetPdf({
+          sheets: album,
+          onSheet: ({ index, total }) => {
+            summary.innerHTML = `<b>Собираем альбом…</b><span>лист ${index + 1} из ${total}</span>`;
+          },
+          onRaster: ({ done, total, index }) => {
+            summary.innerHTML = `<b>Лист ${index + 1}: подложка…</b><span>${done} из ${total} тайлов</span>`;
+          },
+        });
+        const name = (document.getElementById("project-name")?.value || "альбом").trim();
+        saveFile(`${name} · альбом ${pages} л.pdf`, bytes);
+        summary.classList.remove("error");
+        summary.innerHTML = `<b>Готово: ${(bytes.length / 1024 / 1024).toFixed(1)} МБ</b>` +
+          `<span>${ruCount(pages, "лист", "листа", "листов")} одним файлом</span>`;
+      } catch (error) {
+        summary.classList.add("error");
+        summary.innerHTML = `<b>Не удалось собрать альбом.</b><span>${escHtml(String(error.message || error)).slice(0, 160)}</span>`;
+      }
+      button.disabled = false;
+    });
+    renderAlbum();
+
     $("sheet-run").addEventListener("click", async () => {
       const button = $("sheet-run");
       button.disabled = true;
@@ -546,6 +761,27 @@
       button.disabled = false;
     });
     update();
+  }
+
+  // ---------- альбом ----------
+  // Лист альбома — это сохранённая рамка со своим заголовком и номером.
+  // Хранится рядом с рамкой (состояние вида): в проект альбом не пишется,
+  // потому что это оформление выпуска, а не данные чертежа.
+  const ALBUM_KEY = "grado-sheet-album";
+  const loadAlbum = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ALBUM_KEY) || "[]");
+      return Array.isArray(saved) ? saved : [];
+    } catch (error) { return []; }
+  };
+  const saveAlbum = list => {
+    try { localStorage.setItem(ALBUM_KEY, JSON.stringify(list)); } catch (error) {}
+  };
+  root.sheetAlbum = loadAlbum;
+
+  function albumTitle(item, index) {
+    const title = (item.column && item.column.title || "").split("\n")[0].trim();
+    return title || `Лист ${item.column && item.column.number || index + 1}`;
   }
 
   root.openSheetDialog = openSheetDialog;
