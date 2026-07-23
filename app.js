@@ -5804,6 +5804,7 @@ function openLayerMenu(layer, x, y) {
   const items = [
     ["Сделать активным", () => setActiveLayer(layer.id)],
     ["Таблица атрибутов…", () => openAttributeTable(layer)],
+    ["Присоединить таблицу…", () => window.openJoinTable && window.openJoinTable(layer)],
     ["Оформление слоя…", () => openLayerStyle(layer)],
     ["Приблизить к слою", () => zoomToLayer(layer.id)],
     ...(displayIndex > 0 ? [["Переместить выше", () =>
