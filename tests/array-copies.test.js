@@ -76,7 +76,9 @@ const placements = vm.runInContext("arrayPlacements", context);
   assert.match(cmdk, /Массив копий…/, "и в палитре");
   assert.match(app, /id="ar-cx"/, "центр полярного задаётся полями — вокруг себя крутить бессмысленно");
   assert.match(app, /arrayDrawOverlay\(ctx\);/, "предпросмотр рисуется поверх чертежа");
-  assert.match(app, /"btn-simplify", "btn-array"\]/, "кнопка гаснет в пустом проекте");
+  assert.match(app, /"btn-simplify", "btn-array", "btn-find"\]/, "кнопка гаснет в пустом проекте");
+  assert.match(app, /totalPlanned > 1000/,
+    "предел числа копий: сетка 50×50 на пачке объектов не должна вешать вкладку");
   assert.match(app, /props: cloneVariantValue\(f\.props \|\| \{\}\)/,
     "атрибуты исходного объекта едут в копии");
 }

@@ -2536,7 +2536,17 @@ function handleTrimExtendClick(wx, wy) {
     draw();
     renderProps();
   } else {
-    toast("Нет пересечения с границей рядом с этой точкой", "warn");
+    // клик дальше допуска от концов — совсем другая беда, чем отсутствие
+    // пересечения: без различия пользователь ищет несуществующую проблему
+    // в границах, хотя надо просто кликнуть ближе к концу линии
+    const chain = f.line;
+    const tolW = 14 / state.view.k;
+    const farFromEnd = state.tool === "extend" && chain &&
+      Math.hypot(wx - chain[0][0], wy - chain[0][1]) >= tolW &&
+      Math.hypot(wx - chain[chain.length - 1][0], wy - chain[chain.length - 1][1]) >= tolW;
+    toast(farFromEnd
+      ? "Кликните ближе к открытому концу линии — продлевается ближайший к клику конец"
+      : "Нет пересечения с границей рядом с этой точкой", "warn");
   }
 }
 // склейка выбранных линий в одну — цепочкой по совпадающим (с допуском)
@@ -6115,7 +6125,7 @@ function updateStartExperience() {
       button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
     }
   });
-  ["btn-join", "btn-buffer-open", "btn-merge", "btn-simplify", "btn-array"].forEach(id => {
+  ["btn-join", "btn-buffer-open", "btn-merge", "btn-simplify", "btn-array", "btn-find"].forEach(id => {
     const button = document.getElementById(id);
     if (!button) return;
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
@@ -6936,6 +6946,18 @@ function openArrayDialog() {
     // ориентации, на круг едет только её центр
     if (mode === "polar" && !opts.rotate)
       placements = placements.map(place => ({ ...place, keepUpright: true }));
+    // предел: сетка 50×50 на пачке выделенных объектов — это тысячи копий,
+    // живой предпросмотр такого подвешивает вкладку, а проекту столько не надо
+    const totalPlanned = placements.length * targets.length;
+    if (totalPlanned > 1000) {
+      _arrayPreview = null;
+      $a("ar-summary").innerHTML = `<b>Слишком много копий: ${totalPlanned.toLocaleString("ru-RU")}</b>` +
+        `<span>предел 1000 — уменьшите сетку, число копий или выделение</span>`;
+      $a("ar-apply").disabled = true;
+      placements = [];
+      draw();
+      return;
+    }
     _arrayPreview = [];
     for (const place of placements)
       for (const f of targets) {
@@ -7011,8 +7033,8 @@ function openBufferDialog() {
   const sideOptions = [
     ["both", "С обеих сторон"], ["outer", "Снаружи"], ["inner", "Внутри"]
   ];
-  overlay.innerHTML = `<div class="modal fmt-modal buffer-modal">
-    <div class="modal-head">Создать буфер
+  overlay.innerHTML = `<div class="modal fmt-modal buffer-modal" role="dialog" aria-modal="true" aria-labelledby="buffer-title">
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Инструменты</span><span id="buffer-title">Создать буфер</span></div>
       <button class="modal-x" aria-label="Закрыть создание буфера"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <div class="buffer-hint">Буфер строится вокруг выбранных объектов и добавляется в активный слой.</div>
