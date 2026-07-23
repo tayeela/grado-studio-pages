@@ -644,6 +644,15 @@
 .sheet-summary.error{border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:var(--danger-weak)}
 .sheet-summary.error b{color:var(--danger-text)}
 
+/* ---- поиск объектов ---- */
+.modal-overlay .modal.find-modal{width:min(520px,94vw);padding:16px}
+.find-results{display:flex;flex-direction:column;gap:2px;max-height:min(50vh,380px);overflow:auto}
+.modal-overlay button.find-row{height:auto;min-height:40px;padding:7px 10px;display:flex;flex-direction:column;
+  align-items:flex-start;gap:2px;text-align:left;background:transparent;border-color:transparent}
+.modal-overlay button.find-row:hover{background:var(--field-bg);border-color:var(--field-border)}
+.find-row b{font-size:var(--fs-12);color:var(--text)}
+.find-row span{font-size:var(--fs-11);color:var(--muted)}
+
 /* ---- статистика поля ---- */
 .modal-overlay .modal.stats-modal{width:min(420px,94vw);padding:16px}
 .stats-body{display:flex;flex-direction:column;gap:2px;max-height:320px;overflow:auto}

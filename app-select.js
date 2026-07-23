@@ -260,8 +260,37 @@
     return ids;
   }
 
+  // ---------- поиск объектов по атрибутам ----------
+  // Локатор из QGIS: на выгрузке в 30 000 объектов найти участок по
+  // кадастровому номеру или зону по индексу глазами нельзя. Каждое слово
+  // запроса обязано найтись в каком-нибудь значении атрибутов объекта
+  // (И, а не ИЛИ) — «жилая 77:01» сужает, а не расширяет.
+  function searchFeatures(features, query, options = {}) {
+    const limit = options.limit || 50;
+    const words = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    const out = [];
+    for (const feature of features) {
+      const props = feature.props || {};
+      const entries = Object.entries(props)
+        .filter(([key, value]) => !key.startsWith("_") && value !== null && value !== undefined)
+        .map(([key, value]) => [key, String(value)]);
+      if (!entries.length) continue;
+      let firstHit = null;
+      const ok = words.every(word => {
+        const hit = entries.find(([, value]) => value.toLowerCase().includes(word));
+        if (hit && !firstHit) firstHit = hit;
+        return !!hit;
+      });
+      if (!ok) continue;
+      out.push({ feature, field: firstHit[0], value: firstHit[1] });
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   root.GRADO_SELECT = { PREDICATES, geometryOf, intersects, within, withinDistance,
-    testPredicate, buildIndex, selectByLocation, selectByExpression, combine };
+    testPredicate, buildIndex, selectByLocation, selectByExpression, combine, searchFeatures };
 
   if (typeof document === "undefined") return;
 
@@ -424,6 +453,72 @@
       if (first && first.isConnected) first.focus();
     }, 0);
   }
+
+  // ---------- окно «Найти объект» ----------
+  function openFindFeature() {
+    closePopups();
+    if (!state.features.length) { toast("Проект пуст — искать нечего"); return; }
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal find-modal" role="dialog" aria-modal="true" aria-labelledby="ff-title">
+      <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Поиск</span><span id="ff-title">Найти объект</span></div>
+        <button class="modal-x" aria-label="Закрыть поиск"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <div class="modal-body select-body">
+        <label class="select-row">Что ищем<input type="text" id="ff-query" autocomplete="off"
+          placeholder="кадастровый номер, название, индекс зоны…"></label>
+        <div class="find-results" id="ff-results" role="listbox"></div>
+      </div>
+      <div class="modal-actions"><span class="muted" id="ff-count"></span><span class="spacer"></span>
+        <button type="button" id="ff-close">Закрыть</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const $f = sel => overlay.querySelector(sel);
+    const input = $f("#ff-query");
+    let matches = [];
+
+    const goTo = index => {
+      const match = matches[index];
+      if (!match) return;
+      const L = layerOf(match.feature);
+      if (L) state.activeLayerId = L.id;
+      selectOne(match.feature.id);
+      zoomToFeature(match.feature);
+      renderLayers(); renderProps(); draw();
+    };
+    const rebuild = () => {
+      // ищем только по видимым слоям: скрытое не найти и глазами
+      const pool = state.features.filter(f => {
+        const L = layerOf(f);
+        return L && L.visible !== false;
+      });
+      matches = GRADO_SELECT.searchFeatures(pool, input.value, { limit: 50 });
+      $f("#ff-count").textContent = input.value.trim()
+        ? (matches.length === 50 ? "показаны первые 50" : ruCount(matches.length, "совпадение", "совпадения", "совпадений"))
+        : "";
+      $f("#ff-results").innerHTML = matches.map((match, index) => {
+        const L = layerOf(match.feature);
+        return `<button type="button" class="find-row" data-find="${index}" role="option">
+          <b>${escHtml(String(match.value).slice(0, 48))}</b>
+          <span>${escHtml(L ? L.title : "")} · ${escHtml(match.field)}</span>
+        </button>`;
+      }).join("");
+      $f("#ff-results").querySelectorAll("[data-find]").forEach(button =>
+        button.addEventListener("click", () => goTo(Number(button.dataset.find))));
+    };
+    input.addEventListener("input", rebuild);
+    const close = () => overlay.remove();
+    $f("#ff-close").addEventListener("click", close);
+    $f(".modal-x").addEventListener("click", close);
+    overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+    overlay.addEventListener("keydown", event => {
+      if (event.key === "Escape") close();
+      if (event.key === "Enter" && matches.length) { goTo(0); close(); }
+    });
+    setTimeout(() => { if (input.isConnected) input.focus(); }, 0);
+  }
+  root.openFindFeature = openFindFeature;
+  const findTrigger = document.getElementById("btn-find");
+  if (findTrigger) findTrigger.addEventListener("click", openFindFeature);
 
   root.openSelectBy = openSelectBy;
   const trigger = $("btn-select-by");

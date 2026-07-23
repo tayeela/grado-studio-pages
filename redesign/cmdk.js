@@ -68,6 +68,7 @@
       { t: "Массив копий…", run: () => click("btn-array"), available: () => buttonEnabled("btn-array") },
       { t: "Упростить / сгладить геометрию…", run: () => click("btn-simplify"), available: () => buttonEnabled("btn-simplify") },
       { t: "Проверка топологии…", run: () => click("btn-topo-check"), available: () => buttonEnabled("btn-topo-check") },
+      { t: "Найти объект…", run: () => window.openFindFeature && window.openFindFeature() },
       { t: "Выбрать по выражению…", run: () => window.openSelectBy && window.openSelectBy("expression"), available: () => buttonEnabled("btn-select-by") },
       { t: "Выбрать по расположению…", run: () => window.openSelectBy && window.openSelectBy("location"), available: () => buttonEnabled("btn-select-by") },
       { t: "Поворот выделения", k: "R", run: tool("rotate"), available: () => toolEnabled("rotate") },
