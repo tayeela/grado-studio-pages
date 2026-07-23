@@ -45,7 +45,30 @@ function on(id, event, fn) {
 }
 
 const cv = document.getElementById("cv");
-const ctx = cv.getContext("2d");
+// Цель отрисовки подменяется на время выпуска листа: тот же drawNow рисует и на
+// экран, и в PDF (рекордер в app-pdf.js повторяет нужное подмножество Canvas 2D).
+// Иначе для листа пришлось бы держать второй рендерер, а он неизбежно разошёлся
+// бы с экраном.
+let ctx = cv.getContext("2d");
+let _renderTarget = null;          // { ctx, w, h } на время выпуска листа
+const viewportW = () => _renderTarget ? _renderTarget.w : cv.clientWidth;
+const viewportH = () => _renderTarget ? _renderTarget.h : cv.clientHeight;
+// Рисует сцену в чужой контекст с чужим видом и размером «холста».
+function renderSceneTo(target, width, height, view) {
+  const savedCtx = ctx, savedView = state.view, savedSelected = state.selected;
+  const savedIds = state.selectedIds, savedSnap = state.snapHit, savedGuides = state.guides;
+  ctx = target;
+  _renderTarget = { ctx: target, w: width, h: height };
+  state.view = { ...view };
+  // выделение, привязки и направляющие — это экран, на листе им не место
+  state.selected = null; state.selectedIds = new Set(); state.snapHit = null; state.guides = [];
+  try { drawNow(); }
+  finally {
+    ctx = savedCtx; _renderTarget = null; state.view = savedView;
+    state.selected = savedSelected; state.selectedIds = savedIds;
+    state.snapHit = savedSnap; state.guides = savedGuides;
+  }
+}
 
 // Цвет отрисовки холста из палитры темы (canvas-theme.js). Fallback — если
 // tokens/canvas-theme не загрузились (оффлайн-надёжность): прежние значения.
@@ -2778,8 +2801,8 @@ function drawHatch(ring, hatch, strokeColor, holes) {
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const p of ss) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
   const _m = (spec.spacing_px || 9) * 2;
-  x0 = Math.max(x0, -_m); x1 = Math.min(x1, cv.clientWidth + _m);
-  y0 = Math.max(y0, -_m); y1 = Math.min(y1, cv.clientHeight + _m);
+  x0 = Math.max(x0, -_m); x1 = Math.min(x1, viewportW() + _m);
+  y0 = Math.max(y0, -_m); y1 = Math.min(y1, viewportH() + _m);
   if (x1 <= x0 || y1 <= y0) { ctx.restore(); return; }
   ctx.strokeStyle = spec.color || strokeColor;
   ctx.lineWidth = 1.0;
@@ -2822,8 +2845,8 @@ function drawDots(ring, dots, holes) {
   for (const p of ss) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
   const step = Math.max(4, dots.spacing_px || 8);
   const r = Math.max(0.6, (dots.size_px || 2) / 2);
-  x0 = Math.max(x0, -step); x1 = Math.min(x1, cv.clientWidth + step);
-  y0 = Math.max(y0, -step); y1 = Math.min(y1, cv.clientHeight + step);
+  x0 = Math.max(x0, -step); x1 = Math.min(x1, viewportW() + step);
+  y0 = Math.max(y0, -step); y1 = Math.min(y1, viewportH() + step);
   if (x1 <= x0 || y1 <= y0) { ctx.restore(); return; }
   ctx.fillStyle = dots.color;
   const sx = Math.floor(x0 / step) * step, sy = Math.floor(y0 / step) * step;
@@ -3383,10 +3406,11 @@ function draw() {
   _drawPending = requestAnimationFrame(() => { _drawPending = 0; drawNow(); });
 }
 function drawNow() {
-  const w = cv.clientWidth, h = cv.clientHeight;
+  const w = viewportW(), h = viewportH();
   ctx.clearRect(0, 0, w, h);
-  drawBasemap(w, h);
-  drawGrid(w, h);
+  // На листе ни сетки, ни тайлов подложки: сетка — вспомогательная разметка
+  // экрана, а растр вкладывается отдельно, когда до него дойдёт очередь.
+  if (!_renderTarget) { drawBasemap(w, h); drawGrid(w, h); }
 
   // видимый мировой прямоугольник (+ поле) для отсечения объектов за экраном
   const _vpad = 40 / state.view.k;
@@ -3673,6 +3697,9 @@ function drawNow() {
   // займёт спорное место
   drawLabelJobs(_labelJobs, _labelGrid);
 
+  // рамка листа — только на экране: на самом листе её быть не должно
+  if (!_renderTarget && typeof sheetDrawOverlay === "function") sheetDrawOverlay(ctx);
+
   // пикетаж красных линий: засечки поперёк + подписи ПК
   for (const f of state.features) {
     if (f.kind !== "redline" || !(f.props.pk_step > 0) || !f.props._stations) continue;
@@ -3899,7 +3926,7 @@ function updateOverlay() {
 const K_MIN = 0.01, K_MAX = 2000;
 const clampK = k => Math.min(K_MAX, Math.max(K_MIN, k));
 function zoomBy(factor) {
-  const w = cv.clientWidth, h = cv.clientHeight;
+  const w = viewportW(), h = viewportH();
   const [wx, wy] = s2w(w / 2, h / 2);        // мировая точка под центром экрана
   state.view.k = clampK(state.view.k * factor);
   state.view.tx = w / 2 - wx * state.view.k;
@@ -3907,7 +3934,7 @@ function zoomBy(factor) {
   draw();
 }
 function fitBox(x0, y0, x1, y1, pad = 0.82) {
-  const w = cv.clientWidth, h = cv.clientHeight;
+  const w = viewportW(), h = viewportH();
   if (w < 2 || h < 2) return;
   const dx = Math.max(x1 - x0, 10), dy = Math.max(y1 - y0, 10);
   state.view.k = clampK(Math.min(w / dx, h / dy) * pad);
@@ -5035,7 +5062,7 @@ function cvReaderReveal(f) {
   const box = featureViewBox(f);
   const cv = document.getElementById("cv");
   if (!box || !cv) return;
-  const w = cv.clientWidth, h = cv.clientHeight;
+  const w = viewportW(), h = viewportH();
   const [x1, y1] = w2s(box.minx, box.maxy);
   const [x2, y2] = w2s(box.maxx, box.miny);
   if (x1 >= 0 && y1 >= 0 && x2 <= w && y2 <= h) return;
@@ -7609,6 +7636,8 @@ cv.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
   const s = cursorPoint(wxr, wyr);
   if (state.tool === "identify") { openIdentify(wxr, wyr, ex, ey); return; }
+  if (state.tool === "sheet" && typeof sheetPointerDown === "function"
+      && sheetPointerDown(wxr, wyr)) return;
   if (state.tool === "select") {
     const cur = selectedFeature();
     if (cur) {
@@ -7781,6 +7810,7 @@ cv.addEventListener("pointermove", e => {
   const [ex, ey] = evXY(e);
   const [wx, wy] = s2w(ex, ey);
   document.getElementById("st-coords").textContent = `x: ${fmtCoord(wx)}  y: ${fmtCoord(wy)} м`;
+  if (typeof sheetPointerMove === "function" && sheetPointerMove(wx, wy)) return;
   if (state.pan) {
     state.view.tx = state.pan.tx + (ex - state.pan.sx);
     state.view.ty = state.pan.ty + (ey - state.pan.sy);
@@ -7912,6 +7942,7 @@ cv.addEventListener("pointermove", e => {
 // скакать при следующем движении мыши, создавая впечатление, что
 // холст не реагирует на клики.
 window.addEventListener("pointerup", e => {
+  if (typeof sheetPointerUp === "function" && sheetPointerUp()) return;
   if (state.pan) { state.pan = null; return; }
   if (state.edit) {
     const moved = state.edit.moved;

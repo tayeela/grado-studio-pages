@@ -602,6 +602,18 @@
   .vector-output-card{grid-template-columns:1fr;align-items:stretch}.vector-modal .modal-actions{gap:6px}
   .modal-overlay button.vector-help{display:none}
 }
+/* ---- лист PDF ---- */
+.modal-overlay .modal.sheet-modal{width:min(560px,96vw);padding:16px}
+.sheet-body{gap:12px}
+.sheet-intro{margin:0;padding:10px 12px;border:1px solid var(--accent-line);border-radius:var(--r-sm);
+  background:var(--accent-weak);color:var(--text-2);font-size:var(--fs-12);line-height:1.45}
+.sheet-summary{min-height:48px;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--hairline);
+  display:flex;flex-direction:column;justify-content:center;gap:3px;background:var(--field-bg)}
+.sheet-summary b{font-size:var(--fs-12);color:var(--text)}
+.sheet-summary span{font-size:var(--fs-11);line-height:1.4;color:var(--muted)}
+.sheet-summary.error{border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:var(--danger-weak)}
+.sheet-summary.error b{color:var(--danger-text)}
+
 /* ---- соединение таблиц ---- */
 .modal-overlay .modal.join-modal{width:min(620px,96vw);max-height:92vh;padding:16px}
 .join-body{gap:12px}
