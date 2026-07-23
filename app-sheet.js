@@ -384,6 +384,7 @@
                   Math.max(sw[0], ne[0]), Math.max(sw[1], ne[1])];
     const built = await root.buildSheetRaster({ source: config.source || "esri", bbox,
       scale: current.scale, dpi: Number(config.dpi) || 300,
+      sourceOptions: { instance: cdseInstance() },
       signal: options.signal, onProgress: options.onRaster });
     const image = doc.addJpeg(built.bytes, built.width, built.height);
     context.drawImage({ __pdfImage: image }, 0, 0, view.drawWidth, view.height);
@@ -556,6 +557,10 @@
             <label>Плотность, dpi<input type="number" id="sheet-raster-dpi" min="150" max="600" step="50" value="${Number(sheet.raster.dpi) || 300}"></label>
           </div>
           <div class="sheet-raster-note" id="sheet-raster-note"></div>
+          <label class="sheet-field" id="sheet-cdse-row" hidden>Идентификатор экземпляра Copernicus (Sentinel Hub)
+            <input type="text" id="sheet-cdse-instance" placeholder="из личного кабинета CDSE" value="${escHtml(cdseInstance())}">
+            <span class="sheet-raster-note">Хранится в этом браузере и никуда не отправляется, кроме самого Copernicus.</span>
+          </label>
         </div>
         <div class="sheet-font" id="sheet-font-row">
           <span id="sheet-font-name">Шрифт листа: проверяем…</span>
@@ -594,6 +599,9 @@
         source: $("sheet-raster-source").value,
         dpi: Math.max(150, Math.min(600, Number($("sheet-raster-dpi").value) || 300)) };
       $("sheet-raster-fields").hidden = !sheet.raster.on;
+      const needsKey = (TILES.SOURCES[sheet.raster.source] || {}).needsKey;
+      $("sheet-cdse-row").hidden = !sheet.raster.on || !needsKey;
+      if (needsKey) setCdseInstance($("sheet-cdse-instance").value.trim());
       if (sheet.raster.on) {
         const lat = typeof localToLonLat === "function" ? localToLonLat(sheet.cx, sheet.cy)[1] : 55.75;
         const choice = TILES.pickZoom({ source: sheet.raster.source, lat,
@@ -620,6 +628,7 @@
       "sheet-raster", "sheet-raster-source"]
       .forEach(id => $(id).addEventListener("change", update));
     $("sheet-raster-dpi").addEventListener("input", update);
+    $("sheet-cdse-instance").addEventListener("input", update);
     ["sheet-column-width", "sheet-number", "sheet-title-text", "sheet-notes"]
       .forEach(id => $(id).addEventListener("input", update));
     const close = () => { overlay.remove(); };
@@ -767,6 +776,19 @@
   // Лист альбома — это сохранённая рамка со своим заголовком и номером.
   // Хранится рядом с рамкой (состояние вида): в проект альбом не пишется,
   // потому что это оформление выпуска, а не данные чертежа.
+  // Ключ Copernicus — не данные проекта и не общая настройка: он личный,
+  // поэтому живёт в этом браузере и в файл проекта не попадает.
+  const CDSE_KEY = "grado-cdse-instance";
+  const cdseInstance = () => {
+    try { return localStorage.getItem(CDSE_KEY) || ""; } catch (error) { return ""; }
+  };
+  const setCdseInstance = value => {
+    try {
+      if (value) localStorage.setItem(CDSE_KEY, value); else localStorage.removeItem(CDSE_KEY);
+    } catch (error) {}
+  };
+  root.sheetCdseInstance = cdseInstance;
+
   const ALBUM_KEY = "grado-sheet-album";
   const loadAlbum = () => {
     try {
