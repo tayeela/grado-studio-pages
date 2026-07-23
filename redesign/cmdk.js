@@ -66,6 +66,8 @@
       { t: "Изменить форму (reshape)", run: tool("reshape"), available: () => toolEnabled("reshape") },
       { t: "Объединить полигоны", run: () => click("btn-merge"), available: () => buttonEnabled("btn-merge") },
       { t: "Массив копий…", run: () => click("btn-array"), available: () => buttonEnabled("btn-array") },
+      { t: "Копировать объекты в буфер", run: () => window.copySelectedFeatures && window.copySelectedFeatures() },
+      { t: "Вставить объекты из буфера", run: () => window.pasteFeatures && window.pasteFeatures() },
       { t: "Упростить / сгладить геометрию…", run: () => click("btn-simplify"), available: () => buttonEnabled("btn-simplify") },
       { t: "Проверка топологии…", run: () => click("btn-topo-check"), available: () => buttonEnabled("btn-topo-check") },
       { t: "Найти объект…", run: () => window.openFindFeature && window.openFindFeature() },
