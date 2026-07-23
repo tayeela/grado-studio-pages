@@ -112,11 +112,12 @@ const job = (text, x, y, extra = {}) => ({ text, x, y, width: 40, height: 12, ..
     "но правка вершины обязана сбрасывать кеш");
   assert.match(app, /drawLineLabel\(pts, st\.line_label, .+, _labelGrid\)/,
     "подпись знака вдоль линии обязана занимать место в общей сетке");
-  assert.match(app, /ctx\.strokeText\(job\.text, job\.x, job\.y\)/,
+  assert.match(app, /ctx\.strokeText\(job\.text, tx, ty\)/,
     "у подписи обязан быть ореол — иначе она не читается поверх заливки и снимка");
   // подписи собираются, а не рисуются на месте: иначе приоритет не работает
   const jobs = app.slice(app.indexOf("if (st.label_field) {"), app.indexOf("if (state.selectedIds.has(f.id))"));
-  assert.match(jobs, /_labelJobs\.push\(job\)/, "подпись обязана попадать в общий список");
+  assert.match(jobs, /_labelJobs\.push\(applyLabelOffset\(job, f\)\)/,
+    "подпись обязана попадать в общий список — с ручным смещением, если оно есть");
   assert.doesNotMatch(jobs, /ctx\.fillText/, "и не рисоваться сразу");
   // ранний отсев по габариту объекта
   assert.match(app, /if \(f\.ring && \(fit\[2\] - fit\[0\] < size \|\| fit\[3\] - fit\[1\] < size\)\) return null;/,

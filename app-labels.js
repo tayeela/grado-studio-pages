@@ -138,16 +138,20 @@
     const ordered = jobs.map((job, index) => ({ job, index }))
       .sort((a, b) => (b.job.priority || 0) - (a.job.priority || 0) || a.index - b.index);
     for (const { job } of ordered) {
+      // повёрнутая подпись занимает свой описанный прямоугольник
+      const cos = Math.abs(Math.cos(job.angle || 0)), sin = Math.abs(Math.sin(job.angle || 0));
+      const halfW = (job.width * cos + job.height * sin) / 2;
+      const halfH = (job.width * sin + job.height * cos) / 2;
       const offsets = job.candidates && job.candidates.length ? job.candidates : [[0, 0]];
       let box = null, at = null;
       for (const [dx, dy] of offsets) {
         const cx = job.x + dx, cy = job.y + dy;
-        const candidate = [cx - job.width / 2 - pad, cy - job.height / 2 - pad,
-                           cx + job.width / 2 + pad, cy + job.height / 2 + pad];
+        const candidate = [cx - halfW - pad, cy - halfH - pad, cx + halfW + pad, cy + halfH + pad];
         // подпись не должна вылезать за сам объект: «5 этажей» шириной
         // с квартал поверх соседнего здания читается как чужая
         if (job.fit && (job.width > (job.fit[2] - job.fit[0]) || job.height > (job.fit[3] - job.fit[1]))) break;
-        if (grid.hits(candidate)) continue;
+        // закреплённую рукой подпись не прячем: человек поставил её сам
+        if (!job.pinned && grid.hits(candidate)) continue;
         box = candidate; at = [cx, cy];
         break;
       }

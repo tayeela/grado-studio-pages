@@ -3129,18 +3129,47 @@ function labelJob(f, st, text, layer) {
   }
   const pts = f.line || (f.arc || f.circle ? featurePts(f) : null);
   if (pts && pts.length > 1) {
-    // у линии подпись садится в середину — вдоль линии подписывает знак ЛГР
-    const mid = pts[Math.floor(pts.length / 2)];
-    const [sx, sy] = w2s(mid[0], mid[1]);
-    return { text, font, color, size, x: sx, y: sy, width, height: size,
-      candidates: LABELS.aroundPoint(3), priority: base + 200 };
+    // Подпись линии идёт ВДОЛЬ неё — по самому длинному ребру, как подписи
+    // улиц на карте. Раньше она стояла горизонтально в середине и на косой
+    // линии выглядела чужой.
+    let bi = 0, bl = -1;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ax, ay] = w2s(pts[i][0], pts[i][1]);
+      const [bx, by] = w2s(pts[i + 1][0], pts[i + 1][1]);
+      const l = Math.hypot(bx - ax, by - ay);
+      if (l > bl) { bl = l; bi = i; }
+    }
+    const [ax, ay] = w2s(pts[bi][0], pts[bi][1]);
+    const [bx, by] = w2s(pts[bi + 1][0], pts[bi + 1][1]);
+    let angle = Math.atan2(by - ay, bx - ax);
+    if (angle > Math.PI / 2 || angle < -Math.PI / 2) angle += Math.PI;   // не вверх ногами
+    // строка длиннее ребра — кладём горизонтально в середину, не растягивая ложь
+    const along = width + 8 <= bl;
+    return { text, font, color, size,
+      x: (ax + bx) / 2, y: (ay + by) / 2, width, height: size,
+      angle: along ? angle : 0,
+      candidates: along ? null : LABELS.aroundPoint(3), priority: base + 200 };
   }
   return null;
 }
 
+// Ручное смещение подписи (label_offset в метрах мира) применяется к готовому
+// заданию. Смещённая рукой подпись показывается ВСЕГДА: человек поставил её
+// сам — прятать её из-за соседей нельзя, как в QGIS у закреплённых подписей.
+function applyLabelOffset(job, f) {
+  const off = f.label_offset;
+  if (!Array.isArray(off) || (off[0] === 0 && off[1] === 0)) return job;
+  job.x += off[0] * state.view.k;
+  job.y -= off[1] * state.view.k;
+  job.pinned = true;
+  job.priority = 1e9;
+  return job;
+}
+
 // Ореол вокруг текста: подпись читается и поверх заливки зоны, и поверх снимка.
+let _labelBoxes = [];                 // подписи прошлого кадра — для перетаскивания
 function drawLabelJobs(jobs, grid) {
-  if (!LABELS || !jobs.length) return;
+  if (!LABELS || !jobs.length) { _labelBoxes = []; return; }
   const placed = LABELS.layout(jobs, { grid });
   ctx.save();
   ctx.textAlign = "center";
@@ -3151,14 +3180,22 @@ function drawLabelJobs(jobs, grid) {
     ctx.font = job.font;
     ctx.lineWidth = Math.max(2, job.size / 4);
     ctx.strokeStyle = halo;
+    if (job.angle) { ctx.save(); ctx.translate(job.x, job.y); ctx.rotate(job.angle); }
+    const tx = job.angle ? 0 : job.x, ty = job.angle ? 0 : job.y;
     ctx.globalAlpha = 0.85;
-    ctx.strokeText(job.text, job.x, job.y);
+    ctx.strokeText(job.text, tx, ty);
     ctx.globalAlpha = 1;
     ctx.fillStyle = job.color;
-    ctx.fillText(job.text, job.x, job.y);
+    ctx.fillText(job.text, tx, ty);
+    if (job.angle) ctx.restore();
   }
   ctx.restore();
+  // запоминаем только на экране: на листе перетаскивания нет
+  if (!_renderTarget) _labelBoxes = placed
+    .filter(job => job.featureId != null)
+    .map(job => ({ featureId: job.featureId, box: job.box }));
 }
+
 // Ширина текста: measureText дорогой, а на городском слое подписи повторяются
 // (этажность «5» у тысяч зданий) — ключ «шрифт + строка» даёт высокий процент
 // попаданий. Сам ctx.font ставится ЗДЕСЬ и только при промахе: присваивание
@@ -3170,7 +3207,7 @@ function drawLabelJobs(jobs, grid) {
 // уехала бы чужим шрифтом.
 const _measCache = new Map();
 function measureLabel(s, font) {
-  const key = font + " " + s;
+  const key = font + " " + s;
   let w = _measCache.get(key);
   if (w === undefined) {
     if (_measCache.size > 4000) _measCache.clear();   // страховка от роста
@@ -3654,7 +3691,7 @@ function drawNow() {
         const v = labelOf(f);
         if (v !== undefined && v !== "" && v !== null) {
           const job = labelJob(f, st, String(v), layer);
-          if (job) _labelJobs.push(job);
+          if (job) { job.featureId = f.id; _labelJobs.push(applyLabelOffset(job, f)); }
         }
       }
       if (state.selectedIds.has(f.id)) {
@@ -7770,6 +7807,20 @@ cv.addEventListener("pointerdown", e => {
   if (state.tool === "sheet" && typeof sheetPointerDown === "function"
       && sheetPointerDown(wxr, wyr)) return;
   if (state.tool === "select") {
+    // Перетаскивание подписи: клик в рамку подписи УЖЕ выбранного объекта.
+    // Сначала выбор объекта, потом сдвиг его подписи — иначе клик по подписи
+    // спорил бы с обычным выбором.
+    const grabbed = _labelBoxes.find(item => state.selectedIds.has(item.featureId) &&
+      ex >= item.box[0] && ex <= item.box[2] && ey >= item.box[1] && ey <= item.box[3]);
+    if (grabbed) {
+      const f = state.features.find(x => x.id === grabbed.featureId);
+      if (f) {
+        snapshot();
+        state.labelDrag = { f, startX: wxr, startY: wyr,
+          orig: Array.isArray(f.label_offset) ? [...f.label_offset] : [0, 0] };
+        return;
+      }
+    }
     const cur = selectedFeature();
     if (cur) {
       const vi = vertexAt(cur, wxr, wyr);
@@ -7945,6 +7996,12 @@ cv.addEventListener("pointermove", e => {
   const [wx, wy] = s2w(ex, ey);
   document.getElementById("st-coords").textContent = `x: ${fmtCoord(wx)}  y: ${fmtCoord(wy)} м`;
   if (typeof sheetPointerMove === "function" && sheetPointerMove(wx, wy)) return;
+  if (state.labelDrag) {
+    const d = state.labelDrag;
+    d.f.label_offset = [d.orig[0] + (wx - d.startX), d.orig[1] + (wy - d.startY)];
+    draw();
+    return;
+  }
   if (state.pan) {
     state.view.tx = state.pan.tx + (ex - state.pan.sx);
     state.view.ty = state.pan.ty + (ey - state.pan.sy);
@@ -8077,6 +8134,20 @@ cv.addEventListener("pointermove", e => {
 // холст не реагирует на клики.
 window.addEventListener("pointerup", e => {
   if (typeof sheetPointerUp === "function" && sheetPointerUp()) return;
+  if (state.labelDrag) {
+    const d = state.labelDrag;
+    state.labelDrag = null;
+    // почти нулевой сдвиг — это клик, а не перенос: смещение снимается
+    if (d.f.label_offset && Math.hypot(d.f.label_offset[0] - d.orig[0], d.f.label_offset[1] - d.orig[1]) < 0.5) {
+      if (d.orig[0] === 0 && d.orig[1] === 0) delete d.f.label_offset;
+      else d.f.label_offset = d.orig;
+      state.undo.pop(); syncHistoryControls(); draw();
+      return;
+    }
+    afterChange();
+    toast("Подпись закреплена на новом месте. Двойной клик по ней вернёт авторазмещение");
+    return;
+  }
   if (state.pan) { state.pan = null; return; }
   if (state.edit) {
     const moved = state.edit.moved;
@@ -8132,6 +8203,19 @@ window.addEventListener("blur", () => {
   if (state.drawing) { state.drawing = null; draw(); }
 });
 cv.addEventListener("dblclick", e => {
+  {
+    const [ex0, ey0] = evXY(e);
+    const grabbed = _labelBoxes.find(item => ex0 >= item.box[0] && ex0 <= item.box[2] &&
+      ey0 >= item.box[1] && ey0 <= item.box[3]);
+    const f = grabbed && state.features.find(x => x.id === grabbed.featureId);
+    if (f && Array.isArray(f.label_offset)) {
+      snapshot();
+      delete f.label_offset;
+      afterChange();
+      toast("Подпись вернулась к авторазмещению");
+      return;
+    }
+  }
   e.preventDefault();
   if (state.drawing) { finishDrawing(); return; }
   // двойной клик по ребру выбранной фигуры — вставка вершины
