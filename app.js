@@ -1188,7 +1188,7 @@ const GEOM_OF_TOOL = { point: "point", polyline: "polyline",
 // «Разрезать» собирает ломаную тем же черчением, но объекта не создаёт —
 // поэтому он в TOOL_GEOM (сбор точек), но НЕ в GEOM_OF_TOOL (создание слоя
 // под геометрию и переключение активного слоя ему не нужны).
-const TOOL_GEOM = { ...GEOM_OF_TOOL, dim: "polyline", split: "polyline" };
+const TOOL_GEOM = { ...GEOM_OF_TOOL, dim: "polyline", split: "polyline", reshape: "polyline" };
 
 function activeLayer() { return LAYER_BY_ID[state.activeLayerId] || null; }
 
@@ -6014,7 +6014,7 @@ function updateStartExperience() {
     : active.locked ? "Активный слой заблокирован"
       : (active.import_only || active.annotation) ? "Выберите проектный слой" : "Сначала создайте слой";
   const drawingTools = new Set(["point", "polyline", "polygon", "rect", "arc", "circle"]);
-  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror", "split", "identify", "offset"]);
+  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror", "split", "identify", "offset", "reshape"]);
   document.querySelectorAll("#toolbar button[data-tool]").forEach(button => {
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
     if (drawingTools.has(button.dataset.tool)) {
@@ -7137,6 +7137,13 @@ function finishDrawing() {
     else { toast("Нужны хотя бы две точки линии разреза", "warn"); draw(); }
     return;
   }
+  if (state.tool === "reshape") {
+    const pts = d && Array.isArray(d.pts) ? dedupePts(d.pts, false) : null;
+    state.drawing = null; state.typed = "";
+    if (pts && pts.length >= 2) reshapeByLine(pts);
+    else { toast("Нужны хотя бы две точки новой формы", "warn"); draw(); }
+    return;
+  }
   const L = activeLayer();
   if (d && !isDrawableLayer(L)) toast(L?.locked
     ? `Слой «${L.title}» заблокирован — рисование отменено`
@@ -7222,6 +7229,52 @@ function splitByLine(cut) {
   setSelection(ids);
   afterChange();
   toast(`Разрезано: ${ruCount(removed.size, "объект", "объекта", "объектов")} → ${made.length}`);
+}
+
+// «Изменить форму» (reshape): участок контура или линии между первым и
+// последним пересечением с нарисованной ломаной заменяется на неё. Правится
+// РОВНО один объект: если ломаная задевает несколько — просим выделить.
+function reshapeByLine(cut) {
+  const E = window.GRADO_EDIT;
+  if (!E) { toast("Модуль правки геометрии не загружен", "warn"); return; }
+  const scope = state.selectedIds.size
+    ? state.features.filter(f => state.selectedIds.has(f.id) && editableFeature(f))
+    : state.features.filter(f => editableFeature(f) && layerOf(f) === activeLayer());
+  const results = [];
+  for (const f of scope) {
+    if (Array.isArray(f.ring)) {
+      const r = E.reshapeRing(f.ring, cut);
+      if (r.ring) results.push({ f, ring: r.ring });
+    } else if (Array.isArray(f.line)) {
+      const r = E.reshapeLine(f.line, cut);
+      if (r.line) results.push({ f, line: r.line });
+    }
+  }
+  if (!results.length) {
+    toast(state.selectedIds.size
+      ? "Линия должна пересечь выбранный объект минимум дважды"
+      : "Линия должна дважды пересечь объект активного слоя", "warn");
+    draw();
+    return;
+  }
+  if (results.length > 1) {
+    toast(`Ломаная задевает ${results.length} объектов — выделите один и повторите`, "warn");
+    draw();
+    return;
+  }
+  const { f, ring, line } = results[0];
+  // вырез не должен съесть дыру: дыра вне нового контура — это уже не полигон
+  if (ring && f.holes && f.holes.length) {
+    const E2 = window.GRADO_EDIT;
+    const lost = f.holes.some(hole => hole && hole.length > 2 &&
+      !E2.pointInRing(hole[0][0], hole[0][1], ring));
+    if (lost) { toast("Новая форма отрезает дыру полигона — сначала уберите дыру", "warn"); draw(); return; }
+  }
+  snapshot();
+  if (ring) f.ring = ring; else f.line = line;
+  selectOne(f.id);
+  afterChange();
+  toast(ring ? `Форма изменена: площадь ${fmtAreaHa(featureArea(f))}` : "Форма линии изменена");
 }
 
 // «Объединить»: выбранные полигоны одного слоя становятся одним объектом.
@@ -7852,7 +7905,8 @@ cv.addEventListener("pointerdown", e => {
   } else if (state.tool === "dim" || TOOL_GEOM[state.tool]) {
     // рисование геометрии требует активный слой; размеры пишутся в свой
     // аннотационный слой и активного слоя не требуют
-    if (state.tool !== "dim" && state.tool !== "split" && !isDrawableLayer(activeLayer())) {
+    if (state.tool !== "dim" && state.tool !== "split" && state.tool !== "reshape"
+        && !isDrawableLayer(activeLayer())) {
       toast(activeLayer()?.locked ? "Активный слой заблокирован" : "Создайте слой, чтобы рисовать", "warn");
       return;
     }
@@ -8275,6 +8329,12 @@ function setTool(tool, opts = {}) {
   } else {
     state.trimCtx = null;
     setHint("");
+  }
+  if (tool === "reshape") {
+    toast(state.selectedIds.size
+      ? "Режим «Изменить форму»: чертите новую форму через выбранный объект, Enter — применить"
+      : "Режим «Изменить форму»: ломаная должна дважды пересечь контур, Enter — применить");
+    setHint("«Изменить форму»: ломаная через контур → Enter");
   }
   if (tool === "offset") {
     promptOffsetDistance();

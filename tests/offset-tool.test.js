@@ -91,7 +91,7 @@ const ringArea = ring => {
     "полигон с дырами честно отправляется к буферу, а не смещается враньём");
   assert.match(app, /props: cloneVariantValue\(f\.props \|\| \{\}\)/,
     "атрибуты исходного объекта едут в копию");
-  assert.match(app, /"split", "identify", "offset"\]/, "инструмент гаснет без объектов");
+  assert.match(app, /"split", "identify", "offset", "reshape"\]/, "инструмент гаснет без объектов");
 }
 
 console.log("offset-tool: OK");

@@ -41,6 +41,14 @@
     return inside;
   }
 
+  function nearestOnSegment(p, a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    let t = len2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return [a[0] + dx * t, a[1] + dy * t];
+  }
+
   // пересечение отрезков с параметрами: нужен не только факт, но и место —
   // по нему режется и кольцо, и сама режущая ломаная
   function crossParams(p1, p2, p3, p4) {
@@ -191,6 +199,89 @@
     return { part: { ring: openRing(outer), holes: holes.map(openRing) }, reason: null };
   }
 
+  // ---------- изменить форму (reshape, как в QGIS) ----------
+  // Ломаная пересекает контур дважды (или больше): участок контура между
+  // первым и последним пересечением заменяется на путь ломаной. Куда ломаная
+  // выгнулась, туда контур и пойдёт: наружу — прирезка, внутрь — вырез.
+  function reshapeRing(ring, cut) {
+    const base = openRing(ring);
+    if (base.length < 3 || !Array.isArray(cut) || cut.length < 2)
+      return { ring: null, reason: "нужен контур и ломаная" };
+    const hits = crossings(base, cut);
+    if (hits.length < 2)
+      return { ring: null, reason: "линия должна пересечь контур минимум дважды" };
+    const first = hits[0], last = hits[hits.length - 1];
+    if (same(first.point, last.point))
+      return { ring: null, reason: "пересечения совпали — менять нечего" };
+
+    const path = [first.point, ...cutPath(cut, first, last), last.point];
+    // Пересечения делят контур на две дуги. Заменяется та, что БЛИЖЕ к
+    // нарисованному пути: человек чертит новую форму вместо старого куска, и
+    // старый кусок — рядом с новым. Правило «внутрь — меньший, наружу —
+    // больший» здесь врёт: вырез у правого края оставлял правый обрезок
+    // вместо основного тела.
+    const forward = ringPath(base, last, first);       // дуга: последнее → первое по ходу
+    const backward = ringPath(base, first, last);      // дуга: первое → последнее по ходу
+    const probe = path[Math.floor(path.length / 2)];
+    const distToChain = chain => {
+      let best = Infinity;
+      for (let i = 0; i + 1 < chain.length; i++) {
+        const q = nearestOnSegment(probe, chain[i], chain[i + 1]);
+        best = Math.min(best, Math.hypot(probe[0] - q[0], probe[1] - q[1]));
+      }
+      return best;
+    };
+    // заменяем ближнюю дугу — в кандидате остаётся дальняя
+    const chosen = distToChain(backward) <= distToChain(forward)
+      ? [...path, ...forward.slice(1, -1)]
+      : [...path, ...[...backward].reverse().slice(1, -1)];
+    if (Math.abs(ringArea(chosen)) <= EPS)
+      return { ring: null, reason: "после правки не осталось площади" };
+
+    // подряд совпавшие точки на стыках
+    const clean = [];
+    for (const p of chosen) {
+      const prev = clean[clean.length - 1];
+      if (!prev || !same(prev, p)) clean.push(p);
+    }
+    while (clean.length > 1 && same(clean[0], clean[clean.length - 1])) clean.pop();
+    return clean.length > 2 ? { ring: clean, reason: null }
+      : { ring: null, reason: "после правки контур выродился" };
+  }
+
+  // Линия: кусок между первым и последним пересечением заменяется путём
+  // ломаной; направление пути подгоняется под направление линии.
+  function reshapeLine(line, cut) {
+    if (!Array.isArray(line) || line.length < 2 || !Array.isArray(cut) || cut.length < 2)
+      return { line: null, reason: "нужна линия и ломаная" };
+    const hits = [];
+    for (let ci = 0; ci + 1 < cut.length; ci++)
+      for (let li = 0; li + 1 < line.length; li++) {
+        const hit = crossParams(cut[ci], cut[ci + 1], line[li], line[li + 1]);
+        if (hit) hits.push({ cutIdx: ci, cutT: hit.t, lineIdx: li, lineT: hit.u, point: hit.point });
+      }
+    hits.sort((a, b) => a.cutIdx - b.cutIdx || a.cutT - b.cutT);
+    if (hits.length < 2)
+      return { line: null, reason: "линия должна пересечь объект минимум дважды" };
+    const first = hits[0], last = hits[hits.length - 1];
+    const path = [first.point, ...cutPath(cut, first, last), last.point];
+    // где эти пересечения на самой линии
+    const pos = hit => hit.lineIdx + hit.lineT;
+    let early = first, late = last, insert = path;
+    if (pos(first) > pos(last)) { early = last; late = first; insert = [...path].reverse(); }
+    const out = [];
+    for (let i = 0; i <= early.lineIdx; i++) out.push(line[i]);
+    out.push(...insert);
+    for (let i = late.lineIdx + 1; i < line.length; i++) out.push(line[i]);
+    const clean = [];
+    for (const p of out) {
+      const prev = clean[clean.length - 1];
+      if (!prev || !same(prev, p)) clean.push(p);
+    }
+    return clean.length > 1 ? { line: clean, reason: null }
+      : { line: null, reason: "после правки линия выродилась" };
+  }
+
   // ---------- эквидистанта (offset) ----------
   // Параллельная копия ломаной на расстоянии dist: положительное — слева по
   // ходу обхода, отрицательное — справа. Углы соединяются пересечением
@@ -253,5 +344,5 @@
   }
 
   root.GRADO_EDIT = { splitRing, splitPolygon, splitLine, mergePolygons, ringArea, pointInRing, crossings,
-    offsetChain, MITER_LIMIT };
+    offsetChain, MITER_LIMIT, reshapeRing, reshapeLine };
 })(typeof window !== "undefined" ? window : globalThis);
