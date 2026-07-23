@@ -330,6 +330,15 @@ function openLayerStyle(layer, opts = {}) {
   if (curLF && !labelCols.some(c => c.name === curLF))
     labelCols.push({ name: curLF, label: curLF });
   let work = (layer.rules || []).map(r => ({ op: "=", ...r }));
+  // Градуированная символика: числовые поля слоя и настройки прошлого расчёта.
+  // Числовым считаем поле, у которого есть числовые значения на объектах —
+  // тип в схеме у выгрузок портала не всегда проставлен.
+  const SYMBOLOGY = (typeof window !== "undefined" && window.GRADO_SYMBOLOGY) || null;
+  const layerFeatures = state.features.filter(f => layerOf(f) === layer);
+  const numericCols = !SYMBOLOGY ? [] : fieldCols.filter(column =>
+    SYMBOLOGY.numericValues(layerFeatures, column.name).length >= 2);
+  const gradSaved = (layer.fmt && layer.fmt.graduated) || {};
+  if (mode !== "rules" && gradSaved.field) mode = "graduated";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal fmt-modal fmt-modal-lg style-editor-modal" role="dialog" aria-modal="true" aria-labelledby="style-editor-title">
@@ -339,6 +348,7 @@ function openLayerStyle(layer, opts = {}) {
     <div class="seg" id="ls-mode" role="tablist" aria-label="Режим оформления">
       <button type="button" id="style-mode-single" role="tab" aria-controls="ls-single" aria-selected="${mode === "single"}" tabindex="${mode === "single" ? "0" : "-1"}" class="seg-btn${mode === "single" ? " active" : ""}" data-mode="single">Единый стиль</button>
       <button type="button" id="style-mode-rules" role="tab" aria-controls="ls-rules" aria-selected="${mode === "rules"}" tabindex="${mode === "rules" ? "0" : "-1"}" class="seg-btn${mode === "rules" ? " active" : ""}" data-mode="rules">По значению поля</button>
+      <button type="button" id="style-mode-graduated" role="tab" aria-controls="ls-graduated" aria-selected="${mode === "graduated"}" tabindex="${mode === "graduated" ? "0" : "-1"}" class="seg-btn${mode === "graduated" ? " active" : ""}" data-mode="graduated">По диапазонам</button>
     </div>
     <div id="ls-single" role="tabpanel" aria-labelledby="style-mode-single"${mode === "single" ? "" : " hidden"}>
       <label class="style-preset-label"><span>Базовый знак</span><select id="fmt-preset">${stylePickerOptions(layer.fmt && layer.fmt.style_ref)}</select></label>
@@ -411,6 +421,33 @@ function openLayerStyle(layer, opts = {}) {
       <div class="mf-table-wrap"><table class="attr-table mf-table"><thead><tr><th>Поле</th><th>Оп</th><th>Значение</th><th>Знак</th><th></th></tr></thead>
         <tbody id="cr-body"></tbody></table></div>
       <button id="cr-add" class="fmt-copy-btn" aria-describedby="cr-help"${fieldCols.length ? "" : " disabled"}>+ правило</button>
+    </div>
+    <div id="ls-graduated" role="tabpanel" aria-labelledby="style-mode-graduated"${mode === "graduated" ? "" : " hidden"}>
+      <div class="fc-help">Числовое поле разбивается на диапазоны, каждому — свой цвет. Категории для этого не годятся: у 20 000 зданий сорок разных этажностей.</div>
+      <div class="fmt-row">
+        <label>Поле<select id="gr-field">${numericCols.length
+          ? numericCols.map(c => opt(gradSaved.field || "", c.name, c.label || c.name)).join("")
+          : '<option value="">— числовых полей нет —</option>'}</select></label>
+        <label>Классов<input type="number" id="gr-classes" min="2" max="12" step="1" value="${gradSaved.classes || 5}"></label>
+      </div>
+      <div class="fmt-row">
+        <label>Способ<select id="gr-method">${Object.entries(SYMBOLOGY.METHODS).map(([key, meta]) =>
+          opt(gradSaved.method || "equal", key, meta.label)).join("")}</select></label>
+        <label>Палитра<select id="gr-ramp">${Object.entries(SYMBOLOGY.RAMPS).map(([key, meta]) =>
+          opt(gradSaved.ramp || "yellow-red", key, meta.label)).join("")}</select></label>
+      </div>
+      <label class="chk"><input type="checkbox" id="gr-target-stroke"${gradSaved.target === "stroke" ? " checked" : ""}>Красить обводку, а не заливку</label>
+      <div class="gr-preview" id="gr-preview" role="status" aria-live="polite"></div>
+      <button id="gr-build" class="fmt-copy-btn"${numericCols.length ? "" : " disabled"}>Пересчитать диапазоны</button>
+      <div class="fc-help" style="margin-top:12px">Свойства по выражению: толщина, размер знака и кегль подписи могут считаться из атрибутов — как data-defined в QGIS. Пусто — берётся значение из стиля.</div>
+      <div class="fmt-row">
+        <label>Толщина = <input type="text" id="gr-width-expr" placeholder="напр. полосы * 0.5" value="${escHtml((layer.fmt && layer.fmt.width_expr) || "")}"></label>
+        <label>Размер знака = <input type="text" id="gr-size-expr" placeholder="напр. round(ёмкость / 50)" value="${escHtml((layer.fmt && layer.fmt.size_expr) || "")}"></label>
+      </div>
+      <div class="fmt-row">
+        <label>Кегль подписи = <input type="text" id="gr-label-expr" placeholder="напр. if(этажность > 9, 14, 10)" value="${escHtml((layer.fmt && layer.fmt.label_size_expr) || "")}"></label>
+      </div>
+      <div class="form-error" id="gr-expr-error" role="alert" hidden></div>
     </div>
     <div class="form-error style-form-error" id="style-form-error" role="alert" hidden></div>
     </div>
@@ -894,11 +931,80 @@ function openLayerStyle(layer, opts = {}) {
     renderRules();
   });
 
+  // ---------- градуированная символика ----------
+  let gradRules = (layer.rules || []).filter(r => r && r.patch && r.min !== undefined);
+  const gradSettings = () => ({
+    field: $("gr-field") ? $("gr-field").value : "",
+    classes: Math.max(2, Math.min(12, parseInt($("gr-classes")?.value, 10) || 5)),
+    method: $("gr-method") ? $("gr-method").value : "equal",
+    ramp: $("gr-ramp") ? $("gr-ramp").value : "yellow-red",
+    target: $("gr-target-stroke") && $("gr-target-stroke").checked ? "stroke" : "fill",
+  });
+  const renderGradPreview = () => {
+    const box = $("gr-preview");
+    if (!box) return;
+    if (!gradRules.length) {
+      box.innerHTML = numericCols.length
+        ? '<span class="muted">Нажмите «Пересчитать диапазоны»</span>'
+        : '<span class="muted">В слое нет полей с числовыми значениями</span>';
+      return;
+    }
+    box.innerHTML = gradRules.map(rule => {
+      const color = rule.patch.fill || rule.patch.stroke;
+      const hit = layerFeatures.filter(f => SYMBOLOGY.ruleMatchesValue(rule, (f.props || {})[rule.field])).length;
+      return `<div class="gr-class"><span class="gr-swatch" style="background:${escHtml(color)}"></span>` +
+        `<span class="gr-range">${escHtml(rule.title)}</span><span class="gr-count">${hit}</span></div>`;
+    }).join("");
+  };
+  const rebuildGrad = () => {
+    if (!SYMBOLOGY) return;
+    const settings = gradSettings();
+    if (!settings.field) { gradRules = []; renderGradPreview(); return; }
+    const built = SYMBOLOGY.buildGraduated(layerFeatures, settings);
+    gradRules = built.rules;
+    if (built.reason) {
+      const box = $("gr-preview");
+      if (box) box.innerHTML = `<span class="muted">Не построить: ${escHtml(built.reason)}</span>`;
+      return;
+    }
+    renderGradPreview();
+  };
+  if ($("gr-build")) {
+    $("gr-build").addEventListener("click", event => { event.preventDefault(); rebuildGrad(); });
+    ["gr-field", "gr-classes", "gr-method", "gr-ramp", "gr-target-stroke"].forEach(id =>
+      $(id) && $(id).addEventListener("change", rebuildGrad));
+    renderGradPreview();
+  }
+  // выражения проверяем на первом объекте слоя: ошибку человек должен увидеть
+  // здесь, а не получить молчаливо неработающее оформление
+  const checkExpressions = () => {
+    const box = $("gr-expr-error");
+    if (!box) return true;
+    const probe = layerFeatures[0];
+    for (const [id, title] of [["gr-width-expr", "толщины"], ["gr-size-expr", "размера знака"],
+      ["gr-label-expr", "кегля подписи"]]) {
+      const value = $(id) ? $(id).value.trim() : "";
+      if (!value || !probe) continue;
+      try {
+        const result = parseFloat(evalFieldExpr(value, probe));
+        if (!Number.isFinite(result)) throw new Error("получилось не число");
+      } catch (error) {
+        box.hidden = false;
+        box.textContent = `Выражение ${title}: ${error.message || error}`;
+        $(id).focus();
+        return false;
+      }
+    }
+    box.hidden = true;
+    return true;
+  };
+
   // ----- переключение режима -----
   const setMode = m => {
     mode = m;
     $("ls-single").hidden = m !== "single";
     $("ls-rules").hidden = m !== "rules";
+    if ($("ls-graduated")) $("ls-graduated").hidden = m !== "graduated";
     overlay.querySelectorAll(".seg-btn").forEach(b => {
       const selected = b.dataset.mode === m;
       b.classList.toggle("active", selected);
@@ -907,6 +1013,10 @@ function openLayerStyle(layer, opts = {}) {
     });
     // живой предпросмотр текущего режима
     if (m === "single") { delete layer.rules; layer.fmt = collect(); }
+    else if (m === "graduated") {
+      if (!gradRules.length) rebuildGrad();
+      if (gradRules.length) layer.rules = gradRules; else delete layer.rules;
+    }
     else liveRules();
     draw();
   };
@@ -941,19 +1051,40 @@ function openLayerStyle(layer, opts = {}) {
   $("ls-apply").addEventListener("click", () => {
     if (mode === "single" && !validateSingleStyle()) return;
     if (mode === "rules" && !validateRules()) return;
+    if (!checkExpressions()) return;
     closeColorFields();
     layer.fmt = collect();
+    const expressions = [["gr-width-expr", "width_expr"], ["gr-size-expr", "size_expr"],
+      ["gr-label-expr", "label_size_expr"]];
+    for (const [id, key] of expressions) {
+      const value = $(id) ? $(id).value.trim() : "";
+      if (value) layer.fmt[key] = value; else delete layer.fmt[key];
+    }
     if (mode === "rules") {
       syncRules();
       const clean = work.filter(r => r.field && r.value !== "" && r.style_id);
       if (clean.length) layer.rules = clean; else delete layer.rules;
+      delete layer.fmt.graduated;
+    } else if (mode === "graduated") {
+      if (gradRules.length) {
+        layer.rules = gradRules;
+        layer.fmt.graduated = gradSettings();
+      } else {
+        delete layer.rules;
+        delete layer.fmt.graduated;
+      }
     } else {
       delete layer.rules;
+      delete layer.fmt.graduated;
     }
     if (window.commitHistoryFrom) window.commitHistoryFrom(historyBefore);
     state._snapIndex = null;   // cats_off входит в fmt — снап-индекс устарел
     closePopups(); renderLayers(); draw(); persist();
-    toast(mode === "rules" && layer.rules ? `Оформление по значению поля: ${layer.rules.length} правил(о)` : "Оформление слоя применено");
+    toast(mode === "graduated" && layer.rules
+      ? `Оформление по диапазонам: ${layer.rules.length} классов`
+      : mode === "rules" && layer.rules
+        ? `Оформление по значению поля: ${layer.rules.length} правил(о)`
+        : "Оформление слоя применено");
   });
   $("ls-cancel").addEventListener("click", restore);
   overlay.querySelector(".modal-x").addEventListener("click", restore);
