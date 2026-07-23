@@ -1658,7 +1658,7 @@ function selectOne(id) {
   state.selected = id;
   state.selectedIds = id == null ? new Set() : new Set([id]);
 }
-function clearSelection() { state.selected = null; state.selectedIds = new Set(); }
+function clearSelection() { state.selected = null; state.selectedIds = new Set(); state.hoverIdentifyId = null; }
 function setSelection(ids) {
   state.selectedIds = new Set(ids);
   state.selected = ids.length === 1 ? ids[0] : null;
@@ -3526,6 +3526,17 @@ function drawNow() {
           const cx = state.view.tx + a.cx * k; const cy = state.view.ty - a.cy * k;
           ctx.beginPath(); ctx.arc(cx, cy, a.r * k, ...arcScreenArgs(a)); ctx.stroke();
         }
+        ctx.restore();
+      }
+      // наведение на строку списка «что под курсором» — подсветка этого объекта
+      if (state.hoverIdentifyId === f.id) {
+        ctx.save();
+        ctx.strokeStyle = cvColor("selection", "#2f6fde"); ctx.lineWidth = 3;
+        ctx.setLineDash([]); ctx.lineJoin = "round";
+        if (f.point) { const [sx, sy] = w2s(...f.point); ctx.beginPath(); ctx.arc(sx, sy, 9, 0, 2 * Math.PI); ctx.stroke(); }
+        else if (f.circle) { const [sx, sy] = w2s(f.circle.cx, f.circle.cy);
+          ctx.beginPath(); ctx.arc(sx, sy, f.circle.r * state.view.k, 0, 2 * Math.PI); ctx.stroke(); }
+        else { const chain = f.ring || f.line || featurePts(f); if (chain) { drawChain(chain, !!f.ring); ctx.stroke(); } }
         ctx.restore();
       }
       // ховер строки слоя в панели — мягкая подсветка его объектов на холсте
@@ -5798,17 +5809,13 @@ function startBoundaryFlow() {
   toast("Слой границы готов. Поставьте первую точку на холсте.");
 }
 function updateStartExperience() {
-  // Пустой холст объясняет себя одной строкой. Прежний экран-гид загораживал
-  // чертёж и вёл через границу территории, хотя чертить можно с любого слоя.
-  const empty = document.getElementById("cv-empty");
-  if (empty) empty.hidden = state.features.length > 0;
   const active = activeLayer();
   const canDraw = isDrawableLayer(active);
   const drawBlockReason = !active ? "Сначала создайте слой"
     : active.locked ? "Активный слой заблокирован"
       : (active.import_only || active.annotation) ? "Выберите проектный слой" : "Сначала создайте слой";
   const drawingTools = new Set(["point", "polyline", "polygon", "rect", "arc", "circle"]);
-  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror", "split"]);
+  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror", "split", "identify"]);
   document.querySelectorAll("#toolbar button[data-tool]").forEach(button => {
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
     if (drawingTools.has(button.dataset.tool)) {
@@ -7341,6 +7348,87 @@ function hitCandidates(wx, wy, tolW) {
   return out.sort((a, b) => b.rank - a.rank);
 }
 
+// Попадание объекта в точку БЕЗ учёта заливки: в списке «что под курсором»
+// нужны и залитые тела, и голые контуры. Отдельно от hitTest, потому что тот
+// решает другую задачу — кого выбрать одним кликом (там заливка важна).
+// Инструмент «Определить»: список ВСЕХ объектов под курсором, сверху вниз.
+// Наведение на строку подсвечивает объект на чертеже, клик — выбирает его и
+// открывает свойства. Без этого на плотной выгрузке до нижнего объекта не
+// добраться: клик всегда отдаёт верхний.
+function identifySummary(f) {
+  if (f.ring) return `площадь ${fmtAreaHa(featureArea(f))}`;
+  if (f.line) return `длина ${fmtLen(lineLen(f.line))}`;
+  if (f.circle) return `окружность R ${fmtLen(f.circle.r)}`;
+  if (f.arc) return `дуга R ${fmtLen(f.arc.r)}`;
+  return "точка";
+}
+
+function openIdentify(wx, wy, screenX, screenY) {
+  closePopups();
+  const stack = hitTestAll(wx, wy);
+  if (!stack.length) { toast("Под курсором нет объектов"); return; }
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu identify-menu";
+  const head = document.createElement("div");
+  head.className = "identify-head";
+  head.textContent = `Под курсором: ${ruCount(stack.length, "объект", "объекта", "объектов")}`;
+  menu.appendChild(head);
+  for (const f of stack) {
+    const L = layerOf(f);
+    const item = document.createElement("div");
+    item.className = "ctx-item identify-item";
+    const title = document.createElement("b");
+    title.textContent = featureLabelShort(f);
+    const meta = document.createElement("span");
+    meta.textContent = `${L ? L.title : "без слоя"} · ${identifySummary(f)}`;
+    item.append(title, meta);
+    // наведение подсвечивает, но выборку не меняет: иначе список прыгал бы
+    item.addEventListener("pointerenter", () => { state.hoverIdentifyId = f.id; draw(); });
+    item.addEventListener("pointerleave", () => { state.hoverIdentifyId = null; draw(); });
+    item.addEventListener("click", event => {
+      event.stopPropagation();
+      state.hoverIdentifyId = null;
+      closePopups();
+      if (L) state.activeLayerId = L.id;
+      selectOne(f.id);
+      renderLayers(); renderProps(); draw();
+    });
+    menu.appendChild(item);
+  }
+  document.body.appendChild(menu);
+  const rect = cv.getBoundingClientRect();
+  const width = menu.offsetWidth, height = menu.offsetHeight;
+  menu.style.left = Math.min(rect.left + screenX + 8, window.innerWidth - width - 6) + "px";
+  menu.style.top = Math.min(rect.top + screenY + 8, window.innerHeight - height - 6) + "px";
+  setTimeout(() => document.addEventListener("click", () => {
+    state.hoverIdentifyId = null;
+    closePopups();
+    draw();
+  }, { once: true }), 0);
+}
+
+function featureHitsPoint(f, wx, wy, tolW, pointTolW) {
+  const pointTol = pointTolW == null ? tolW : pointTolW;
+  if (f.point) return Math.hypot(f.point[0] - wx, f.point[1] - wy) < pointTol;
+  if (f.line) return nearChain(wx, wy, f.line, tolW) !== null;
+  if (f.arc) return Math.abs(Math.hypot(f.arc.cx - wx, f.arc.cy - wy) - f.arc.r) < tolW;
+  if (f.circle) return Math.abs(Math.hypot(f.circle.cx - wx, f.circle.cy - wy) - f.circle.r) < tolW;
+  if (f.ring) return pointInPolygon(wx, wy, f) || nearRing(wx, wy, f.ring, tolW)
+    || (f.holes || []).some(h => nearRing(wx, wy, h, tolW));
+  return false;
+}
+
+// Все объекты под точкой, сверху вниз. На плотной выгрузке (зона + участок +
+// ОКС + красная линия в одной точке) одним кликом до нужного не добраться:
+// hitTest отдаёт только верхний.
+function hitTestAll(wx, wy) {
+  const tolW = 7 / state.view.k;
+  const pointTolW = tolW + 4 / state.view.k;
+  return hitCandidates(wx, wy, tolW)
+    .filter(({ f }) => featureHitsPoint(f, wx, wy, tolW, pointTolW))
+    .map(({ f }) => f);
+}
+
 function hitTest(wx, wy) {
   const tolW = 7 / state.view.k;
   const cand = hitCandidates(wx, wy, tolW);
@@ -7425,6 +7513,7 @@ cv.addEventListener("pointerdown", e => {
   }
   if (e.button !== 0) return;
   const s = cursorPoint(wxr, wyr);
+  if (state.tool === "identify") { openIdentify(wxr, wyr, ex, ey); return; }
   if (state.tool === "select") {
     const cur = selectedFeature();
     if (cur) {
@@ -7981,6 +8070,10 @@ function setTool(tool, opts = {}) {
   } else {
     state.trimCtx = null;
     setHint("");
+  }
+  if (tool === "identify") {
+    toast("Режим «Определить»: клик по чертежу покажет все объекты под курсором, сверху вниз");
+    setHint("«Определить»: клик — список объектов под курсором");
   }
   if (tool === "split") {
     toast(state.selectedIds.size
@@ -9003,14 +9096,6 @@ window.studio = { state, addFeature, refreshTep, fitView, snapPoint, gridStep,
 on("btn-refresh-src", "click", fetchSources);
 on("btn-shortcuts", "click", openShortcuts);
 on("btn-new-layer", "click", openNewLayerDialog);
-// Подложку не включаем сами (это запросы к внешнему серверу тайлов), но и
-// молчать о ней нельзя: пустой холст читается как «карты тут нет».
-on("start-basemap", "click", () => {
-  const show = document.getElementById("basemap-show");
-  if (!show) return;
-  if (!show.checked) { show.checked = true; show.dispatchEvent(new Event("change", { bubbles: true })); }
-  toast("Подложка включена. Источник и прозрачность — в панели «Подложка»");
-});
 on("btn-style-lib", "click", openStyleLibrary);
 on("btn-project-styles", "click", openProjectStyles);
 on("btn-recover", "click", openAutosaveRecovery);
@@ -9069,8 +9154,12 @@ function initSidePanelResizer(config) {
     const value = Math.max(MIN_WIDTH, Math.min(maxWidth, Math.round(width)));
     if (remember) preferredWidth = value;
     panel.style.flexBasis = value + 'px';
-    // левая панель уезжает за край отрицательным margin — он обязан совпасть
-    if (config.side === 'left') panel.style.setProperty('--layer-panel-width', value + 'px');
+    // Переменную ставим на КОРЕНЬ документа, а не на саму панель: её читает
+    // панель инструментов (#toolbar стоит на left:calc(var(--layer-panel-width)
+    // + 12px)), а она панели не потомок — при расширении слоёв рельс оставался
+    // на месте и налезал на список.
+    if (config.side === 'left')
+      document.documentElement.style.setProperty('--layer-panel-width', value + 'px');
     resizer.setAttribute('aria-valuemax', String(maxWidth));
     resizer.setAttribute('aria-valuenow', String(value));
     resizer.setAttribute('aria-valuetext', `${value} пикселей`);

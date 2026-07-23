@@ -115,14 +115,7 @@ header{
 /* Пустой холст: одна строка по центру, для мыши прозрачна — чертить можно
    прямо сквозь неё. Прежний экран-гид перекрывал чертёж и вёл через границу
    территории, хотя чертить можно с любого слоя. */
-.cv-empty{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);
-  display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;
-  pointer-events:none;color:var(--muted);font-size:var(--fs-12);max-width:min(420px,72%)}
-.cv-empty[hidden]{display:none}
-.cv-empty b{font-size:var(--fs-13);font-weight:600;color:var(--text-2)}
-.cv-empty span{line-height:1.5}
-.cv-empty .linkbtn{pointer-events:auto}
-/* ссылка-действие внутри подсказки: не кнопка по виду, но кнопка по сути */
+/* ссылка-действие в тексте: не кнопка по виду, но кнопка по сути */
 .linkbtn{padding:0;border:0;background:none;color:var(--accent);font:inherit;font-size:inherit;
   text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .linkbtn:hover{color:var(--accent-hover)}
