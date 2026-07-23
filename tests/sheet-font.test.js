@@ -74,8 +74,8 @@ const text = bytes => Buffer.from(bytes).toString("latin1");
   assert.match(sheet, /в шрифте нет кириллицы/, "и человек обязан узнать причину отказа");
   assert.match(sheet, /FALLBACK_FONT = \{ name: "Onest"/,
     "пока своего файла нет, лист идёт на шрифте из репозитория");
-  assert.match(sheet, /id="sheet-font-file"/, "файл выбирается в окне листа");
-  assert.match(sheet, /Шрифт листа: \$\{info\.name\} \(ваш файл/,
+  assert.match(sheet, /data-face="\$\{item\.key\}"/, "файл выбирается в окне листа — по одному на начертание");
+  assert.match(sheet, /Шрифт листа — по одному файлу на начертание/,
     "и видно, каким шрифтом лист будет набран");
   // сам файл шрифта наружу не отправляется
   assert.doesNotMatch(sheet, /fetch\([^)]*font[^)]*POST/i);

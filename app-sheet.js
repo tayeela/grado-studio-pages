@@ -164,7 +164,7 @@
     let y = pad + 14 * PT;
 
     if (column.title) {
-      context.font = `${16 * PT}px sans-serif`;
+      context.font = `700 ${16 * PT}px sans-serif`;   // заголовок листа — полужирный, как в эталоне
       context.fillStyle = "#1c1c1a";
       context.textAlign = "right";
       for (const line of wrapText(context, column.title, inner)) {
@@ -178,7 +178,7 @@
     const left = x + pad;
 
     if (column.legend !== false) {
-      context.font = `${10 * PT}px sans-serif`;
+      context.font = `700 ${10 * PT}px sans-serif`;
       context.fillStyle = "#1c1c1a";
       context.fillText("Условные обозначения", left, y);
       y += 17 * PT;                            // образец высотой 4 мм не должен лезть на заголовок
@@ -199,7 +199,7 @@
     if (column.tep !== false) {
       const rows = tepRows();
       if (rows.length) {
-        context.font = `${10 * PT}px sans-serif`;
+        context.font = `700 ${10 * PT}px sans-serif`;
         context.fillStyle = "#1c1c1a";
         context.fillText("Технико-экономические показатели", left, y);
         y += 14 * PT;
@@ -218,7 +218,9 @@
           context.fillText(lines[0] + (lines.length > 1 ? "…" : ""), left + numberW, y);
           context.textAlign = "right";
           context.fillStyle = "#1c1c1a";
+          context.font = `700 ${7 * PT}px sans-serif`;
           context.fillText(row.value, left + inner - 1.5 * PT, y);
+          context.font = `${7 * PT}px sans-serif`;
           context.textAlign = "left";
           y += rowH;
         });
@@ -339,9 +341,15 @@
   async function buildSheetPdf(options = {}) {
     const PDF = root.GRADO_PDF;
     if (!PDF) throw new Error("модуль PDF не загружен");
-    const fontBytes = await sheetFontBytes();
+    const faces = await sheetFont();
     const doc = PDF.createDocument();
-    doc.addFont("SheetFont", fontBytes);
+    const fontFaces = {};
+    for (const item of FACES) {
+      if (!faces[item.key]) continue;
+      const name = `Sheet_${item.key}`;
+      doc.addFont(name, faces[item.key].bytes);
+      fontFaces[item.key] = name;
+    }
     const list = options.sheets && options.sheets.length ? options.sheets : [sheet];
     const rasters = [];
     for (let i = 0; i < list.length; i++) {
@@ -352,7 +360,7 @@
         onRaster: options.onRaster
           ? progress => options.onRaster({ ...progress, index: i, total: list.length })
           : null,
-      });
+      }, fontFaces);
       rasters.push(raster);
     }
     return { bytes: doc.build(), raster: rasters[0], rasters, pages: list.length };
@@ -360,10 +368,11 @@
 
   // Один лист альбома — страница документа. Шрифт и растры общие для всего
   // файла, поэтому альбом из десяти листов весит не в десять раз больше.
-  async function addSheetPage(doc, PDF, current, options) {
+  async function addSheetPage(doc, PDF, current, options, fontFaces) {
     const view = sheetView(current);
     const page = doc.addPage(view.widthMm, view.heightMm);
-    const context = PDF.createContext(doc, page, { scale: 96 / 72, fontName: "SheetFont" });
+    const context = PDF.createContext(doc, page,
+      { scale: 96 / 72, fontName: fontFaces.regular, fontFaces });
     // Подложка кладётся ПЕРВОЙ: вектор чертежа обязан лежать поверх снимка.
     const raster = await sheetRaster(doc, context, view, options, current);
     renderSceneTo(context, view.width, view.height, { k: view.k, tx: view.tx, ty: view.ty });
@@ -418,6 +427,15 @@
   // и его лицензия встраивание разрешает.
   const FONT_DB = "grado-sheet-font";
   const FALLBACK_FONT = { name: "Onest", url: "./fonts/Onest-Variable.ttf" };
+  // Четыре начертания — ровно те, что живут в рабочем альбоме: обычное,
+  // полужирное, курсив и полужирный курсив. Каждое кладётся своим файлом:
+  // в TrueType это разные файлы, а не варианты одного.
+  const FACES = [
+    { key: "regular", title: "обычное" },
+    { key: "bold", title: "полужирное" },
+    { key: "italic", title: "курсив" },
+    { key: "boldItalic", title: "полужирный курсив" },
+  ];
   let fontCache = null;
 
   function fontStore(mode) {
@@ -433,28 +451,31 @@
     });
   }
 
-  async function savedFont() {
+  async function savedFont(face = "regular") {
     if (typeof indexedDB === "undefined") return null;
     try {
       const { store } = await fontStore("readonly");
       return await new Promise((resolve, reject) => {
-        const request = store.get("sheet");
+        const request = store.get(face === "regular" ? "sheet" : `sheet:${face}`);
         request.onsuccess = () => resolve(request.result || null);
         request.onerror = () => reject(request.error);
       });
     } catch (error) { return null; }
   }
 
-  async function storeFont(name, bytes) {
+  async function storeFont(name, bytes, face = "regular") {
     const { store, done } = await fontStore("readwrite");
-    store.put({ name, bytes, at: Date.now() }, "sheet");
+    store.put({ name, bytes, face, at: Date.now() },
+      face === "regular" ? "sheet" : `sheet:${face}`);
     await done;
-    fontCache = { name, bytes };
+    fontCache = null;
   }
 
-  async function forgetFont() {
+  async function forgetFont(face) {
     const { store, done } = await fontStore("readwrite");
-    store.delete("sheet");
+    if (face) store.delete(face === "regular" ? "sheet" : `sheet:${face}`);
+    else for (const item of FACES)
+      store.delete(item.key === "regular" ? "sheet" : `sheet:${item.key}`);
     await done;
     fontCache = null;
   }
@@ -474,34 +495,41 @@
     return font;
   }
 
+  // Набор начертаний для выпуска: что положил человек, плюс запасное обычное.
   async function sheetFont() {
     if (fontCache) return fontCache;
-    const saved = await savedFont();
-    if (saved && saved.bytes) {
-      fontCache = { name: saved.name, bytes: new Uint8Array(saved.bytes) };
-      return fontCache;
+    const faces = {};
+    for (const item of FACES) {
+      const saved = await savedFont(item.key);
+      if (saved && saved.bytes) faces[item.key] = { name: saved.name, bytes: new Uint8Array(saved.bytes) };
     }
-    const response = await fetch(FALLBACK_FONT.url);
-    if (!response.ok) throw new Error("не найден шрифт листа");
-    fontCache = { name: FALLBACK_FONT.name, bytes: new Uint8Array(await response.arrayBuffer()) };
+    if (!faces.regular) {
+      const response = await fetch(FALLBACK_FONT.url);
+      if (!response.ok) throw new Error("не найден шрифт листа");
+      faces.regular = { name: FALLBACK_FONT.name, own: false,
+        bytes: new Uint8Array(await response.arrayBuffer()) };
+    }
+    fontCache = faces;
     return fontCache;
   }
   root.sheetFontInfo = async () => {
-    const saved = await savedFont();
-    return saved ? { name: saved.name, own: true, size: saved.bytes.byteLength || saved.bytes.length }
-      : { name: FALLBACK_FONT.name, own: false };
+    const out = {};
+    for (const item of FACES) {
+      const saved = await savedFont(item.key);
+      out[item.key] = saved
+        ? { name: saved.name, own: true, size: saved.bytes.byteLength || saved.bytes.length }
+        : { name: item.key === "regular" ? FALLBACK_FONT.name : null, own: false };
+    }
+    return out;
   };
-  root.setSheetFont = async file => {
+  root.setSheetFont = async (file, face = "regular") => {
     const bytes = new Uint8Array(await file.arrayBuffer());
     checkFont(bytes);
-    await storeFont(file.name.replace(/\.(ttf|otf)$/i, ""), bytes);
-    return fontCache;
+    await storeFont(file.name.replace(/\.(ttf|otf)$/i, ""), bytes, face);
+    return true;
   };
   root.clearSheetFont = forgetFont;
-
-  async function sheetFontBytes() {
-    return (await sheetFont()).bytes;
-  }
+  root.SHEET_FACES = FACES;
 
   function saveFile(name, bytes) {
     const blob = new Blob([bytes], { type: "application/pdf" });
@@ -562,11 +590,8 @@
             <span class="sheet-raster-note">Хранится в этом браузере и никуда не отправляется, кроме самого Copernicus.</span>
           </label>
         </div>
-        <div class="sheet-font" id="sheet-font-row">
-          <span id="sheet-font-name">Шрифт листа: проверяем…</span>
-          <span class="spacer"></span>
-          <label class="sheet-font-pick">Выбрать файл<input type="file" id="sheet-font-file" accept=".ttf,.otf" hidden></label>
-          <button type="button" id="sheet-font-clear" hidden>Убрать</button>
+        <div class="sheet-fonts" id="sheet-fonts">
+          <div class="sheet-fonts-head">Шрифт листа — по одному файлу на начертание</div>
         </div>
         <div class="sheet-album" id="sheet-album"></div>
         <div class="sheet-summary" id="sheet-summary" role="status" aria-live="polite"></div>
@@ -643,29 +668,43 @@
     });
     const showFont = async () => {
       const info = await root.sheetFontInfo();
-      $("sheet-font-name").textContent = info.own
-        ? `Шрифт листа: ${info.name} (ваш файл, ${Math.round(info.size / 1024)} КБ)`
-        : `Шрифт листа: ${info.name} — запасной. Положите свой файл, чтобы лист набирался им.`;
-      $("sheet-font-clear").hidden = !info.own;
+      const box = $("sheet-fonts");
+      box.innerHTML = `<div class="sheet-fonts-head">Шрифт листа — по одному файлу на начертание</div>` +
+        FACES.map(item => {
+          const state = info[item.key] || {};
+          const text = state.own
+            ? `${escHtml(state.name)} · ${Math.round(state.size / 1024)} КБ`
+            : item.key === "regular"
+              ? `${escHtml(state.name || "")} — запасной`
+              : "не задано, возьмётся обычное";
+          return `<div class="sheet-font-row">
+            <span class="sheet-font-face">${item.title}</span>
+            <span class="sheet-font-state${state.own ? " own" : ""}">${text}</span>
+            <label class="sheet-font-pick">Файл<input type="file" data-face="${item.key}" accept=".ttf,.otf" hidden></label>
+            ${state.own ? `<button type="button" data-face-clear="${item.key}" title="Убрать это начертание">×</button>` : ""}
+          </div>`;
+        }).join("");
+      box.querySelectorAll("input[data-face]").forEach(input =>
+        input.addEventListener("change", async event => {
+          const file = event.target.files && event.target.files[0];
+          if (!file) return;
+          try {
+            await root.setSheetFont(file, event.target.dataset.face);
+            summary.classList.remove("error");
+            await showFont();
+          } catch (error) {
+            summary.classList.add("error");
+            summary.innerHTML = `<b>Файл шрифта не подошёл.</b><span>${escHtml(String(error.message || error))}</span>`;
+          }
+          event.target.value = "";
+        }));
+      box.querySelectorAll("[data-face-clear]").forEach(button =>
+        button.addEventListener("click", async () => {
+          await root.clearSheetFont(button.dataset.faceClear);
+          await showFont();
+        }));
     };
     showFont();
-    $("sheet-font-file").addEventListener("change", async event => {
-      const file = event.target.files && event.target.files[0];
-      if (!file) return;
-      try {
-        await root.setSheetFont(file);
-        summary.classList.remove("error");
-        await showFont();
-      } catch (error) {
-        summary.classList.add("error");
-        summary.innerHTML = `<b>Файл шрифта не подошёл.</b><span>${escHtml(String(error.message || error))}</span>`;
-      }
-      event.target.value = "";
-    });
-    $("sheet-font-clear").addEventListener("click", async () => {
-      await root.clearSheetFont();
-      await showFont();
-    });
 
     let album = loadAlbum();
     const renderAlbum = () => {

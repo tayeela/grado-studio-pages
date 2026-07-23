@@ -615,6 +615,14 @@
 .sheet-album-title{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sheet-album-meta{flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums}
 .modal-overlay .sheet-album-row button{height:24px;padding-inline:8px;font-size:var(--fs-11)}
+.sheet-fonts{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--hairline);
+  border-radius:var(--r-sm);background:var(--field-bg);font-size:var(--fs-11);color:var(--text-2)}
+.sheet-fonts-head{color:var(--muted)}
+.sheet-font-row{display:flex;align-items:center;gap:8px}
+.sheet-font-face{flex:0 0 auto;min-width:118px}
+.sheet-font-state{flex:1 1 auto;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-font-state.own{color:var(--success-text)}
+.modal-overlay .sheet-font-row button{height:24px;padding-inline:8px}
 .sheet-font{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--hairline);
   border-radius:var(--r-sm);background:var(--field-bg);font-size:var(--fs-11);color:var(--text-2)}
 .sheet-font .spacer{flex:1 1 auto}

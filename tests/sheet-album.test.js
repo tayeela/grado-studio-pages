@@ -68,7 +68,7 @@ const text = bytes => Buffer.from(bytes).toString("latin1");
   const sheet = fs.readFileSync(path.join(root, "app-sheet.js"), "utf8");
   assert.match(sheet, /const list = options\.sheets && options\.sheets\.length \? options\.sheets : \[sheet\];/,
     "выпуск обязан принимать набор листов, а не только текущий");
-  assert.match(sheet, /async function addSheetPage\(doc, PDF, current, options\)/,
+  assert.match(sheet, /async function addSheetPage\(doc, PDF, current, options, fontFaces\)/,
     "лист альбома — страница того же документа");
   assert.match(sheet, /const ALBUM_KEY = "grado-sheet-album";/,
     "альбом — состояние выпуска, а не данные проекта");
