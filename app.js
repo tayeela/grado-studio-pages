@@ -4051,6 +4051,7 @@ function drawNow() {
   // поэтому обращение защищено (как и в node-тестах, где модуля нет вовсе)
   if (typeof topoDrawOverlay === "function") topoDrawOverlay(ctx);
   if (typeof simplifyDrawOverlay === "function") simplifyDrawOverlay(ctx);
+  arrayDrawOverlay(ctx);
   drawSnapMarker();
   updateOverlay();
 }
@@ -6111,7 +6112,7 @@ function updateStartExperience() {
       button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
     }
   });
-  ["btn-join", "btn-buffer-open", "btn-merge", "btn-simplify"].forEach(id => {
+  ["btn-join", "btn-buffer-open", "btn-merge", "btn-simplify", "btn-array"].forEach(id => {
     const button = document.getElementById(id);
     if (!button) return;
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
@@ -6795,6 +6796,206 @@ function openTepPresetEditor() {
   overlay.querySelector("#ed-close").onclick = () => overlay.remove();
   overlay.querySelector(".modal-x").onclick = () => overlay.remove();
   overlay.onclick = e => { if(e.target === overlay) overlay.remove(); };
+}
+
+// ---------- массив копий (array из AutoCAD) ----------
+// Прямоугольный: сетка N×M с шагами по осям. Полярный: N копий по кругу
+// вокруг центра выделения, с поворотом самих копий или без. Ряды парковок,
+// опоры освещения, секции застройки — руками это не размножают.
+let _arrayPreview = null;                      // [{chains:[[..pts..]], closed}]
+
+function arrayDrawOverlay(context) {
+  if (!_arrayPreview || !_arrayPreview.length) return;
+  context.save();
+  context.strokeStyle = cvColor("selection", "#2f6fde");
+  context.lineWidth = 1.2;
+  context.setLineDash([5, 4]);
+  for (const item of _arrayPreview)
+    for (const chain of item.chains) {
+      context.beginPath();
+      chain.forEach((p, i) => {
+        const [sx, sy] = w2s(p[0], p[1]);
+        if (i) context.lineTo(sx, sy); else context.moveTo(sx, sy);
+      });
+      if (item.closed) context.closePath();
+      context.stroke();
+    }
+  context.restore();
+}
+
+// копия геометрии со сдвигом и (для полярного) поворотом вокруг центра
+function arrayTransformed(f, dx, dy, rotation) {
+  const move = p => {
+    let x = p[0], y = p[1];
+    if (rotation) {
+      const cos = Math.cos(rotation.ang), sin = Math.sin(rotation.ang);
+      const rx = x - rotation.cx, ry = y - rotation.cy;
+      x = rotation.cx + rx * cos - ry * sin;
+      y = rotation.cy + rx * sin + ry * cos;
+    }
+    return [x + dx, y + dy];
+  };
+  if (f.point) return { point: move(f.point) };
+  if (f.line) return { line: f.line.map(move) };
+  if (f.ring) return { ring: f.ring.map(move),
+    holes: f.holes && f.holes.length ? f.holes.map(h => h.map(move)) : undefined };
+  if (f.circle) { const c = move([f.circle.cx, f.circle.cy]);
+    return { circle: { cx: c[0], cy: c[1], r: f.circle.r } }; }
+  if (f.arc) { const c = move([f.arc.cx, f.arc.cy]);
+    return { arc: { ...f.arc, cx: c[0], cy: c[1],
+      a0: f.arc.a0 + (rotation ? rotation.ang : 0) } }; }
+  return null;
+}
+
+// позиции копий (без исходной)
+function arrayPlacements(mode, opts, center) {
+  const out = [];
+  if (mode === "rect") {
+    for (let row = 0; row < opts.rows; row++)
+      for (let col = 0; col < opts.cols; col++) {
+        if (!row && !col) continue;            // исходное место
+        out.push({ dx: col * opts.stepX, dy: row * opts.stepY, rotation: null });
+      }
+  } else {
+    // полный круг делится на count, у неполной дуги последняя копия ложится
+    // ровно на её конец
+    const closed = Math.abs(opts.sweep) >= 360;
+    const copies = Math.max(1, opts.count);
+    const step = (opts.sweep * Math.PI / 180) / (closed ? copies : Math.max(1, copies));
+    for (let i = 1; i <= (closed ? copies - 1 : copies); i++)
+      out.push({ dx: 0, dy: 0, rotation: { cx: center[0], cy: center[1], ang: step * i } });
+  }
+  return out;
+}
+
+function openArrayDialog() {
+  closePopups();
+  const targets = selectionFeatures().filter(f => editableFeature(f));
+  if (!targets.length) { toast("Выберите объекты для массива", "warn"); return; }
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const f of targets) for (const p of featurePts(f)) {
+    if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+    if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+  }
+  const center = [(x0 + x1) / 2, (y0 + y1) / 2];
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal fmt-modal array-modal" role="dialog" aria-modal="true" aria-labelledby="ar-title">
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Правка</span><span id="ar-title">Массив копий</span></div>
+      <button class="modal-x" aria-label="Закрыть массив"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body vector-body">
+      <p class="vector-intro">Выбрано объектов: ${targets.length}. Пунктир — предпросмотр копий; проект меняется по кнопке.</p>
+      <div class="fmt-row"><label>Вид<select id="ar-mode">
+        <option value="rect">Прямоугольный</option><option value="polar">Полярный</option></select></label></div>
+      <div class="fmt-row" id="ar-rect">
+        <label>Столбцов<input id="ar-cols" type="number" min="1" max="50" step="1" value="3"></label>
+        <label>Рядов<input id="ar-rows" type="number" min="1" max="50" step="1" value="2"></label>
+        <label>Шаг X, м<input id="ar-stepx" type="number" step="1" value="${Math.max(10, Math.round(x1 - x0 + 5))}"></label>
+        <label>Шаг Y, м<input id="ar-stepy" type="number" step="1" value="${Math.max(10, Math.round(y1 - y0 + 5))}"></label>
+      </div>
+      <div class="fmt-row" id="ar-polar" hidden>
+        <label>Копий<input id="ar-count" type="number" min="1" max="60" step="1" value="6"></label>
+        <label>Дуга, град<input id="ar-sweep" type="number" min="10" max="360" step="10" value="360"></label>
+        <label class="chk"><input id="ar-rotate" type="checkbox" checked>Поворачивать копии</label>
+        <label>Центр X, м<input id="ar-cx" type="number" step="1" value="${Math.round(center[0])}"></label>
+        <label>Центр Y, м<input id="ar-cy" type="number" step="1" value="${Math.round(center[1] - Math.max(20, y1 - y0 + 20))}"></label>
+      </div>
+      <div class="vector-summary" id="ar-summary" role="status" aria-live="polite"></div>
+    </div>
+    <div class="modal-actions"><span class="spacer"></span>
+      <button type="button" id="ar-cancel">Отмена</button>
+      <button type="button" id="ar-apply" class="primary">Создать</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const $a = id => overlay.querySelector("#" + id);
+  let placements = [];
+
+  const rebuild = () => {
+    const mode = $a("ar-mode").value;
+    $a("ar-rect").hidden = mode !== "rect";
+    $a("ar-polar").hidden = mode !== "polar";
+    const opts = mode === "rect"
+      ? { cols: Math.max(1, +$a("ar-cols").value || 1), rows: Math.max(1, +$a("ar-rows").value || 1),
+          stepX: +$a("ar-stepx").value || 0, stepY: +$a("ar-stepy").value || 0 }
+      : { count: Math.max(1, +$a("ar-count").value || 1),
+          sweep: Math.max(10, Math.min(360, +$a("ar-sweep").value || 360)),
+          rotate: $a("ar-rotate").checked };
+    // Центр полярного — из полей: вокруг центра САМОГО объекта крутить
+    // бессмысленно, все копии совпали бы с исходной. По умолчанию центр
+    // сдвинут вниз от выделения — сразу видно круг.
+    const pivot = mode === "polar"
+      ? [Number($a("ar-cx").value) || center[0], Number($a("ar-cy").value) || center[1]]
+      : center;
+    placements = arrayPlacements(mode, opts, pivot);
+    // «не поворачивать» в полярном: геометрия копии остаётся в исходной
+    // ориентации, на круг едет только её центр
+    if (mode === "polar" && !opts.rotate)
+      placements = placements.map(place => ({ ...place, keepUpright: true }));
+    _arrayPreview = [];
+    for (const place of placements)
+      for (const f of targets) {
+        const g = arrayCopyGeometry(f, place);
+        if (!g) continue;
+        const chains = g.ring ? [g.ring, ...(g.holes || [])]
+          : g.line ? [g.line]
+          : g.point ? [[g.point]]
+          : [featurePts({ ...f, ...g })];
+        _arrayPreview.push({ chains, closed: !!g.ring });
+      }
+    const total = placements.length * targets.length;
+    $a("ar-summary").innerHTML = `<b>Будет создано: ${ruCount(total, "копия", "копии", "копий")}</b>` +
+      `<span>${mode === "rect" ? "сетка со сдвигом по осям" : "по кругу вокруг центра выделения"}</span>`;
+    $a("ar-apply").disabled = !total;
+    draw();
+  };
+  overlay.querySelectorAll("select,input").forEach(el => {
+    el.addEventListener("change", rebuild);
+    el.addEventListener("input", rebuild);
+  });
+  const close = () => { _arrayPreview = null; overlay.remove(); draw(); };
+  $a("ar-cancel").addEventListener("click", close);
+  overlay.querySelector(".modal-x").addEventListener("click", close);
+  overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+  overlay.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
+  $a("ar-apply").addEventListener("click", () => {
+    if (!placements.length) return;
+    snapshot();
+    const ids = [];
+    for (const place of placements)
+      for (const f of targets) {
+        const g = arrayCopyGeometry(f, place);
+        if (!g) continue;
+        const nf = { id: state.nextId++, layer_id: f.layer_id,
+          props: cloneVariantValue(f.props || {}), ...g };
+        if (f.style_id) nf.style_id = f.style_id;
+        if (f.kind) nf.kind = f.kind;
+        upgradeFeature(nf);
+        state.features.push(nf);
+        ids.push(nf.id);
+      }
+    close();
+    setSelection(ids);
+    afterChange();
+    toast(`Массив: ${ruCount(ids.length, "копия", "копии", "копий")}`);
+  });
+  rebuild();
+}
+
+// геометрия одной копии: поворотная — вращением вокруг центра; «не
+// поворачивать» — центр объекта едет по кругу, сама геометрия только сдвигается
+function arrayCopyGeometry(f, place) {
+  if (!place.keepUpright) return arrayTransformed(f, place.dx, place.dy, place.rotation);
+  const pts = featurePts(f);
+  let ox = 0, oy = 0, n = 0;
+  for (const p of pts) { ox += p[0]; oy += p[1]; n += 1; }
+  ox /= n || 1; oy /= n || 1;
+  const ang = place.rotation.ang;
+  const cos = Math.cos(ang), sin = Math.sin(ang);
+  const rx = ox - place.rotation.cx, ry = oy - place.rotation.cy;
+  const nx = place.rotation.cx + rx * cos - ry * sin;
+  const ny = place.rotation.cy + rx * sin + ry * cos;
+  return arrayTransformed(f, nx - ox, ny - oy, null);
 }
 
 function openBufferDialog() {
@@ -8683,6 +8884,7 @@ on("p-territory-mode", "change", refreshTep);
 on("p-krail", "change", refreshTep);
 on("p-kba", "change", refreshTep);
 on("btn-tep-editor", "click", openTepPresetEditor);
+on("btn-array", "click", openArrayDialog);
 const bufferOpen = document.getElementById("btn-buffer-open");
 if (bufferOpen) bufferOpen.addEventListener("click", openBufferDialog);
 
