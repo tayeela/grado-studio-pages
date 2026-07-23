@@ -4002,6 +4002,37 @@ function drawNow() {
     ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
     ctx.restore();
   }
+  // измерение площади: контур за курсором, площадь и периметр у последней точки
+  if (state.measureArea && state.measureArea.pts.length) {
+    const m = state.measureArea;
+    const chain = m.done || !state.mouse ? m.pts : [...m.pts, state.mouse];
+    ctx.save();
+    ctx.strokeStyle = cvColor("selection", "#2f6fde");
+    ctx.fillStyle = cvColor("selection", "#2f6fde") + "22";
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([6, 3]);
+    drawChain(chain, chain.length > 2);
+    if (chain.length > 2) ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (chain.length > 1) {
+      let per = 0;
+      for (let i = 0; i + 1 < chain.length; i++)
+        per += Math.hypot(chain[i + 1][0] - chain[i][0], chain[i + 1][1] - chain[i][1]);
+      const closing = chain.length > 2
+        ? Math.hypot(chain[0][0] - chain[chain.length - 1][0], chain[0][1] - chain[chain.length - 1][1]) : 0;
+      const area = chain.length > 2 ? Math.abs(ringArea(chain)) : 0;
+      const last = chain[chain.length - 1];
+      const [mx, my] = w2s(last[0], last[1]);
+      ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
+      ctx.fillStyle = cvColor("selection", "#2f6fde");
+      const text = area > 0
+        ? `${fmtAreaHa(area)} (${Math.round(area).toLocaleString("ru-RU")} м²) · периметр ${fmtLen(per + closing)}`
+        : fmtLen(per);
+      ctx.fillText(text, mx + 12, my - 10);
+    }
+    ctx.restore();
+  }
   // измерение
   if (state.measure) {
     const a = state.measure.a;
@@ -7917,6 +7948,11 @@ cv.addEventListener("pointerdown", e => {
       state.drag = { a: [wxr, wyr], b: [wxr, wyr], marquee: true, add: e.shiftKey, moved: false };
       draw(); renderProps();
     }
+  } else if (state.tool === "marea") {
+    // измерение площади: клики собирают контур, счёт живёт на холсте
+    if (!state.measureArea || state.measureArea.done) state.measureArea = { pts: [], done: false };
+    state.measureArea.pts.push(s.p);
+    draw();
   } else if (state.tool === "measure") {
     if (!state.measure || state.measure.b) state.measure = { a: s.p, b: null };
     else state.measure.b = s.p;
@@ -8333,6 +8369,11 @@ document.addEventListener("keydown", e => {
       toast(state.tool === "trim" ? "Кликните лишний кусок линии" : "Кликните открытый конец линии для продления");
       return;
     }
+    if (state.measureArea && !state.measureArea.done && state.measureArea.pts.length > 2) {
+      state.measureArea.done = true;           // контур замкнут, счёт остаётся на экране
+      draw();
+      return;
+    }
     if (state.drawing && state.typed) placeTypedPoint();
     else finishDrawing();
     return;
@@ -8341,6 +8382,7 @@ document.addEventListener("keydown", e => {
     if (state.xf && state.xf.phase === "act") { xfCancel(); return; }
     if (state.typed) { state.typed = ""; draw(); return; }
     if (state.drawing) { state.drawing = null; draw(); return; }
+    if (state.measureArea) { state.measureArea = null; draw(); return; }
     if (state.measure) { state.measure = null; draw(); return; }
     if (state.trimCtx && (state.trimCtx.boundary.size || state.trimCtx.ready)) {
       state.trimCtx = { boundary: new Set(), ready: false }; draw();
@@ -8413,6 +8455,7 @@ function setTool(tool, opts = {}) {
   state.tool = tool; state.drawing = null; state.drag = null;
   state.edit = null; state.typed = "";
   if (tool !== "measure") state.measure = null;
+  if (tool !== "marea") state.measureArea = null;
   // Подсказка режима видна в статус-строке, пока режим активен: тост исчезает
   // через 5 секунд, а режим остаётся. Пустая строка — обычные инструменты.
   const hintEl = document.getElementById("st-hint");
@@ -8427,6 +8470,10 @@ function setTool(tool, opts = {}) {
   } else {
     state.trimCtx = null;
     setHint("");
+  }
+  if (tool === "marea") {
+    toast("Измерение площади: кликайте контур, Enter — замкнуть, Esc — убрать");
+    setHint("«Площадь»: клики по контуру → Enter");
   }
   if (tool === "reshape") {
     toast(state.selectedIds.size
