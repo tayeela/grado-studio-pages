@@ -103,6 +103,7 @@
       { t: "Горячие клавиши", run: () => click("btn-shortcuts") },
     ]},
     { sec: "Выпуск", items: [
+      { t: "Лист PDF в масштабе…", run: () => window.openSheetDialog && window.openSheetDialog() },
       { t: "Экспорт чертежа (DXF)", run: () => click("btn-dxf"), desktop: true },
       { t: "Печать в масштабе (PDF)", run: () => click("btn-print"), desktop: true },
       { t: "Собрать альбом АГК (PDF)", run: () => click("btn-album"), desktop: true },
