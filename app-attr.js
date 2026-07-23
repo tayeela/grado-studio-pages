@@ -34,8 +34,10 @@ function attrValue(f, col) {
 }
 function fieldDefault(type) { return (type === "int" || type === "real") ? 0 : (type === "bool" ? false : ""); }
 function castField(type, v) {
-  if (type === "int") return Math.round(parseFloat(v) || 0);
-  if (type === "real") { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+  // нечисло в числовом поле — пусто, а не молчаливый 0: «жилая» превращалась
+  // в 0 без следа, и статистика с ТЭП считали выдуманные нули (QGIS даёт NULL)
+  if (type === "int") { const n = parseFloat(v); return isNaN(n) ? "" : Math.round(n); }
+  if (type === "real") { const n = parseFloat(v); return isNaN(n) ? "" : n; }
   if (type === "bool") return v === true || v === "true" || v === "1" || v === "да";
   return String(v);
 }
@@ -458,7 +460,7 @@ function openAddFieldDialog(layer, onDone) {
       <button class="modal-x" aria-label="Закрыть создание поля"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <label>Имя поля<input type="text" id="af-name" placeholder="напр. население"></label>
-      <label>Тип<select id="af-type">${Object.entries(FIELD_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
+      <label>Тип<select id="af-type">${Object.entries(FIELD_TYPES).map(([k, v]) => `<option value="${k}"${k === "text" ? " selected" : ""}>${v}</option>`).join("")}</select></label>
     </div>
     <div class="modal-actions"><span class="spacer"></span>
       <button id="af-cancel">Отмена</button><button id="af-ok" class="primary">Создать</button></div></div>`;
