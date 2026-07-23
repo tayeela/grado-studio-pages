@@ -602,6 +602,29 @@
   .vector-output-card{grid-template-columns:1fr;align-items:stretch}.vector-modal .modal-actions{gap:6px}
   .modal-overlay button.vector-help{display:none}
 }
+/* ---- Отбор объектов: по выражению и по расположению ---- */
+.modal-overlay .modal.select-modal{width:min(620px,96vw);max-height:92vh;padding:16px}
+.select-body{gap:12px}
+.select-tabs{display:flex;gap:4px;border-bottom:1px solid var(--hairline);padding-bottom:8px}
+.modal-overlay .select-tabs button{height:32px;padding-inline:12px;background:transparent;border-color:transparent;color:var(--muted)}
+.modal-overlay .select-tabs button:hover{background:var(--field-bg)}
+.modal-overlay .select-tabs button.active{background:var(--accent-weak);border-color:var(--accent-line);color:var(--accent)}
+.select-pane{display:flex;flex-direction:column;gap:10px}
+.select-pane[hidden]{display:none}
+.select-row{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-11);color:var(--text-2)}
+.select-fields{display:flex;flex-wrap:wrap;gap:6px}
+.modal-overlay button.select-field{height:28px;padding-inline:9px;font-size:var(--fs-11);background:var(--field-bg);border-color:var(--field-border);color:var(--text-2)}
+.modal-overlay button.select-field:hover{border-color:var(--accent);color:var(--accent)}
+.select-hint{margin:0;font-size:var(--fs-11);line-height:1.5;color:var(--muted)}
+.select-hint b{color:var(--text-2);font-weight:600}
+.select-summary{min-height:48px;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--hairline);
+  display:flex;flex-direction:column;justify-content:center;gap:3px;background:var(--field-bg)}
+.select-summary b{font-size:var(--fs-12);color:var(--text)}
+.select-summary span{font-size:var(--fs-11);line-height:1.4;color:var(--muted)}
+.select-summary.error{border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:var(--danger-weak)}
+.select-summary.error b{color:var(--danger-text)}
+@media(max-width:700px){.modal-overlay .modal.select-modal{width:calc(100vw - 20px);padding:12px}}
+
 /* ---- Проверка топологии: находки списком, переход к месту на чертеже ---- */
 .modal-overlay .modal.topo-modal{width:min(720px,96vw);max-height:92vh;padding:16px}
 .topo-body{gap:14px}
