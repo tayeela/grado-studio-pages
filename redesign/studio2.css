@@ -653,6 +653,18 @@
 .find-row b{font-size:var(--fs-12);color:var(--text)}
 .find-row span{font-size:var(--fs-11);color:var(--muted)}
 
+/* ---- группы легенды листа ---- */
+.legend-groups-modal { width: min(560px, 92vw); }
+.lg-groups { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.lg-group-row { display: flex; gap: 6px; align-items: center; }
+.lg-group-row input { flex: 1; min-width: 0; }
+.lg-group-row button { flex: 0 0 auto; padding: 4px 9px; }
+.lg-layers { display: flex; flex-direction: column; gap: 4px; margin-top: 10px;
+  max-height: 40vh; overflow-y: auto; }
+.lg-layer-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.lg-layer-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-layer-row select { flex: 0 0 auto; max-width: 55%; }
+
 /* ---- статистика поля ---- */
 .modal-overlay .modal.stats-modal{width:min(420px,94vw);padding:16px}
 .stats-body{display:flex;flex-direction:column;gap:2px;max-height:320px;overflow:auto}

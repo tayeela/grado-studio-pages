@@ -83,33 +83,56 @@
 
   // Строки условных обозначений собираются из того же, что показывает панель
   // «Легенда»: слои, их категории и диапазоны градуированной символики.
-  function legendRows() {
+  function legendRowsForLayer(layer) {
     const rows = [];
-    // в Node слоёв нет — раскладка обязана собираться и без них
-    if (typeof LAYERS_V2 === "undefined" || typeof state === "undefined") return rows;
-    for (const layer of LAYERS_V2) {
-      if (!layer.visible) continue;
-      const features = state.features.filter(f => layerOf(f) === layer);
-      if (!features.length) continue;
-      const ranges = typeof rangeRulesOf === "function" ? rangeRulesOf(layer) : [];
-      if (ranges.length) {
-        const base = layerStyle(layer) || {};
-        for (const rule of ranges)
-          rows.push({ title: rule.title || `${rule.min} – ${rule.max}`,
-            style: { ...base, ...rule.patch }, geometry: layer.geometry_type });
-        continue;
-      }
-      const cats = typeof layerCatStats === "function" ? layerCatStats(layer) : [];
-      const visible = cats.filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
-      if (visible.length > 1) {
-        for (const cat of visible)
-          rows.push({ title: cat.title, style: cat.sample ? styleOf(cat.sample) : layerStyle(layer),
-            geometry: layer.geometry_type });
-        continue;
-      }
-      rows.push({ title: layer.title, style: styleOf(features[0]) || layerStyle(layer),
-        geometry: layer.geometry_type });
+    const features = state.features.filter(f => layerOf(f) === layer);
+    if (!features.length) return rows;
+    const ranges = typeof rangeRulesOf === "function" ? rangeRulesOf(layer) : [];
+    if (ranges.length) {
+      const base = layerStyle(layer) || {};
+      for (const rule of ranges)
+        rows.push({ title: rule.title || `${rule.min} – ${rule.max}`,
+          style: { ...base, ...rule.patch }, geometry: layer.geometry_type });
+      return rows;
     }
+    const cats = typeof layerCatStats === "function" ? layerCatStats(layer) : [];
+    const visible = cats.filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
+    if (visible.length > 1) {
+      for (const cat of visible)
+        rows.push({ title: cat.title, style: cat.sample ? styleOf(cat.sample) : layerStyle(layer),
+          geometry: layer.geometry_type });
+      return rows;
+    }
+    rows.push({ title: layer.title, style: styleOf(features[0]) || layerStyle(layer),
+      geometry: layer.geometry_type });
+    return rows;
+  }
+
+  // Группы легенды — по эталонному альбому: «Границы», «Застройка», «Линии
+  // градостроительного регулирования» печатаются заголовками в заданном
+  // порядке. Раскладка хранится в проекте (state.sheetLegend); слои внутри
+  // группы идут в порядке панели слоёв, не попавшие в группы — после групп
+  // без заголовка. Пустая группа (слой скрыт или пуст) заголовок не печатает.
+  function legendRows() {
+    // в Node слоёв нет — раскладка обязана собираться и без них
+    if (typeof LAYERS_V2 === "undefined" || typeof state === "undefined") return [];
+    const eligible = LAYERS_V2.filter(layer => layer.visible);
+    const cfg = state.sheetLegend;
+    if (!cfg || !Array.isArray(cfg.groups) || !cfg.groups.length)
+      return eligible.flatMap(legendRowsForLayer);
+    const rows = [];
+    const used = new Set();
+    for (const group of cfg.groups) {
+      const memberIds = new Set(Array.isArray(group.layers) ? group.layers : []);
+      const members = eligible.filter(layer => memberIds.has(layer.id));
+      const body = members.flatMap(legendRowsForLayer);
+      members.forEach(layer => used.add(layer.id));
+      if (!body.length) continue;
+      if (group.title) rows.push({ heading: true, title: String(group.title) });
+      rows.push(...body);
+    }
+    for (const layer of eligible)
+      if (!used.has(layer.id)) rows.push(...legendRowsForLayer(layer));
     return rows;
   }
 
@@ -190,6 +213,16 @@
       const sampleW = mmToPx(11), sampleH = mmToPx(4), gap = mmToPx(3);
       for (const row of legendRows()) {
         if (y > view.height - pad - mmToPx(20)) break;
+        if (row.heading) {
+          // заголовок группы («Границы», «Застройка»…) — без образца знака
+          y += 3 * PT;
+          context.font = `700 ${8 * PT}px sans-serif`;
+          context.fillStyle = "#1c1c1a";
+          context.fillText(row.title, left, y);
+          y += 12 * PT;
+          context.font = `${7.5 * PT}px sans-serif`;
+          continue;
+        }
         drawSample(context, row.style || {}, row.geometry, left, y - sampleH + 1.5 * PT, sampleW, sampleH);
         context.fillStyle = "#44423c";
         const lines = wrapText(context, row.title, inner - sampleW - gap);
@@ -548,6 +581,114 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // ---------- группы легенды ----------
+  // Заголовки как в эталонном альбоме: слой назначается в группу, группы
+  // печатаются в своём порядке. Порядок слоёв внутри группы — порядок панели
+  // слоёв: он уже управляется перетаскиванием там, второй порядок не нужен.
+  function openLegendGroups() {
+    closePopups();
+    const eligible = LAYERS_V2.filter(layer =>
+      layer.visible && state.features.some(f => layerOf(f) === layer));
+    if (!eligible.length) { toast("В проекте нет видимых слоёв с объектами", "warn"); return; }
+    let groups = state.sheetLegend && Array.isArray(state.sheetLegend.groups)
+      ? JSON.parse(JSON.stringify(state.sheetLegend.groups)) : [];
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal legend-groups-modal" role="dialog" aria-modal="true" aria-labelledby="lg-title">
+      <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Выпуск</span><span id="lg-title">Группы легенды листа</span></div>
+        <button class="modal-x" aria-label="Закрыть группы легенды"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <div class="modal-body select-body">
+        <p class="vector-intro">Группы печатаются в колонке листа заголовками в своём порядке;
+          слои внутри группы идут в порядке панели слоёв, не назначенные — после групп без заголовка.
+          Раскладка хранится в проекте.</p>
+        <div class="lg-groups" id="lg-groups"></div>
+        <div class="fmt-row">
+          <button type="button" id="lg-add">Добавить группу</button>
+          <button type="button" id="lg-preset" title="Границы / Застройка / Линии градостроительного регулирования — слои разложатся по своим ролям">Как в альбоме</button>
+        </div>
+        <div class="lg-layers" id="lg-layers"></div>
+      </div>
+      <div class="modal-actions"><button type="button" id="lg-clear">Без групп</button><span class="spacer"></span>
+        <button type="button" id="lg-cancel">Отмена</button>
+        <button type="button" id="lg-apply" class="primary">Применить</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const $g = id => overlay.querySelector("#" + id);
+
+    const membership = layerId => groups.findIndex(group =>
+      Array.isArray(group.layers) && group.layers.includes(layerId));
+    const unassign = layerId => { for (const group of groups)
+      group.layers = (group.layers || []).filter(id => id !== layerId); };
+
+    const render = () => {
+      $g("lg-groups").innerHTML = groups.map((group, index) => `<div class="lg-group-row">
+        <input type="text" data-lg-name="${index}" value="${escHtml(group.title || "")}" placeholder="Название группы">
+        <button type="button" data-lg-up="${index}" title="Выше"${index ? "" : " disabled"}>↑</button>
+        <button type="button" data-lg-down="${index}" title="Ниже"${index < groups.length - 1 ? "" : " disabled"}>↓</button>
+        <button type="button" data-lg-del="${index}" title="Убрать группу">✕</button>
+      </div>`).join("") || `<div class="muted">Групп нет — легенда печатается сплошным списком.</div>`;
+      $g("lg-layers").innerHTML = eligible.map(layer => `<div class="lg-layer-row">
+        <span>${escHtml(layer.title)}</span>
+        <select data-lg-layer="${escHtml(layer.id)}">
+          <option value="-1">— без группы —</option>
+          ${groups.map((group, index) => `<option value="${index}"${membership(layer.id) === index ? " selected" : ""}>${escHtml(group.title || `Группа ${index + 1}`)}</option>`).join("")}
+        </select>
+      </div>`).join("");
+      overlay.querySelectorAll("[data-lg-name]").forEach(input =>
+        input.addEventListener("input", () => { groups[+input.dataset.lgName].title = input.value; }));
+      overlay.querySelectorAll("[data-lg-up]").forEach(button =>
+        button.addEventListener("click", () => { const i = +button.dataset.lgUp;
+          [groups[i - 1], groups[i]] = [groups[i], groups[i - 1]]; render(); }));
+      overlay.querySelectorAll("[data-lg-down]").forEach(button =>
+        button.addEventListener("click", () => { const i = +button.dataset.lgDown;
+          [groups[i], groups[i + 1]] = [groups[i + 1], groups[i]]; render(); }));
+      overlay.querySelectorAll("[data-lg-del]").forEach(button =>
+        button.addEventListener("click", () => { groups.splice(+button.dataset.lgDel, 1); render(); }));
+      overlay.querySelectorAll("[data-lg-layer]").forEach(select =>
+        select.addEventListener("change", () => {
+          const layerId = select.dataset.lgLayer;
+          unassign(layerId);
+          const index = +select.value;
+          if (index >= 0 && groups[index]) (groups[index].layers = groups[index].layers || []).push(layerId);
+        }));
+    };
+    $g("lg-add").addEventListener("click", () => { groups.push({ title: "", layers: [] }); render(); });
+    $g("lg-preset").addEventListener("click", () => {
+      // роли слоёв раскладываются сами: границы — в «Границы», здания —
+      // в «Застройку», красные линии и ограничения — в «Линии
+      // градостроительного регулирования»; остальное остаётся без группы
+      const byKind = kinds => eligible.filter(layer => kinds.includes(layer.kind)).map(layer => layer.id);
+      groups = [
+        { title: "Границы", layers: byKind(["boundary"]) },
+        { title: "Застройка", layers: byKind(["building"]) },
+        { title: "Линии градостроительного регулирования", layers: byKind(["redline", "restrict"]) },
+      ];
+      render();
+    });
+    const close = () => overlay.remove();
+    $g("lg-cancel").addEventListener("click", close);
+    overlay.querySelector(".modal-x").addEventListener("click", close);
+    overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+    overlay.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
+    $g("lg-clear").addEventListener("click", () => {
+      state.sheetLegend = null;
+      persist(); draw(); close();
+      toast("Легенда — сплошным списком");
+    });
+    $g("lg-apply").addEventListener("click", () => {
+      const cleaned = groups
+        .map(group => ({ title: String(group.title || "").trim(),
+          layers: (group.layers || []).filter(Boolean) }))
+        .filter(group => group.title || group.layers.length);
+      state.sheetLegend = cleaned.length ? { groups: cleaned } : null;
+      persist(); draw(); close();
+      toast("Группы легенды сохранены в проекте");
+    });
+    render();
+  }
+  root.openLegendGroups = openLegendGroups;
+
   // ---------- окно ----------
   function openSheetDialog() {
     closePopups();
@@ -579,6 +720,7 @@
           <div class="fmt-row">
             <label class="chk"><input type="checkbox" id="sheet-legend"${sheet.column.legend === false ? "" : " checked"}>Условные обозначения</label>
             <label class="chk"><input type="checkbox" id="sheet-tep"${sheet.column.tep === false ? "" : " checked"}>Таблица ТЭП</label>
+            <button type="button" id="sheet-legend-groups">Группы легенды…</button>
           </div>
           <label class="chk"><input type="checkbox" id="sheet-smallcaps"${sheet.column.smallCapsTitle ? " checked" : ""}>Заголовок капителью (SC700)</label>
           <label class="sheet-field">Примечания<textarea id="sheet-notes" rows="2" placeholder="* коэффициент перехода…">${escHtml(sheet.column.notes || "")}</textarea></label>
@@ -668,6 +810,7 @@
     overlay.querySelector(".modal-x").addEventListener("click", close);
     overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
     overlay.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
+    $("sheet-legend-groups").addEventListener("click", openLegendGroups);
     $("sheet-center").addEventListener("click", () => {
       const [wx, wy] = s2w(viewportWidth() / 2, viewportHeight() / 2);
       sheet.cx = wx; sheet.cy = wy;
