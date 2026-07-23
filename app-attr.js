@@ -195,6 +195,47 @@ function evalFieldExpr(expr, f) {
   return res;
 }
 
+// ---------- статистика поля (панель статистики QGIS) ----------
+// Считает по списку значений: числовое — минимум/максимум/сумма/среднее/
+// медиана, любое — счётчик пустых и самые частые значения. Пустым считается
+// то же, что в отборе: заглушки портала NOT_FOUND и None — это «пусто».
+function fieldStats(values) {
+  const isEmpty = v => v === null || v === undefined ||
+    ["", "none", "null", "not_found", "-"].includes(String(v).trim().toLowerCase());
+  const filled = values.filter(v => !isEmpty(v));
+  // Числом считается только строка ЦЕЛИКОМ: parseFloat выдирает «77» из
+  // кадастрового номера 77:01:0001:15 и превращал бы номер в статистику.
+  const wholeNumber = v => {
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    const text = String(v).trim().replace(",", ".").replace(/\s+/g, "");
+    return /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(text) ? parseFloat(text) : null;
+  };
+  const numbers = filled.map(wholeNumber).filter(n => n !== null);
+  const stats = { count: values.length, filled: filled.length, empty: values.length - filled.length,
+    numericCount: numbers.length, numeric: null, top: [] };
+  // числовая сводка — только когда числа составляют большинство заполненных:
+  // у поля «кадастровый номер» parseFloat выдирает «77» и врёт статистикой
+  if (numbers.length && numbers.length >= filled.length * 0.9) {
+    numbers.sort((a, b) => a - b);
+    const sum = numbers.reduce((acc, n) => acc + n, 0);
+    const mid = numbers.length >> 1;
+    stats.numeric = {
+      min: numbers[0], max: numbers[numbers.length - 1], sum,
+      mean: sum / numbers.length,
+      median: numbers.length % 2 ? numbers[mid] : (numbers[mid - 1] + numbers[mid]) / 2,
+    };
+  } else if (filled.length) {
+    const counter = new Map();
+    for (const v of filled) {
+      const key = String(v).trim();
+      counter.set(key, (counter.get(key) || 0) + 1);
+    }
+    stats.top = [...counter].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    stats.uniqueCount = counter.size;
+  }
+  return stats;
+}
+
 function openAttributeTable(layer) {
   closePopups();
   let editMode = false, filter = "all";
@@ -209,6 +250,7 @@ function openAttributeTable(layer) {
       <button id="at-addf" class="at-editonly" hidden>+ поле</button>
       <button id="at-fields" class="at-editonly" hidden title="Переименование, тип, порядок, значение по умолчанию">⚙ Поля слоя</button>
       <button id="at-calc">∑ Калькулятор полей</button>
+      <button id="at-stats" title="Минимум, максимум, сумма, среднее и медиана поля — по строкам текущего фильтра">Σ Статистика</button>
       <span class="spacer"></span>
       <label class="at-filter">Показать
         <select id="at-flt"><option value="all">все</option><option value="selected">выделенные</option></select></label>
@@ -346,9 +388,65 @@ function openAttributeTable(layer) {
   $("at-addf").addEventListener("click", () => openAddFieldDialog(layer, () => { persist(); renderTable(); }));
   $("at-fields").addEventListener("click", () => openManageFieldsDialog(layer, () => { draw(); refreshTep(); renderTable(); }));
   $("at-calc").addEventListener("click", () => openFieldCalc(layer, filtered, () => { renderTable(); }));
+  $("at-stats").addEventListener("click", () => openFieldStats(layer, filtered));
   overlay.querySelector(".modal-x").addEventListener("click", closePopups);
   overlay.addEventListener("click", ev => { if (ev.target === overlay) closePopups(); });
   renderTable();
+}
+
+// Окно статистики поля — по строкам текущего фильтра таблицы («все» или
+// «выделенные»), как панель статистики в QGIS. Таблица остаётся под ним.
+function openFieldStats(layer, filtered) {
+  const columns = attrColumns(layer);
+  if (!columns.length) { toast("В слое нет полей", "warn"); return; }
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal fmt-modal stats-modal" role="dialog" aria-modal="true" aria-labelledby="fs-title">
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Таблица атрибутов</span><span id="fs-title">Статистика поля</span></div>
+      <button class="modal-x" aria-label="Закрыть статистику"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body vector-body">
+      <label>Поле<select id="fs-field">${columns.map(c =>
+        `<option value="${escHtml(c.name)}">${escHtml(c.label || c.name)}</option>`).join("")}</select></label>
+      <div class="stats-body" id="fs-body"></div>
+    </div>
+    <div class="modal-actions"><span class="muted" id="fs-scope"></span><span class="spacer"></span>
+      <button type="button" id="fs-close">Закрыть</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const $q = sel => overlay.querySelector(sel);
+  const fmt = n => Number.isFinite(n)
+    ? (Math.abs(n) >= 1000 ? Math.round(n).toLocaleString("ru-RU")
+      : String(Math.round(n * 100) / 100))
+    : "—";
+  const rebuild = () => {
+    const name = $q("#fs-field").value;
+    const column = columns.find(c => c.name === name);
+    const feats = filtered();
+    const values = feats.map(f => attrValue(f, column));
+    const stats = fieldStats(values);
+    $q("#fs-scope").textContent = `по ${ruCount(feats.length, "строке", "строкам", "строкам")} текущего фильтра`;
+    const rows = [["Строк", stats.count], ["Заполнено", stats.filled], ["Пусто", stats.empty]];
+    if (stats.numeric) {
+      rows.push(["Минимум", fmt(stats.numeric.min)], ["Максимум", fmt(stats.numeric.max)],
+        ["Сумма", fmt(stats.numeric.sum)], ["Среднее", fmt(stats.numeric.mean)],
+        ["Медиана", fmt(stats.numeric.median)]);
+    }
+    let html = rows.map(([k, v]) =>
+      `<div class="stats-row"><span>${escHtml(k)}</span><b>${escHtml(String(v))}</b></div>`).join("");
+    if (!stats.numeric && stats.top.length) {
+      html += `<div class="stats-row stats-head"><span>Частые значения</span><b>${stats.uniqueCount} уникальных</b></div>`;
+      html += stats.top.map(([value, count]) =>
+        `<div class="stats-row"><span class="stats-val">${escHtml(value.slice(0, 40))}</span><b>${count}</b></div>`).join("");
+    }
+    $q("#fs-body").innerHTML = html;
+  };
+  $q("#fs-field").addEventListener("change", rebuild);
+  const close = () => overlay.remove();
+  $q("#fs-close").addEventListener("click", close);
+  $q(".modal-x").addEventListener("click", close);
+  overlay.addEventListener("click", ev => { ev.stopPropagation(); if (ev.target === overlay) close(); });
+  overlay.addEventListener("keydown", ev => { if (ev.key === "Escape") { ev.stopPropagation(); close(); } });
+  rebuild();
 }
 
 // диалог создания поля — БЕЗ closePopups (таблица под ним остаётся)
