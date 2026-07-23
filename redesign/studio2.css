@@ -607,6 +607,20 @@
 .sheet-body{gap:12px}
 .sheet-intro{margin:0;padding:10px 12px;border:1px solid var(--accent-line);border-radius:var(--r-sm);
   background:var(--accent-weak);color:var(--text-2);font-size:var(--fs-12);line-height:1.45}
+.sheet-album{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto;
+  border:1px solid var(--hairline);border-radius:var(--r-sm);padding:10px;font-size:var(--fs-11)}
+.sheet-album-row{display:flex;align-items:center;gap:8px;color:var(--text-2)}
+.sheet-album-no{flex:0 0 auto;min-width:20px;height:20px;display:grid;place-items:center;
+  border:1px solid var(--hairline);border-radius:3px;font-variant-numeric:tabular-nums}
+.sheet-album-title{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-album-meta{flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums}
+.modal-overlay .sheet-album-row button{height:24px;padding-inline:8px;font-size:var(--fs-11)}
+.sheet-font{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--hairline);
+  border-radius:var(--r-sm);background:var(--field-bg);font-size:var(--fs-11);color:var(--text-2)}
+.sheet-font .spacer{flex:1 1 auto}
+.sheet-font-pick{flex:0 0 auto;height:28px;display:inline-flex;align-items:center;padding-inline:10px;
+  border:1px solid var(--field-border);border-radius:var(--r-sm);cursor:pointer;background:var(--panel)}
+.sheet-font-pick:hover{border-color:var(--accent);color:var(--accent)}
 .sheet-raster-note{font-size:var(--fs-11);line-height:1.45;color:var(--muted)}
 .sheet-raster-note.warn{color:var(--warning-text)}
 #sheet-raster-fields{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--hairline);border-radius:var(--r-sm)}

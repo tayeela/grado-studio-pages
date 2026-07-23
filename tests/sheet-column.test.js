@@ -77,7 +77,7 @@ const S = globalThis.GRADO_SHEET_CORE;
 // ---------- проводка ----------
 {
   const sheet = fs.readFileSync(path.join(root, "app-sheet.js"), "utf8");
-  assert.match(sheet, /drawSheetColumn\(context, sheet, view\);/,
+  assert.match(sheet, /drawSheetColumn\(context, current, view\);/,
     "колонка обязана рисоваться при выпуске, после сцены");
   assert.match(sheet, /function tepRows\(\)/, "таблица ТЭП берётся из готового расчёта студии");
   assert.match(sheet, /root\.lastTepData/, "того же, что показан в панели");

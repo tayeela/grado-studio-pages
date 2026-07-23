@@ -57,6 +57,16 @@
   // целиком: подрезание таблиц — отдельная работа с составными глифами, а
   // 120–300 КБ на лист роли не играют.
   function readFont(buffer) {
+    try { return parseFont(buffer); }
+    catch (error) {
+      // Свои объяснения пропускаем как есть, чужие — заворачиваем: человек
+      // выбирает файл шрифта и должен прочесть про файл, а не про DataView.
+      if (/TrueType|таблиц|символов|кириллиц/i.test(error.message || "")) throw error;
+      throw new Error("файл шрифта повреждён или обрезан");
+    }
+  }
+
+  function parseFont(buffer) {
     const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const tag = view.getUint32(0);
@@ -223,10 +233,19 @@
         `/CapHeight ${num(font.ascent * scale)} /StemV 80 /FontFile2 ${entry.fileId} 0 R >>`);
       put(entry.fileId, { dict: `<< /Length ${font.bytes.length} /Length1 ${font.bytes.length} >>`,
         stream: font.bytes });
+      // Одному глифу отвечает несколько кодов: у дефиса это U+002D и U+00AD
+      // (мягкий перенос), у пробела — U+0020 и U+00A0. В обратную таблицу
+      // берём НАИМЕНЬШИЙ код, иначе текст из готового листа копируется
+      // мягкими переносами и неразрывными пробелами.
+      const best = new Map();
+      for (const [code, glyph] of font.map) {
+        if (!entry.used.has(glyph) || code > 0xffff) continue;
+        const known = best.get(glyph);
+        if (known === undefined || code < known) best.set(glyph, code);
+      }
       const pairs = [];
-      for (const [code, glyph] of font.map)
-        if (entry.used.has(glyph) && code <= 0xffff)
-          pairs.push(`<${glyph.toString(16).padStart(4, "0")}> <${code.toString(16).padStart(4, "0")}>`);
+      for (const [glyph, code] of best)
+        pairs.push(`<${glyph.toString(16).padStart(4, "0")}> <${code.toString(16).padStart(4, "0")}>`);
       const cmap = `/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n` +
         `/CMapName /Identity-H def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n` +
         chunk(pairs, 100).map(part => `${part.length} beginbfchar\n${part.join("\n")}\nendbfchar\n`).join("") +

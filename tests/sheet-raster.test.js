@@ -109,7 +109,7 @@ const MOSCOW = 55.75;
 {
   const sheet = fs.readFileSync(path.join(root, "app-sheet.js"), "utf8");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-  assert.match(sheet, /const raster = await sheetRaster\(doc, context, view, options\);/,
+  assert.match(sheet, /const raster = await sheetRaster\(doc, context, view, options, current\);/,
     "подложка обязана ложиться ДО чертежа");
   assert.match(sheet, /renderSceneTo\(context[\s\S]{0,120}drawSheetColumn/,
     "порядок: растр → чертёж → колонка");
