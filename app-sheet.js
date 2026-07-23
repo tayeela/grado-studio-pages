@@ -12,6 +12,7 @@
 (function (root) {
   "use strict";
 
+  const TILES = root.GRADO_TILES || { SOURCES: {}, pickZoom: () => ({ actual: 0, actualDpi: 0, upscaled: false }) };
   const MM_PER_PX = 25.4 / 96;                 // единицы холста = CSS-пиксели
   const PX_PER_MM = 96 / 25.4;
 
@@ -274,7 +275,8 @@
     return { format: saved?.format || "A3", portrait: !!saved?.portrait,
       scale: saved?.scale || 2000, cx: wx, cy: wy,
       column: saved?.column || { on: true, widthMm: 110, legend: true, tep: true,
-        title: "", notes: "", number: "" } };
+        title: "", notes: "", number: "" },
+      raster: saved?.raster || { on: false, source: "esri", dpi: 300 } };
   }
   const viewportWidth = () => document.getElementById("cv").clientWidth || 800;
   const viewportHeight = () => document.getElementById("cv").clientHeight || 600;
@@ -334,7 +336,7 @@
   };
 
   // ---------- выпуск ----------
-  async function buildSheetPdf() {
+  async function buildSheetPdf(options = {}) {
     const PDF = root.GRADO_PDF;
     if (!PDF) throw new Error("модуль PDF не загружен");
     const fontBytes = await sheetFontBytes();
@@ -343,9 +345,49 @@
     const view = sheetView(sheet);
     const page = doc.addPage(view.widthMm, view.heightMm);
     const context = PDF.createContext(doc, page, { scale: 96 / 72, fontName: "SheetFont" });
+    // Подложка кладётся ПЕРВОЙ: вектор чертежа обязан лежать поверх снимка.
+    const raster = await sheetRaster(doc, context, view, options);
     renderSceneTo(context, view.width, view.height, { k: view.k, tx: view.tx, ty: view.ty });
     drawSheetColumn(context, sheet, view);
-    return doc.build();
+    if (raster) drawAttribution(context, view, raster);
+    return { bytes: doc.build(), raster };
+  }
+
+  // Растр вкладывается ровно в чертёжную полосу листа: рамка листа и есть его
+  // охват, поэтому снимок не нужно ни двигать, ни подрезать на месте.
+  async function sheetRaster(doc, context, view, options) {
+    const config = sheet.raster || {};
+    if (!config.on || !root.buildSheetRaster) return null;
+    if (typeof localToLonLat !== "function") return null;
+    const [x0, y0, x1, y1] = sheetExtent(sheet);
+    const sw = localToLonLat(x0, y0), ne = localToLonLat(x1, y1);
+    const bbox = [Math.min(sw[0], ne[0]), Math.min(sw[1], ne[1]),
+                  Math.max(sw[0], ne[0]), Math.max(sw[1], ne[1])];
+    const built = await root.buildSheetRaster({ source: config.source || "esri", bbox,
+      scale: sheet.scale, dpi: Number(config.dpi) || 300,
+      signal: options.signal, onProgress: options.onRaster });
+    const image = doc.addJpeg(built.bytes, built.width, built.height);
+    context.drawImage({ __pdfImage: image }, 0, 0, view.drawWidth, view.height);
+    return built;
+  }
+
+  // Источник тайлов обязан быть подписан на листе — это условие использования
+  // и у OSM, и у ESRI.
+  function drawAttribution(context, view, raster) {
+    context.save();
+    context.font = `${6 * (96 / 72)}px sans-serif`;
+    context.textAlign = "left";
+    context.textBaseline = "alphabetic";
+    context.fillStyle = "#ffffff";
+    const text = raster.attribution;
+    const width = context.measureText(text).width;
+    const x = 6 * PX_PER_MM, y = view.height - 4 * PX_PER_MM;
+    context.globalAlpha = 0.75;
+    context.fillRect(x - 2, y - 8, width + 6, 12);
+    context.globalAlpha = 1;
+    context.fillStyle = "#44423c";
+    context.fillText(text, x, y);
+    context.restore();
   }
 
   // Пока свой шрифт не заведён, лист идёт на Onest из репозитория: он лежит
@@ -406,6 +448,15 @@
           </div>
           <label class="sheet-field">Примечания<textarea id="sheet-notes" rows="2" placeholder="* коэффициент перехода…">${escHtml(sheet.column.notes || "")}</textarea></label>
         </div>
+        <label class="chk"><input type="checkbox" id="sheet-raster"${sheet.raster.on ? " checked" : ""}>Подложка на листе (растр в PDF)</label>
+        <div id="sheet-raster-fields"${sheet.raster.on ? "" : " hidden"}>
+          <div class="fmt-row">
+            <label>Источник<select id="sheet-raster-source">${Object.entries(TILES.SOURCES).map(([key, spec]) =>
+              `<option value="${key}"${key === sheet.raster.source ? " selected" : ""}>${escHtml(spec.title)}${spec.unofficial ? " (неофициальный)" : ""}</option>`).join("")}</select></label>
+            <label>Плотность, dpi<input type="number" id="sheet-raster-dpi" min="150" max="600" step="50" value="${Number(sheet.raster.dpi) || 300}"></label>
+          </div>
+          <div class="sheet-raster-note" id="sheet-raster-note"></div>
+        </div>
         <div class="sheet-summary" id="sheet-summary" role="status" aria-live="polite"></div>
       </div>
       <div class="modal-actions"><button type="button" id="sheet-center">По центру вида</button><span class="spacer"></span>
@@ -429,6 +480,21 @@
         number: $("sheet-number").value.trim(),
       };
       $("sheet-column-fields").hidden = !sheet.column.on;
+      sheet.raster = { on: $("sheet-raster").checked,
+        source: $("sheet-raster-source").value,
+        dpi: Math.max(150, Math.min(600, Number($("sheet-raster-dpi").value) || 300)) };
+      $("sheet-raster-fields").hidden = !sheet.raster.on;
+      if (sheet.raster.on) {
+        const lat = typeof localToLonLat === "function" ? localToLonLat(sheet.cx, sheet.cy)[1] : 55.75;
+        const choice = TILES.pickZoom({ source: sheet.raster.source, lat,
+          scale: sheet.scale, dpi: sheet.raster.dpi });
+        const note = $("sheet-raster-note");
+        note.classList.toggle("warn", choice.upscaled);
+        note.textContent = choice.upscaled
+          ? `Источник даёт ${choice.actual.toFixed(2)} м/точку — это ${Math.round(choice.actualDpi)} dpi. ` +
+            `Снимок будет увеличен до ${sheet.raster.dpi} dpi; резче он не станет.`
+          : `Источник даёт ${choice.actual.toFixed(2)} м/точку — хватает на ${sheet.raster.dpi} dpi.`;
+      }
       const [widthMm, heightMm] = sheetSize(sheet.format, sheet.portrait);
       const columnWidth = sheet.column.on ? (Number(sheet.column.widthMm) || 110) : 0;
       const groundW = (widthMm - columnWidth) / 1000 * sheet.scale;
@@ -440,8 +506,10 @@
       save();
       draw();
     };
-    ["sheet-format", "sheet-orient", "sheet-scale", "sheet-column", "sheet-legend", "sheet-tep"]
+    ["sheet-format", "sheet-orient", "sheet-scale", "sheet-column", "sheet-legend", "sheet-tep",
+      "sheet-raster", "sheet-raster-source"]
       .forEach(id => $(id).addEventListener("change", update));
+    $("sheet-raster-dpi").addEventListener("input", update);
     ["sheet-column-width", "sheet-number", "sheet-title-text", "sheet-notes"]
       .forEach(id => $(id).addEventListener("input", update));
     const close = () => { overlay.remove(); };
@@ -459,10 +527,18 @@
       button.disabled = true;
       summary.innerHTML = `<b>Собираем лист…</b><span>вектор, тем же кодом, что рисует экран</span>`;
       try {
-        const bytes = await buildSheetPdf();
+        const { bytes, raster } = await buildSheetPdf({
+          onRaster: ({ done, total }) => {
+            summary.innerHTML = `<b>Собираем подложку…</b><span>${done} из ${total} тайлов</span>`;
+          },
+        });
         const name = (document.getElementById("project-name")?.value || "лист").trim();
         saveFile(`${name} · ${sheet.format} 1-${sheet.scale}.pdf`, bytes);
-        summary.innerHTML = `<b>Готово: ${(bytes.length / 1024 / 1024).toFixed(1)} МБ</b><span>масштаб 1:${sheet.scale.toLocaleString("ru-RU")}, ${sheet.format}</span>`;
+        const rasterNote = raster
+          ? ` · подложка ${Math.round(raster.actualDpi)} dpi${raster.failed ? `, ${raster.failed} тайлов не пришло` : ""}`
+          : "";
+        summary.innerHTML = `<b>Готово: ${(bytes.length / 1024 / 1024).toFixed(1)} МБ</b>` +
+          `<span>масштаб 1:${sheet.scale.toLocaleString("ru-RU")}, ${sheet.format}${rasterNote}</span>`;
       } catch (error) {
         summary.classList.add("error");
         summary.innerHTML = `<b>Не удалось собрать лист.</b><span>${escHtml(String(error.message || error)).slice(0, 160)}</span>`;
