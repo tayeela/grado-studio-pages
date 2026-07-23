@@ -34,6 +34,12 @@ const context = vm.createContext({
   syncHistoryControls() {},
   afterChange: null,
   rebuildLayerIndexes: null,
+  // встроенные приёмники данных: их можно удалить из панели, но импорт обязан
+  // уметь завести их заново
+  _BUILTIN_LAYER_SPECS: [{ id: "source.nspd.buildings", title: "Здания (ЕГРН)", kind: "building",
+    semantic_class: "oks.building", geometry_type: "polygon", style_id: "building.fill",
+    stage: "existing", source_kind: "nspd", import_only: true, defaults: () => ({}) }],
+  cloneLayerSpec: layer => ({ ...layer }),
 });
 context.snapshot = () => {
   context.state.undo.push("before import");
@@ -137,5 +143,39 @@ assert.deepEqual(JSON.parse(JSON.stringify({
   fmt: existingLayer.fmt,
   fmtInit: existingLayer._fmtInit,
 })), beforeRollback.existingLayer);
+
+context.failAfterChange = false;   // прошлый блок нарочно ломал фиксацию
+
+// ---------- удалённый встроенный приёмник заводится заново ----------
+// Приёмник «Здания (ЕГРН)» — обычный слой, его можно удалить из панели. Раньше
+// после этого источник становился непригоден навсегда: следующая выгрузка
+// падала с «Схема полей ссылается на неизвестный слой».
+{
+  context.LAYERS_V2.length = 0;
+  context.rebuildLayerIndexes();
+  context.state.features = [];
+  context.state.nextId = 1;
+  const revived = context.prepareSourceImport({
+    layers: [],
+    features: [{ layer_id: "source.nspd.buildings", kind: "building",
+      ring: [[0, 0], [10, 0], [0, 10]], props: { floors: 5 }, srcKey: "b:1" }],
+    fieldsByLayer: { "source.nspd.buildings": [{ name: "floors", type: "real" }] },
+  });
+  assert.equal(revived.added, 1, "объект обязан импортироваться и без слоя в проекте");
+  assert.deepEqual(Array.from(revived.newLayers, layer => layer.id), ["source.nspd.buildings"],
+    "приёмник обязан заводиться заново по встроенной спецификации");
+  assert.equal(revived.newLayers[0].title, "Здания (ЕГРН)", "с прежним названием");
+  assert.equal(revived.newLayers[0].import_only, true, "и прежними свойствами");
+  context.commitPreparedSourceImport(revived);
+  assert.ok(context.LAYER_BY_ID["source.nspd.buildings"], "после фиксации слой в проекте");
+  assert.deepEqual(Array.from(context.LAYER_BY_ID["source.nspd.buildings"].fields || [], f => f.name), ["floors"],
+    "поля выгрузки обязаны лечь в восстановленный слой");
+
+  // слой, которого нет ни в проекте, ни среди встроенных, — по-прежнему ошибка
+  assert.throws(() => context.prepareSourceImport({
+    layers: [], features: [],
+    fieldsByLayer: { "source.unknown.layer": [{ name: "x", type: "text" }] },
+  }), /неизвестный слой/, "выдуманный слой обязан оставаться ошибкой");
+}
 
 console.log("transactional import: ok");

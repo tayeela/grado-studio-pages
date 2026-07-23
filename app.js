@@ -1463,9 +1463,22 @@ function prepareSourceImport(input = {}) {
     assertCompatibleImportedLayer(LAYER_BY_ID[layer.id], layer);
     stagedLayerById.set(layer.id, layer);
   }
+  // Встроенный приёмник данных («Здания (ЕГРН)», «Дороги OSM» и прочие) можно
+  // удалить из панели слоёв — он такой же слой. После этого источник становился
+  // непригоден НАВСЕГДА: следующая выгрузка падала с «Схема полей ссылается на
+  // неизвестный слой». Приёмник — часть модели, а не пользовательский слой,
+  // поэтому заводим его заново по встроенной спецификации и продолжаем.
+  const reviveBuiltinLayer = layerId => {
+    const spec = _BUILTIN_LAYER_SPECS.find(item => item.id === layerId);
+    if (!spec) return null;
+    const layer = cloneLayerSpec(spec);
+    layer.visible = true;
+    stagedLayerById.set(layerId, layer);
+    return layer;
+  };
   const fieldsByLayer = normalizeImportFields(input.fieldsByLayer || input.fields);
   for (const layerId of Object.keys(fieldsByLayer))
-    if (!LAYER_BY_ID[layerId] && !stagedLayerById.has(layerId))
+    if (!LAYER_BY_ID[layerId] && !stagedLayerById.has(layerId) && !reviveBuiltinLayer(layerId))
       throw new Error(`Схема полей ссылается на неизвестный слой «${layerId}»`);
 
   const existingKeys = new Set();
@@ -1483,7 +1496,8 @@ function prepareSourceImport(input = {}) {
   const invalidDetails = [];
   const resolveImportLayer = feature => {
     if (feature.layer_id)
-      return stagedLayerById.get(feature.layer_id) || LAYER_BY_ID[feature.layer_id] || null;
+      return stagedLayerById.get(feature.layer_id) || LAYER_BY_ID[feature.layer_id]
+        || reviveBuiltinLayer(feature.layer_id) || null;
     return LAYER_BY_KIND[feature.kind] || null;
   };
   for (const raw of incomingFeatures) {
