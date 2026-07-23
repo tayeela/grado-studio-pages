@@ -1694,6 +1694,7 @@ const state = {
   projectStyles: {},              // свои стили проекта: { "my_id": {fill, stroke, width, ... , title? } }
   projectCustomKinds: [],         // пользовательские роли/типы слоёв для этого проекта
   albumConfig: JSON.parse(JSON.stringify(DEFAULT_ALBUM_CONFIG)),
+  sheetLegend: null,              // группы легенды листа: { groups: [{title, layers:[id]}] }
   _fitted: false, _ix: null,
 };
 
@@ -4195,6 +4196,7 @@ function historySmallState() {
   delete saved.variants;
   delete saved.accessRadii;
   delete saved.albumConfig;
+  delete saved.sheetLegend;
   return JSON.stringify({ history_version: 2, ...saved });
 }
 // ---------------------------------------------------------------------------
@@ -4479,6 +4481,7 @@ function collectState(opts = {}) {
     variants: state.variants || [],
     accessRadii: state.accessRadii,
     albumConfig: state.albumConfig,
+    sheetLegend: state.sheetLegend || null,
   };
 }
 // Настройки, которые должны ехать внутри .grado вместе с геометрией. Без
@@ -6237,6 +6240,7 @@ function resetProjectState(name = "Новый проект") {
   state.projectCustomKinds = [];
   state.accessRadii = { on: false, r: 300 };
   state.albumConfig = JSON.parse(JSON.stringify(DEFAULT_ALBUM_CONFIG));
+  state.sheetLegend = null;
   state.activeLayerId = null;
   state.drawing = null;
   state.drag = null;
@@ -9627,6 +9631,8 @@ function applyRestoredState(d) {
   if (isRecord(d.albumConfig)) {
     state.albumConfig = d.albumConfig;
   }
+  state.sheetLegend = isRecord(d.sheetLegend) && Array.isArray(d.sheetLegend.groups)
+    ? d.sheetLegend : null;
   state.osnap = d.osnap !== false;
   setTopoEdit(d.topoEdit === true, true);
   state.gridSnap = d.gridSnap !== false;
