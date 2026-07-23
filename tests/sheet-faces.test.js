@@ -33,6 +33,36 @@ const text = bytes => Buffer.from(bytes).toString("latin1");
   assert.equal(P.faceOf("italic bold 14px sans-serif"), "boldItalic");
   assert.equal(P.faceOf("400 12px sans-serif"), "regular", "обычный вес — обычное начертание");
   assert.equal(P.faceOf(""), "regular");
+  // капитель — отдельный файл (в эталоне CenturyGothic-SC700), а не приём вёрстки
+  assert.equal(P.faceOf("small-caps 700 16px sans-serif"), "smallCaps");
+  assert.equal(P.faceOf("small-caps 16px sans-serif"), "smallCaps");
+}
+
+// ---------- капитель и её замена ----------
+{
+  const doc = P.createDocument();
+  doc.addFont("R", onest);
+  doc.addFont("B", onest);
+  const page = doc.addPage(120, 40);
+  // капитель НЕ вложена: обязана замениться полужирным, а не обычным
+  const ctx = P.createContext(doc, page, { scale: 1, fontName: "R",
+    fontFaces: { regular: "R", bold: "B", smallCaps: "SC" } });
+  ctx.font = "small-caps 700 16px sans-serif";
+  ctx.fillText("Титульный лист", 5, 20);
+  const stream = page.ops.join(" ");
+  assert.ok(stream.includes("/B "), "без капители обязан браться полужирный");
+  assert.ok(!stream.includes("/SC "), "и не ссылаться на невложенный шрифт");
+
+  // а когда вложена — берётся она
+  const doc2 = P.createDocument();
+  doc2.addFont("R", onest);
+  doc2.addFont("SC", onest);
+  const page2 = doc2.addPage(120, 40);
+  const ctx2 = P.createContext(doc2, page2, { scale: 1, fontName: "R",
+    fontFaces: { regular: "R", smallCaps: "SC" } });
+  ctx2.font = "small-caps 700 16px sans-serif";
+  ctx2.fillText("Титульный лист", 5, 20);
+  assert.ok(page2.ops.join(" ").includes("/SC "), "положенная капитель обязана использоваться");
 }
 
 // ---------- лист использует нужные начертания ----------
@@ -81,12 +111,17 @@ const text = bytes => Buffer.from(bytes).toString("latin1");
 {
   const sheet = fs.readFileSync(path.join(root, "app-sheet.js"), "utf8");
   assert.match(sheet, /\{ key: "boldItalic", title: "полужирный курсив" \}/,
-    "четыре начертания обязаны быть в списке");
+    "начертания обязаны быть в списке");
+  assert.match(sheet, /\{ key: "smallCaps", title: "капитель \(SC700\)" \}/,
+    "включая капитель из эталонного альбома");
+  assert.match(sheet, /column\.smallCapsTitle[\s\S]{0,80}small-caps 700/,
+    "заголовок капителью — по галочке, а не всегда");
+  assert.match(sheet, /id="sheet-smallcaps"/, "и галочка обязана быть в окне");
   assert.match(sheet, /doc\.addFont\(name, faces\[item\.key\]\.bytes\);/,
     "каждое положенное начертание вкладывается в файл");
   assert.match(sheet, /fontName: fontFaces\.regular, fontFaces/,
     "и доезжает до рекордера");
-  assert.match(sheet, /context\.font = `700 \$\{16 \* PT\}px sans-serif`;/,
+  assert.match(sheet, /: `700 \$\{16 \* PT\}px sans-serif`;/,
     "заголовок листа обязан быть полужирным — как в эталоне");
   assert.match(sheet, /context\.font = `700 \$\{10 \* PT\}px sans-serif`;[\s\S]{0,120}Условные обозначения/,
     "и заголовок условных обозначений тоже");

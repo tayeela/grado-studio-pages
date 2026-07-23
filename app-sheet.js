@@ -164,7 +164,11 @@
     let y = pad + 14 * PT;
 
     if (column.title) {
-      context.font = `700 ${16 * PT}px sans-serif`;   // заголовок листа — полужирный, как в эталоне
+      // Капитель — по требованию: в эталонном альбоме ею набран титул, а не
+      // каждый лист. Нет положенного файла — рекордер возьмёт полужирный.
+      context.font = column.smallCapsTitle
+        ? `small-caps 700 ${16 * PT}px sans-serif`
+        : `700 ${16 * PT}px sans-serif`;
       context.fillStyle = "#1c1c1a";
       context.textAlign = "right";
       for (const line of wrapText(context, column.title, inner)) {
@@ -435,6 +439,7 @@
     { key: "bold", title: "полужирное" },
     { key: "italic", title: "курсив" },
     { key: "boldItalic", title: "полужирный курсив" },
+    { key: "smallCaps", title: "капитель (SC700)" },
   ];
   let fontCache = null;
 
@@ -575,6 +580,7 @@
             <label class="chk"><input type="checkbox" id="sheet-legend"${sheet.column.legend === false ? "" : " checked"}>Условные обозначения</label>
             <label class="chk"><input type="checkbox" id="sheet-tep"${sheet.column.tep === false ? "" : " checked"}>Таблица ТЭП</label>
           </div>
+          <label class="chk"><input type="checkbox" id="sheet-smallcaps"${sheet.column.smallCapsTitle ? " checked" : ""}>Заголовок капителью (SC700)</label>
           <label class="sheet-field">Примечания<textarea id="sheet-notes" rows="2" placeholder="* коэффициент перехода…">${escHtml(sheet.column.notes || "")}</textarea></label>
         </div>
         <label class="chk"><input type="checkbox" id="sheet-raster"${sheet.raster.on ? " checked" : ""}>Подложка на листе (растр в PDF)</label>
@@ -615,6 +621,7 @@
         widthMm: Math.max(40, Math.min(200, Number($("sheet-column-width").value) || 110)),
         legend: $("sheet-legend").checked,
         tep: $("sheet-tep").checked,
+        smallCapsTitle: $("sheet-smallcaps").checked,
         title: $("sheet-title-text").value,
         notes: $("sheet-notes").value,
         number: $("sheet-number").value.trim(),
@@ -650,7 +657,7 @@
       draw();
     };
     ["sheet-format", "sheet-orient", "sheet-scale", "sheet-column", "sheet-legend", "sheet-tep",
-      "sheet-raster", "sheet-raster-source"]
+      "sheet-raster", "sheet-raster-source", "sheet-smallcaps"]
       .forEach(id => $(id).addEventListener("change", update));
     $("sheet-raster-dpi").addEventListener("input", update);
     $("sheet-cdse-instance").addEventListener("input", update);

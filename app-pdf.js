@@ -460,10 +460,19 @@
   // пришлось бы размечать вторым, отдельным от экрана способом.
   function faceOf(fontSpec) {
     const text = String(fontSpec || "").toLowerCase();
+    // «small-caps» — это тоже отдельный файл шрифта (в эталонном альбоме
+    // CenturyGothic-SC700), а не начертание, которое можно подделать
+    // масштабированием заглавных.
+    if (/(^|\s)small-caps(\s|$)/.test(text)) return "smallCaps";
     const weight = /(^|\s)(bold|[6-9]00)(\s|$)/.test(text);
     const italic = /(^|\s)(italic|oblique)(\s|$)/.test(text);
     return weight && italic ? "boldItalic" : weight ? "bold" : italic ? "italic" : "regular";
   }
+
+  // Чем заменить отсутствующее начертание: капитель ближе всего к полужирному,
+  // полужирный курсив — к полужирному, и всё в итоге сводится к обычному.
+  const FACE_FALLBACK = { smallCaps: ["bold", "regular"], boldItalic: ["bold", "italic", "regular"],
+    bold: ["regular"], italic: ["regular"], regular: [] };
 
   // Какое имя шрифта в документе отвечает этой строке начертания. Если нужного
   // начертания человек не положил, берём обычное: лучше ровный текст, чем
@@ -471,8 +480,10 @@
   function fontNameFor(fontSpec, doc, options) {
     const face = faceOf(fontSpec);
     const names = options.fontFaces || {};
-    const candidate = names[face];
-    if (candidate && doc.hasFont(candidate)) return candidate;
+    for (const key of [face, ...(FACE_FALLBACK[face] || [])]) {
+      const candidate = names[key];
+      if (candidate && doc.hasFont(candidate)) return candidate;
+    }
     return names.regular && doc.hasFont(names.regular) ? names.regular : options.fontName;
   }
 
