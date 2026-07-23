@@ -1090,7 +1090,10 @@ function _markerGlyphsSVG(mk, x0, x1, midY, stroke) {
 const GEOM_OF_TOOL = { point: "point", polyline: "polyline",
                        polygon: "polygon", rect: "polygon", arc: "arc", circle: "circle" };
 // какую геометрию собирает черчение (rect кликами = контур-полигон, dim — линия)
-const TOOL_GEOM = { ...GEOM_OF_TOOL, dim: "polyline" };
+// «Разрезать» собирает ломаную тем же черчением, но объекта не создаёт —
+// поэтому он в TOOL_GEOM (сбор точек), но НЕ в GEOM_OF_TOOL (создание слоя
+// под геометрию и переключение активного слоя ему не нужны).
+const TOOL_GEOM = { ...GEOM_OF_TOOL, dim: "polyline", split: "polyline" };
 
 function activeLayer() { return LAYER_BY_ID[state.activeLayerId] || null; }
 
@@ -5805,7 +5808,7 @@ function updateStartExperience() {
     : active.locked ? "Активный слой заблокирован"
       : (active.import_only || active.annotation) ? "Выберите проектный слой" : "Сначала создайте слой";
   const drawingTools = new Set(["point", "polyline", "polygon", "rect", "arc", "circle"]);
-  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror"]);
+  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror", "split"]);
   document.querySelectorAll("#toolbar button[data-tool]").forEach(button => {
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
     if (drawingTools.has(button.dataset.tool)) {
@@ -5820,7 +5823,7 @@ function updateStartExperience() {
       button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
     }
   });
-  ["btn-join", "btn-buffer-open"].forEach(id => {
+  ["btn-join", "btn-buffer-open", "btn-merge"].forEach(id => {
     const button = document.getElementById(id);
     if (!button) return;
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
@@ -6921,6 +6924,13 @@ function dedupePts(pts, closed) {
 }
 function finishDrawing() {
   const d = state.drawing;
+  if (state.tool === "split") {
+    const pts = d && Array.isArray(d.pts) ? dedupePts(d.pts, false) : null;
+    state.drawing = null; state.typed = "";
+    if (pts && pts.length >= 2) splitByLine(pts);
+    else { toast("Нужны хотя бы две точки линии разреза", "warn"); draw(); }
+    return;
+  }
   const L = activeLayer();
   if (d && !isDrawableLayer(L)) toast(L?.locked
     ? `Слой «${L.title}» заблокирован — рисование отменено`
@@ -6945,6 +6955,105 @@ function finishDrawing() {
   }
   state.drawing = null; state.typed = "";
   draw();
+}
+
+// ---------- разрезать и объединить (правка геометрии, как в QGIS) ----------
+// Инструмент «Разрезать»: человек чертит ломаную, все пересечённые объекты
+// доступных слоёв делятся по ней. Атрибуты достаются каждой части — часть
+// квартала остаётся тем же кварталом, пока человек не скажет иначе.
+function editableFeature(f) {
+  const L = layerOf(f);
+  return !!L && !L.locked && !L.annotation && L.visible !== false && !isHidden(f);
+}
+
+function splitByLine(cut) {
+  const E = window.GRADO_EDIT;
+  if (!E) { toast("Модуль правки геометрии не загружен", "warn"); return; }
+  // Область реза — как в QGIS: есть выбор, режем выбранное; нет выбора —
+  // только активный слой. Резать весь проект одной линией нельзя: на городской
+  // выгрузке под линией окажутся зоны, участки, здания и красные линии разом.
+  const active = activeLayer();
+  const scope = state.selectedIds.size
+    ? state.features.filter(f => state.selectedIds.has(f.id) && editableFeature(f))
+    : state.features.filter(f => f.layer_id === (active && active.id) && editableFeature(f));
+  if (!scope.length) {
+    toast(state.selectedIds.size ? "Выбранные объекты нельзя резать (слой заблокирован или скрыт)"
+      : "Нечего резать: выберите объекты или сделайте активным слой с ними", "warn");
+    draw();
+    return;
+  }
+  const made = [], removed = new Set();
+  let blocked = null;
+  for (const f of scope) {
+    if (Array.isArray(f.ring)) {
+      const result = E.splitPolygon(f, cut);
+      if (!result.parts.length) { if (result.reason && result.reason !== "линия не пересекает объект") blocked = result.reason; continue; }
+      removed.add(f.id);
+      for (const part of result.parts) made.push({ src: f, geom: { ring: part.ring, holes: part.holes.length ? part.holes : undefined } });
+    } else if (Array.isArray(f.line)) {
+      const result = E.splitLine(f.line, cut);
+      if (!result.parts.length) continue;
+      removed.add(f.id);
+      for (const part of result.parts) made.push({ src: f, geom: { line: part } });
+    }
+  }
+  if (!made.length) {
+    toast(blocked ? `Разрез невозможен: ${blocked}` : "Линия разреза никого не пересекла", "warn");
+    draw();
+    return;
+  }
+  snapshot();
+  state.features = state.features.filter(f => !removed.has(f.id));
+  const ids = [];
+  for (const { src, geom } of made) {
+    const f = { id: state.nextId++, layer_id: src.layer_id, props: cloneVariantValue(src.props || {}), ...geom };
+    if (src.style_id) f.style_id = src.style_id;
+    if (src.kind) f.kind = src.kind;
+    upgradeFeature(f);
+    state.features.push(f);
+    ids.push(f.id);
+  }
+  setSelection(ids);
+  afterChange();
+  toast(`Разрезано: ${ruCount(removed.size, "объект", "объекта", "объектов")} → ${made.length}`);
+}
+
+// «Объединить»: выбранные полигоны одного слоя становятся одним объектом.
+// Атрибуты берутся у первого выбранного — как в QGIS, где предлагают выбрать
+// объект-источник; здесь источник виден в подтверждении.
+function mergeSelectedPolygons() {
+  const E = window.GRADO_EDIT;
+  if (!E) { toast("Модуль правки геометрии не загружен", "warn"); return; }
+  const picked = selectionFeatures().filter(f => Array.isArray(f.ring) && editableFeature(f));
+  if (picked.length < 2) { toast("Выберите два и более полигона одного слоя", "warn"); return; }
+  const layerIds = new Set(picked.map(f => f.layer_id));
+  if (layerIds.size > 1) { toast("Объединять можно объекты одного слоя", "warn"); return; }
+  const result = E.mergePolygons(picked);
+  if (!result.part) { toast(`Не объединить: ${result.reason}`, "warn"); return; }
+  snapshot();
+  const keep = picked[0];
+  const ids = new Set(picked.map(f => f.id));
+  state.features = state.features.filter(f => !ids.has(f.id));
+  const f = { id: state.nextId++, layer_id: keep.layer_id, props: cloneVariantValue(keep.props || {}),
+    ring: result.part.ring };
+  if (result.part.holes.length) f.holes = result.part.holes;
+  if (keep.style_id) f.style_id = keep.style_id;
+  if (keep.kind) f.kind = keep.kind;
+  upgradeFeature(f);
+  state.features.push(f);
+  setSelection([f.id]);
+  afterChange();
+  toast(`Объединено ${ruCount(picked.length, "полигон", "полигона", "полигонов")} · атрибуты от «${featureLabelShort(keep)}»`);
+}
+
+// короткое имя объекта для сообщения — первое осмысленное значение атрибутов
+function featureLabelShort(f) {
+  const props = f.props || {};
+  for (const key of ["name", "title", "zone_title", "purpose", "index", "cad_num"]) {
+    const value = props[key];
+    if (value != null && String(value).trim()) return String(value).trim().slice(0, 30);
+  }
+  return `объект №${f.id}`;
 }
 
 // Простой порт Arc.from_3pts для фронтенда (храним параметры + для рендера)
@@ -7451,7 +7560,7 @@ cv.addEventListener("pointerdown", e => {
   } else if (state.tool === "dim" || TOOL_GEOM[state.tool]) {
     // рисование геометрии требует активный слой; размеры пишутся в свой
     // аннотационный слой и активного слоя не требуют
-    if (state.tool !== "dim" && !isDrawableLayer(activeLayer())) {
+    if (state.tool !== "dim" && state.tool !== "split" && !isDrawableLayer(activeLayer())) {
       toast(activeLayer()?.locked ? "Активный слой заблокирован" : "Создайте слой, чтобы рисовать", "warn");
       return;
     }
@@ -7873,6 +7982,12 @@ function setTool(tool, opts = {}) {
     state.trimCtx = null;
     setHint("");
   }
+  if (tool === "split") {
+    toast(state.selectedIds.size
+      ? `Режим «Разрезать»: чертите линию через выбранное (${state.selectedIds.size}), Enter — разрезать`
+      : "Режим «Разрезать»: чертите линию через объекты, Enter — разрезать. Выделите объекты, чтобы резать только их.");
+    setHint("«Разрезать»: линия через объекты → Enter");
+  }
   if (tool === "fillet") {
     promptFilletRadius();   // задать радиус при входе в инструмент
     // раньше инструкция уходила ТОЛЬКО в скрытый #st-hint: после диалога радиуса
@@ -7958,6 +8073,7 @@ function quickLayerByKind(kind) {
 document.querySelectorAll("#toolbar button[data-tool]").forEach(
   b => b.addEventListener("click", () => setTool(b.dataset.tool)));
 document.getElementById("btn-join").addEventListener("click", () => joinSelected());
+on("btn-merge", "click", () => mergeSelectedPolygons());
 
 function setOsnap(v) {
   state.osnap = !!v;
