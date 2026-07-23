@@ -420,7 +420,7 @@
     function drawText(text, x, y, isFill) {
       const value = String(text ?? "");
       if (!value) return;
-      const entry = doc.fontEntry(options.fontName);
+      const entry = doc.fontEntry(fontNameFor(state.font, doc, options));
       if (!entry) return;
       const size = fontSize(state.font);
       const width = textWidth(value, state.font, doc, options);
@@ -455,8 +455,29 @@
     return match ? parseFloat(match[1]) : 10;
   };
 
+  // Начертание выбирается по той же строке шрифта, что и на холсте:
+  // «600 12px sans-serif» — полужирный, «italic 11px …» — курсив. Иначе лист
+  // пришлось бы размечать вторым, отдельным от экрана способом.
+  function faceOf(fontSpec) {
+    const text = String(fontSpec || "").toLowerCase();
+    const weight = /(^|\s)(bold|[6-9]00)(\s|$)/.test(text);
+    const italic = /(^|\s)(italic|oblique)(\s|$)/.test(text);
+    return weight && italic ? "boldItalic" : weight ? "bold" : italic ? "italic" : "regular";
+  }
+
+  // Какое имя шрифта в документе отвечает этой строке начертания. Если нужного
+  // начертания человек не положил, берём обычное: лучше ровный текст, чем
+  // отсутствующая строка.
+  function fontNameFor(fontSpec, doc, options) {
+    const face = faceOf(fontSpec);
+    const names = options.fontFaces || {};
+    const candidate = names[face];
+    if (candidate && doc.hasFont(candidate)) return candidate;
+    return names.regular && doc.hasFont(names.regular) ? names.regular : options.fontName;
+  }
+
   function textWidth(text, fontSpec, doc, options) {
-    const entry = doc.fontEntry(options.fontName);
+    const entry = doc.fontEntry(fontNameFor(fontSpec, doc, options));
     if (!entry) return 0;
     const size = fontSize(fontSpec);
     const font = entry.font;
@@ -468,5 +489,6 @@
     return width;
   }
 
-  root.GRADO_PDF = { PT_PER_MM, createDocument, createContext, readFont, parseColor, textWidth };
+  root.GRADO_PDF = { PT_PER_MM, createDocument, createContext, readFont, parseColor,
+    textWidth, faceOf };
 })(typeof window !== "undefined" ? window : globalThis);
