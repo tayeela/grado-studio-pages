@@ -60,6 +60,8 @@
       { t: "Сопрячь угол (fillet)", run: tool("fillet"), available: () => toolEnabled("fillet") },
       { t: "Буфер вокруг выбранных объектов…", run: () => click("btn-buffer-open"), desktop: true, available: () => buttonEnabled("btn-buffer-open") },
       { t: "Геообработка полигонов…", run: () => click("btn-vector-open"), available: () => buttonEnabled("btn-vector-open") },
+      { t: "Разрезать объекты", run: tool("split"), available: () => toolEnabled("split") },
+      { t: "Объединить полигоны", run: () => click("btn-merge"), available: () => buttonEnabled("btn-merge") },
       { t: "Проверка топологии…", run: () => click("btn-topo-check"), available: () => buttonEnabled("btn-topo-check") },
       { t: "Выбрать по выражению…", run: () => window.openSelectBy && window.openSelectBy("expression"), available: () => buttonEnabled("btn-select-by") },
       { t: "Выбрать по расположению…", run: () => window.openSelectBy && window.openSelectBy("location"), available: () => buttonEnabled("btn-select-by") },
