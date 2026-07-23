@@ -469,6 +469,27 @@ function layerCats(L) {
 // QGIS-подобная легенда: категории слоя со счётчиком и представителем. sample —
 // первый объект категории; styleOf(sample) = ровно то, что нарисовано на холсте
 // (с учётом оформления слоя), поэтому образец в подпункте совпадает с картой.
+// Правила-диапазоны слоя (градуированная символика). Отдельно от категорий:
+// у них нет знака из библиотеки — только патч цвета поверх стиля слоя.
+function rangeRulesOf(L) {
+  if (!L || !Array.isArray(L.rules)) return [];
+  return L.rules.filter(rule => rule && rule.patch && rule.min !== undefined && rule.max !== undefined);
+}
+// Строки легенды по диапазонам: один проход по объектам слоя на все классы.
+function rangeLegendItems(L, ranges) {
+  const SY = typeof window !== "undefined" && window.GRADO_SYMBOLOGY;
+  const counts = new Array(ranges.length).fill(0);
+  if (SY) for (const f of state.features) {
+    if (layerOf(f) !== L) continue;
+    const value = (f.props || {})[ranges[0].field];
+    for (let i = 0; i < ranges.length; i++)
+      if (SY.ruleMatchesValue(ranges[i], value)) { counts[i] += 1; break; }
+  }
+  const base = layerStyle(L) || {};
+  return ranges.map((rule, i) => ({ title: rule.title || `${rule.min} – ${rule.max}`,
+    count: counts[i], style: { ...base, ...rule.patch } }));
+}
+
 function layerCatStats(L) {
   const m = new Map();
   for (const f of state.features) {
@@ -577,10 +598,60 @@ function categoryLayerVisualFormat(L) {
 // условное форматирование: первое правило слоя, чьё поле совпадает со
 // значением атрибута объекта, отдаёт свой библиотечный стиль.
 // Поддержка ops для более мощных правил (fmt-патчи): = > < >= <= contains starts
+// ---------- свойства по выражению (data-defined в QGIS) ----------
+// Толщина линии по интенсивности, размер знака по ёмкости, кегль подписи по
+// значимости: fmt.width_expr / fmt.size_expr / fmt.label_size_expr. Выражение —
+// тот же безопасный вычислитель, что у калькулятора полей и отбора.
+//
+// Считается ОДИН раз на объект и живёт до следующей правки: на 20 000 объектов
+// пересчёт каждый кадр — это десятки миллисекунд впустую, значения меняются
+// только вместе с атрибутами.
+let _dataVersion = 0;
+const _ddCache = new WeakMap();
+const DD_KEYS = [["width_expr", "width", 0.1, 20], ["size_expr", "marker_size", 0.5, 40],
+                 ["label_size_expr", "label_size", 6, 72]];
+
+function dataDefinedPatch(L, f) {
+  const fmt = L && L.fmt;
+  if (!fmt || !DD_KEYS.some(([key]) => fmt[key])) return null;
+  const hit = _ddCache.get(f);
+  if (hit && hit.v === _dataVersion && hit.owner === L) return hit.patch;
+  const patch = {};
+  for (const [key, target, low, high] of DD_KEYS) {
+    const expression = fmt[key];
+    if (!expression) continue;
+    let value = null;
+    try { value = parseFloat(evalFieldExpr(expression, f)); } catch (error) { value = null; }
+    if (Number.isFinite(value)) patch[target] = Math.max(low, Math.min(high, value));
+  }
+  const result = Object.keys(patch).length ? patch : null;
+  _ddCache.set(f, { v: _dataVersion, owner: L, patch: result });
+  return result;
+}
+
+// патч ложится на готовый стиль: размер знака и кегль подписи лежат глубже
+function applyDataDefined(style, patch) {
+  if (!patch) return style;
+  const out = { ...style };
+  if (patch.width != null) out.width = patch.width;
+  if (patch.marker_size != null) out.marker = { ...(out.marker || {}), size: patch.marker_size };
+  if (patch.label_size != null) out.label_font = { ...(out.label_font || {}), size: patch.label_size };
+  return out;
+}
+
 function ruleStyleFor(L, f) {
   if (!L || !Array.isArray(L.rules)) return null;
   const props = f.props || {};
+  const SY = typeof window !== "undefined" && window.GRADO_SYMBOLOGY;
   for (const r of L.rules) {
+    // правило-ДИАПАЗОН (градуированная символика): несёт не знак из библиотеки,
+    // а патч оформления поверх стиля слоя — цветов диапазонов в библиотеке нет
+    // и быть не может, они считаются по данным слоя
+    if (r.patch && SY && r.min !== undefined && r.max !== undefined) {
+      if (!r.field) continue;
+      if (SY.ruleMatchesValue(r, props[r.field])) return { ...(layerStyle(L) || {}), ...r.patch };
+      continue;
+    }
     if (!r.field || r.value === undefined || r.value === "") continue;
     const v = props[r.field] ?? "";
     const rv = r.value;
@@ -666,7 +737,8 @@ function styleOf(f) {
     const refStyle = refId && (state.projectStyles[refId] || STYLES_V2[refId]);
     base = { ...(refStyle || base), ...categoryLayerVisualFormat(L), ...categoryPatch };
   }
-  return f.fmt ? { ...base, ...f.fmt } : base;   // f.fmt — оформление отдельного объекта
+  const withData = applyDataDefined(base, dataDefinedPatch(L, f));
+  return f.fmt ? { ...withData, ...f.fmt } : withData;   // f.fmt — оформление отдельного объекта
 }
 
 // Эталонный тёмный штрих границы (#1c1c1a) корректен для печати и светлого
@@ -4428,6 +4500,7 @@ function maybeRefreshStations() {
 
 function afterChange() {
   state._ix = null; state._snapIndex = null; cvReader.order = null;
+  _dataVersion += 1;                       // кеш свойств по выражению устарел
   syncHistoryControls();
   // страховка: убрать из выделения id несуществующих объектов (после
   // импорта/очистки/undo, где features заменяются целиком)
@@ -5335,13 +5408,18 @@ function renderLayerLegend(sampleByLayer = {}, statsByLayer = null) {
       ? [...stat.cats.values()].sort((a, b) => a.title.localeCompare(b.title, "ru"))
       : layerCatStats(layer);
     const cats = allCats.filter(cat => !((layer.fmt && layer.fmt.cats_off) || []).includes(cat.id));
-    const items = cats.length > 1 ? cats : [{
-      title: layer.title,
-      count: stat ? stat.count : featuresOnLayer(layer.id).length,
-      sample: sampleByLayer[layer.id],
-    }];
+    // Градуированная символика: в легенде обязаны стоять диапазоны с их
+    // цветами, иначе на чертеже цвет есть, а ключа к нему нет. Категорий у
+    // таких правил нет — знак им не назначается, цвет считается по данным.
+    const ranges = rangeRulesOf(layer);
+    const items = ranges.length ? rangeLegendItems(layer, ranges)
+      : cats.length > 1 ? cats : [{
+        title: layer.title,
+        count: stat ? stat.count : featuresOnLayer(layer.id).length,
+        sample: sampleByLayer[layer.id],
+      }];
     items.forEach(item => {
-      const style = item.sample ? styleOf(item.sample) : layerStyle(layer);
+      const style = item.style || (item.sample ? styleOf(item.sample) : layerStyle(layer));
       const row = document.createElement("div");
       row.className = "legend-row";
       row.innerHTML = `<span class="legend-sample" aria-hidden="true">${styleSampleSVG(style, { w: 54, h: 20 })}</span>
