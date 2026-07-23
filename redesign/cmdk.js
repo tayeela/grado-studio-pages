@@ -74,6 +74,7 @@
       { t: "Зеркало", run: tool("mirror"), available: () => toolEnabled("mirror") },
       { t: "Размерная линия", k: "D", run: tool("dim"), available: () => toolEnabled("dim") },
       { t: "Измерение расстояния", k: "M", run: tool("measure"), available: () => toolEnabled("measure") },
+      { t: "Измерение площади", run: tool("marea"), available: () => toolEnabled("marea") },
     ]},
     { sec: "Данные", items: [
       { t: "Данные по видимой области…", run: () => call("openDataFetch") },
