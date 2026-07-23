@@ -142,7 +142,7 @@ const sum = parts => parts.reduce((total, part) =>
   assert.match(cmdk, /Объединить полигоны/);
 
   // «Разрезать» собирает точки как полилиния, но объекта не создаёт
-  assert.match(app, /const TOOL_GEOM = \{ \.\.\.GEOM_OF_TOOL, dim: "polyline", split: "polyline" \};/,
+  assert.match(app, /const TOOL_GEOM = \{ \.\.\.GEOM_OF_TOOL, dim: "polyline", split: "polyline", reshape: "polyline" \};/,
     "инструмент обязан собирать ломаную");
   assert.doesNotMatch(app, /GEOM_OF_TOOL = \{[^}]*split/,
     "но не заводить слой под геометрию: он ничего не создаёт");

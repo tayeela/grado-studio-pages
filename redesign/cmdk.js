@@ -63,6 +63,7 @@
       { t: "Геообработка полигонов…", run: () => click("btn-vector-open"), available: () => buttonEnabled("btn-vector-open") },
       { t: "Определить объект под курсором", run: tool("identify"), available: () => toolEnabled("identify") },
       { t: "Разрезать объекты", run: tool("split"), available: () => toolEnabled("split") },
+      { t: "Изменить форму (reshape)", run: tool("reshape"), available: () => toolEnabled("reshape") },
       { t: "Объединить полигоны", run: () => click("btn-merge"), available: () => buttonEnabled("btn-merge") },
       { t: "Проверка топологии…", run: () => click("btn-topo-check"), available: () => buttonEnabled("btn-topo-check") },
       { t: "Выбрать по выражению…", run: () => window.openSelectBy && window.openSelectBy("expression"), available: () => buttonEnabled("btn-select-by") },
