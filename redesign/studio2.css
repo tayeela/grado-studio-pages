@@ -644,6 +644,16 @@
 .sheet-summary.error{border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:var(--danger-weak)}
 .sheet-summary.error b{color:var(--danger-text)}
 
+/* ---- статистика поля ---- */
+.modal-overlay .modal.stats-modal{width:min(420px,94vw);padding:16px}
+.stats-body{display:flex;flex-direction:column;gap:2px;max-height:320px;overflow:auto}
+.stats-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:6px 8px;border-radius:4px;font-size:var(--fs-12);color:var(--text-2)}
+.stats-row:nth-child(odd){background:var(--field-bg)}
+.stats-row b{color:var(--text);font-variant-numeric:tabular-nums}
+.stats-row.stats-head{margin-top:8px;color:var(--muted);background:none}
+.stats-val{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---- соединение таблиц ---- */
 .modal-overlay .modal.join-modal{width:min(620px,96vw);max-height:92vh;padding:16px}
 .join-body{gap:12px}
