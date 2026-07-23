@@ -8632,7 +8632,11 @@ on("btn-album", "click", () => download("/api/album", "-album.pdf"));
 on("btn-album-config", "click", openAlbumConfig);
 on("btn-grado", "click", () => download(
   "/api/grado", window.GRADO_STATIC ? ".grado-web.json" : ".grado"));
-on("btn-dxf", "click", () => download("/api/dxf", ".dxf"));
+on("btn-dxf", "click", () => {
+  // В браузере DXF собирается на месте (app-dxf.js); с сервером — как раньше.
+  if (typeof exportDxf === "function") { exportDxf(); return; }
+  download("/api/dxf", ".dxf");
+});
 on("btn-print", "click", () => download("/api/print", "-print.pdf"));
 
 function hasProjectContent() {

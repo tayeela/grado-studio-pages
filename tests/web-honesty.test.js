@@ -49,6 +49,12 @@ assert.match(cmdk, /off \? '<span class="hint">настольная версия
   "и обязаны быть подписаны");
 assert.match(cmdk, /if \(isWeb && c\.desktop\) \{[\s\S]{0,200}только в настольной версии/,
   "выключенная команда не должна делать вид, что сработала");
+// печать и DXF в браузере ЕСТЬ: тупиков с «требует настольную версию» быть не должно
+const adapterSource = fs.readFileSync(path.join(root, "pages-adapter.js"), "utf8");
+assert.match(adapterSource, /if \(id === "btn-print" && typeof window\.openSheetDialog === "function"\)/,
+  "«Печать в масштабе» обязана открывать лист PDF, а не упираться в заглушку");
+assert.doesNotMatch(adapterSource, /blocked = new Set\(\["btn-album", "btn-dxf"/,
+  "DXF собирается в браузере — блокировать его нечего");
 assert.match(cmdk, /\{ t: "Данные по видимой области…", run: \(\) => call\("openDataFetch"\) \},/,
   "выгрузка по области в браузере работает — прятать её из палитры нельзя");
 assert.match(shell, /\.cmdk-row\.cmdk-off\{opacity:\.5;cursor:default\}/,

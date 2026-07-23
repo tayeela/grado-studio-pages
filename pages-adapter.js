@@ -710,8 +710,9 @@
     return json({ error: "Эта функция требует настольную версию ГРАДО Студии" }, 501);
   };
 
-  const blocked = new Set(["btn-album", "btn-dxf", "btn-print",
-    "btn-buffer-open"]);
+  // DXF и лист PDF собираются прямо в браузере (app-dxf.js, app-pdf.js),
+  // поэтому в списке недоступного их больше нет.
+  const blocked = new Set(["btn-album", "btn-print", "btn-buffer-open"]);
   document.addEventListener("click", event => {
     const target = event.target.closest("[data-click],button");
     const id = target && (target.dataset.click || target.id);
@@ -720,6 +721,12 @@
     event.stopImmediatePropagation();
     if (id === "btn-album") {
       document.getElementById("btn-album-config")?.click();
+      return;
+    }
+    // Печать в масштабе в браузере ЕСТЬ — это лист PDF (app-sheet.js). Тупика
+    // с «требует настольную версию» здесь быть не должно.
+    if (id === "btn-print" && typeof window.openSheetDialog === "function") {
+      window.openSheetDialog();
       return;
     }
     if (window.toast) window.toast("Функция требует настольную версию с сервером", "warn");
@@ -792,7 +799,7 @@
     const fgistpRow = document.querySelector('[data-click="btn-fgistp"]');
     if (fgistpRow) fgistpRow.remove();
     addMenuNote("menu-data", "В веб-версии доступны OSM и НСПД по видимой области, а также файлы НСПД и GeoJSON. ZIP и прямые ссылки требуют настольную версию.");
-    addMenuNote("menu-out", "DXF и печать в масштабе доступны в настольной версии.");
+    addMenuNote("menu-out", "Лист PDF, альбом и DXF собираются прямо здесь. Сборка альбома АГК по шаблонам — в настольной версии.");
     const style = document.createElement("style");
     style.textContent = `.web-badge{margin-left:7px;padding:2px 6px;border-radius:6px;background:var(--accent-weak);color:var(--accent);font-size:9px;letter-spacing:.04em}.build-badge{margin-left:5px;padding:2px 6px;border-radius:6px;background:var(--field-bg);color:var(--text-2);font-size:9px;letter-spacing:.03em;font-weight:600;opacity:.7;cursor:help}.web-disabled{opacity:.46;cursor:default}.web-disabled:hover,.web-disabled:focus{background:transparent;color:var(--text)}.web-menu-note{max-width:250px;margin:6px 4px 2px;padding:8px 9px;border-radius:8px;background:var(--field-bg);color:var(--text-2);font-size:11px;line-height:1.35}.pages-mode #st-bridge{display:none!important}`;
     document.head.appendChild(style);
