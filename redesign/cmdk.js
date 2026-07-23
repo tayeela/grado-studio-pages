@@ -58,7 +58,7 @@
       { t: "Обрезать по границе", k: "T", run: tool("trim"), available: () => toolEnabled("trim") },
       { t: "Продлить до границы", k: "E", run: tool("extend"), available: () => toolEnabled("extend") },
       { t: "Сопрячь угол (fillet)", run: tool("fillet"), available: () => toolEnabled("fillet") },
-      { t: "Буфер вокруг выбранных объектов…", run: () => click("btn-buffer-open"), desktop: true, available: () => buttonEnabled("btn-buffer-open") },
+      { t: "Буфер вокруг выбранных объектов…", run: () => click("btn-buffer-open"), available: () => buttonEnabled("btn-buffer-open") },
       { t: "Геообработка полигонов…", run: () => click("btn-vector-open"), available: () => buttonEnabled("btn-vector-open") },
       { t: "Определить объект под курсором", run: tool("identify"), available: () => toolEnabled("identify") },
       { t: "Разрезать объекты", run: tool("split"), available: () => toolEnabled("split") },

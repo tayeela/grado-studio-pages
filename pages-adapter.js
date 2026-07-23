@@ -475,6 +475,21 @@
     }
     if (!path.startsWith("/api/")) return nativeFetch(input, options);
 
+    // Буфер считается прямо в браузере (app-buffer.js): модуль загружается
+    // после адаптера, но К МОМЕНТУ КЛИКА он уже есть — проверяем при вызове.
+    if (path === "/api/buffer") {
+      const engine = window.GRADO_BUFFER;
+      if (!engine) return json({ error: "Модуль буфера ещё не загружен — обновите страницу" }, 503);
+      try {
+        const payload = await bodyJson(input, options);
+        const result = engine.bufferFeatures(payload || {});
+        if (!result.features.length && result.notes.length)
+          return json({ error: result.notes[0] }, 400);
+        return json(result);
+      } catch (error) {
+        return json({ error: error.message || "Не удалось построить буфер" }, 400);
+      }
+    }
     if (path === "/api/hub") return json({ hub: false });
     if (path === "/api/inbox") return json({ bridge: true, items: [] });
     if (path === "/api/sources") return json([]);
@@ -712,7 +727,8 @@
 
   // DXF и лист PDF собираются прямо в браузере (app-dxf.js, app-pdf.js),
   // поэтому в списке недоступного их больше нет.
-  const blocked = new Set(["btn-album", "btn-print", "btn-buffer-open"]);
+  // Буфер тоже считается здесь (app-buffer.js + маршрут /api/buffer выше).
+  const blocked = new Set(["btn-album", "btn-print"]);
   document.addEventListener("click", event => {
     const target = event.target.closest("[data-click],button");
     const id = target && (target.dataset.click || target.id);
@@ -767,13 +783,7 @@
       album.setAttribute("aria-label", "Состав листов альбома; печать PDF доступна в настольной версии");
       album.classList.remove("primary");
     }
-    const buffer = document.getElementById("btn-buffer-open");
-    if (buffer) {
-      buffer.dataset.webUnavailable = "true";
-      buffer.disabled = true;
-      buffer.title = "Буферизация доступна в настольной версии";
-      buffer.setAttribute("aria-label", "Буферизация — доступна в настольной версии");
-    }
+    // Буфер работает: считается в браузере через маршрут /api/buffer.
     document.querySelectorAll("[data-click]").forEach(row => {
       if (blocked.has(row.dataset.click)) {
         row.classList.add("web-disabled");
