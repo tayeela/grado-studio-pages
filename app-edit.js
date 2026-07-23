@@ -191,5 +191,67 @@
     return { part: { ring: openRing(outer), holes: holes.map(openRing) }, reason: null };
   }
 
-  root.GRADO_EDIT = { splitRing, splitPolygon, splitLine, mergePolygons, ringArea, pointInRing, crossings };
+  // ---------- эквидистанта (offset) ----------
+  // Параллельная копия ломаной на расстоянии dist: положительное — слева по
+  // ходу обхода, отрицательное — справа. Углы соединяются пересечением
+  // смещённых прямых (как в AutoCAD); на острых углах, где пересечение улетает
+  // дальше четырёх расстояний, ставится фаска — иначе шип длиной в километры.
+  // Самопересечения при смещении вогнутой ломаной больше локального радиуса
+  // не вычищаются: это поведение CAD, а чистку даёт починка геометрии.
+  const MITER_LIMIT = 4;
+
+  function offsetChain(points, dist, closed = false) {
+    const chain = [];
+    for (const p of points) {
+      const last = chain[chain.length - 1];
+      if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 1e-9) chain.push(p);
+    }
+    if (closed && chain.length > 2 && same(chain[0], chain[chain.length - 1])) chain.pop();
+    if (chain.length < 2) return null;
+
+    // смещённые отрезки
+    const segs = [];
+    const count = closed ? chain.length : chain.length - 1;
+    for (let i = 0; i < count; i++) {
+      const a = chain[i], b = chain[(i + 1) % chain.length];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) continue;
+      const nx = -dy / len * dist, ny = dx / len * dist;
+      segs.push({ a: [a[0] + nx, a[1] + ny], b: [b[0] + nx, b[1] + ny],
+        dx: dx / len, dy: dy / len });
+    }
+    if (!segs.length) return null;
+
+    // стык двух смещённых отрезков: пересечение прямых или фаска
+    const joint = (s1, s2) => {
+      const denom = s1.dx * s2.dy - s1.dy * s2.dx;
+      if (Math.abs(denom) < 1e-9) return [s1.b];              // почти параллельны
+      const t = ((s2.a[0] - s1.a[0]) * s2.dy - (s2.a[1] - s1.a[1]) * s2.dx) / denom;
+      const x = s1.a[0] + s1.dx * t, y = s1.a[1] + s1.dy * t;
+      const reach = Math.hypot(x - s1.b[0], y - s1.b[1]);
+      if (reach > MITER_LIMIT * Math.abs(dist)) return [s1.b, s2.a];   // фаска
+      return [[x, y]];
+    };
+
+    const out = [];
+    if (!closed) {
+      out.push(segs[0].a);
+      for (let i = 0; i + 1 < segs.length; i++) out.push(...joint(segs[i], segs[i + 1]));
+      out.push(segs[segs.length - 1].b);
+    } else {
+      for (let i = 0; i < segs.length; i++)
+        out.push(...joint(segs[i], segs[(i + 1) % segs.length]));
+    }
+    // подряд совпавшие точки после фасок
+    const clean = [];
+    for (const p of out) {
+      const last = clean[clean.length - 1];
+      if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 1e-9) clean.push(p);
+    }
+    return clean.length > 1 ? clean : null;
+  }
+
+  root.GRADO_EDIT = { splitRing, splitPolygon, splitLine, mergePolygons, ringArea, pointInRing, crossings,
+    offsetChain, MITER_LIMIT };
 })(typeof window !== "undefined" ? window : globalThis);

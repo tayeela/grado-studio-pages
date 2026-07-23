@@ -2711,6 +2711,83 @@ async function promptFilletRadius() {
 }
 
 
+// ---------- эквидистанта: параллельная копия на заданном расстоянии ----------
+async function promptOffsetDistance() {
+  const cur = state.offsetDist > 0 ? state.offsetDist : 10;
+  const v = await uiPrompt("Расстояние смещения, м:", String(cur), { ok: "OK", placeholder: "10" });
+  if (v == null) return;
+  state.offsetDist = Math.max(0.01, parseFloat(String(v).replace(",", ".")) || cur);
+  toast(`Эквидистанта ${state.offsetDist} м — кликайте по линии, сторона по месту клика`);
+}
+
+// Сторона определяется кликом, как в AutoCAD: ближайшее ребро цепочки, знак
+// векторного произведения решает, слева точка или справа.
+function offsetSideOfClick(chain, closed, wx, wy) {
+  let best = Infinity, sign = 1;
+  const count = closed ? chain.length : chain.length - 1;
+  for (let i = 0; i < count; i++) {
+    const a = chain[i], b = chain[(i + 1) % chain.length];
+    const q = nearestOnSeg([wx, wy], a, b);
+    const d = Math.hypot(wx - q[0], wy - q[1]);
+    if (d < best) {
+      best = d;
+      const cross = (b[0] - a[0]) * (wy - a[1]) - (b[1] - a[1]) * (wx - a[0]);
+      sign = cross >= 0 ? 1 : -1;
+    }
+  }
+  return sign;
+}
+
+function handleOffsetClick(wx, wy) {
+  const E = window.GRADO_EDIT;
+  if (!E) { toast("Модуль правки геометрии не загружен", "warn"); return; }
+  const f = hitTest(wx, wy);
+  if (!f) { toast("Кликните по линии, контуру, дуге или окружности"); return; }
+  const L = layerOf(f);
+  if (!L || L.locked) { toast("Слой заблокирован", "warn"); return; }
+  const dist = state.offsetDist > 0 ? state.offsetDist : 10;
+  let geom = null;
+
+  if (f.circle) {
+    // концентрическая окружность: клик внутри — меньше, снаружи — больше
+    const clickR = Math.hypot(wx - f.circle.cx, wy - f.circle.cy);
+    const r = f.circle.r + (clickR >= f.circle.r ? dist : -dist);
+    if (r <= 0.01) { toast("Смещение больше радиуса — окружности не останется", "warn"); return; }
+    geom = { circle: { cx: f.circle.cx, cy: f.circle.cy, r } };
+  } else if (f.arc) {
+    const clickR = Math.hypot(wx - f.arc.cx, wy - f.arc.cy);
+    const r = f.arc.r + (clickR >= f.arc.r ? dist : -dist);
+    if (r <= 0.01) { toast("Смещение больше радиуса — дуги не останется", "warn"); return; }
+    geom = { arc: { ...f.arc, r } };
+  } else if (Array.isArray(f.line) && f.line.length > 1) {
+    const chain = E.offsetChain(f.line, offsetSideOfClick(f.line, false, wx, wy) * dist, false);
+    if (chain) geom = { line: chain };
+  } else if (Array.isArray(f.ring) && f.ring.length > 2) {
+    if (f.holes && f.holes.length) {
+      // дыры при смещении контура поехали бы враньём — честно отправляем к буферу
+      toast("У полигона есть дыры — используйте «Буфер» со стороной «внутри»/«снаружи»", "warn");
+      return;
+    }
+    const ring = E.offsetChain(f.ring, offsetSideOfClick(f.ring, true, wx, wy) * dist, true);
+    if (ring && ring.length > 2 && Math.abs(ringArea(ring)) > 1e-6) geom = { ring };
+  } else {
+    toast("У точки эквидистанты нет — используйте «Буфер»", "warn");
+    return;
+  }
+
+  if (!geom) { toast("Смещение съело объект — уменьшите расстояние", "warn"); return; }
+  snapshot();
+  const nf = { id: state.nextId++, layer_id: f.layer_id,
+    props: cloneVariantValue(f.props || {}), ...geom };
+  if (f.style_id) nf.style_id = f.style_id;
+  if (f.kind) nf.kind = f.kind;
+  upgradeFeature(nf);
+  state.features.push(nf);
+  selectOne(nf.id);
+  afterChange();
+  toast(`Эквидистанта ${dist} м готова — кликайте дальше или Esc`);
+}
+
 function lastDrawingPt() {
   if (!state.drawing) return null;
   const pts = state.drawing.pts;
@@ -5937,7 +6014,7 @@ function updateStartExperience() {
     : active.locked ? "Активный слой заблокирован"
       : (active.import_only || active.annotation) ? "Выберите проектный слой" : "Сначала создайте слой";
   const drawingTools = new Set(["point", "polyline", "polygon", "rect", "arc", "circle"]);
-  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror", "split", "identify"]);
+  const editingTools = new Set(["trim", "extend", "fillet", "rotate", "scale", "mirror", "split", "identify", "offset"]);
   document.querySelectorAll("#toolbar button[data-tool]").forEach(button => {
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;
     if (drawingTools.has(button.dataset.tool)) {
@@ -7730,6 +7807,8 @@ cv.addEventListener("pointerdown", e => {
     handleTrimExtendClick(wxr, wyr);
   } else if (state.tool === "fillet") {
     handleFilletClick(wxr, wyr);
+  } else if (state.tool === "offset") {
+    handleOffsetClick(wxr, wyr);
   } else if (state.tool === "rotate" || state.tool === "scale" || state.tool === "mirror") {
     xfClickBase(s.p);
   } else if (state.tool === "point") {
@@ -8196,6 +8275,10 @@ function setTool(tool, opts = {}) {
   } else {
     state.trimCtx = null;
     setHint("");
+  }
+  if (tool === "offset") {
+    promptOffsetDistance();
+    setHint("«Эквидистанта»: клик по линии — параллельная копия, сторона по клику");
   }
   if (tool === "identify") {
     toast("Режим «Определить»: клик по чертежу покажет все объекты под курсором, сверху вниз");
