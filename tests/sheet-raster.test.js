@@ -105,6 +105,20 @@ const MOSCOW = 55.75;
   }
 }
 
+// ---------- источник по ключу (Copernicus) ----------
+{
+  const cdse = T.SOURCES.cdse;
+  assert.ok(cdse && cdse.needsKey, "квартальные мозаики Copernicus доступны только по ключу");
+  assert.match(cdse.url(10, 1, 2, { instance: "abc" }), /sh\.dataspace\.copernicus\.eu\/ogc\/wmts\/abc/,
+    "адрес обязан включать идентификатор экземпляра из личного кабинета");
+  assert.equal(cdse.maxZoom, 15, "10 м на точку — глубже лезть незачем");
+  // на рабочем листе он бесполезен, на обзорном — годен
+  const work = T.pickZoom({ source: "cdse", lat: MOSCOW, scale: 2000, dpi: 300 });
+  const overview = T.pickZoom({ source: "cdse", lat: MOSCOW, scale: 200000, dpi: 300 });
+  assert.ok(work.actualDpi < 30, `на 1:2000 это ${Math.round(work.actualDpi)} dpi`);
+  assert.ok(!overview.upscaled, "а на 1:200 000 хватает с запасом");
+}
+
 // ---------- проводка ----------
 {
   const sheet = fs.readFileSync(path.join(root, "app-sheet.js"), "utf8");
@@ -122,6 +136,12 @@ const MOSCOW = 55.75;
     assert.ok(html.includes(host), `политика безопасности обязана пускать ${host}`);
   }
   assert.ok(!html.includes("clarity.maptiles.arcgis.com"), "мёртвый хост в политике не нужен");
+  assert.ok(html.includes("sh.dataspace.copernicus.eu"), "и пускать Copernicus");
+  assert.match(sheet, /const CDSE_KEY = "grado-cdse-instance";/,
+    "ключ Copernicus личный: он живёт в браузере, а не в проекте");
+  assert.match(sheet, /sourceOptions: \{ instance: cdseInstance\(\) \}/,
+    "и доезжает до сборки растра");
+  assert.doesNotMatch(sheet, /albumConfig[\s\S]{0,80}cdse/i, "в файл проекта ключ не пишется");
 }
 
 console.log("sheet-raster: OK");

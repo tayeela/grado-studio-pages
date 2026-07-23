@@ -32,6 +32,24 @@
       url: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
       attribution: "© участники OpenStreetMap",
     },
+    // Квартальные безоблачные мозаики Copernicus: свежие (мозаика выходит
+    // в течение месяца после квартала), глобальные, 10 м на точку. Анонимного
+    // доступа нет — коллекция лежит в Sentinel Hub, и ключ (client_id/secret)
+    // человек заводит в своём личном кабинете. Ключ хранится в браузере.
+    cdse: {
+      title: "Copernicus, квартальная мозаика", kind: "overview", maxZoom: 15,
+      projection: "spherical", needsKey: true,
+      collection: "5460de54-082e-473a-b6ea-d5cbe3c17cca",
+      url: (z, x, y, options = {}) => {
+        const id = options.instance || "";
+        return `https://sh.dataspace.copernicus.eu/ogc/wmts/${id}?service=WMTS&request=GetTile` +
+          `&version=1.0.0&layer=${encodeURIComponent(options.layer || "QUARTERLY-MOSAIC")}` +
+          `&style=default&format=image/jpeg&tilematrixset=PopularWebMercator256` +
+          `&tilematrix=${z}&tilecol=${x}&tilerow=${y}` +
+          (options.time ? `&time=${encodeURIComponent(options.time)}` : "");
+      },
+      attribution: "Copernicus Sentinel-2, квартальная мозаика (CDSE)",
+    },
     eox: {
       title: "Sentinel-2 cloudless 2025", kind: "overview", maxZoom: 15, projection: "spherical",
       url: (z, x, y) => `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/GoogleMapsCompatible/${z}/${y}/${x}.jpg`,
@@ -111,11 +129,15 @@
     return createImageBitmap(await response.blob());
   }
 
-  async function buildRaster({ source, bbox, scale, dpi = 300, signal, onProgress }) {
+  async function buildRaster({ source, bbox, scale, dpi = 300, signal, onProgress,
+    sourceOptions } = {}) {
+    const options = { sourceOptions };
     const spec = SOURCES[source] || SOURCES.esri;
     const [west, south, east, north] = bbox;
     const lat = (south + north) / 2;
     const choice = pickZoom({ source, lat, scale, dpi });
+    if (spec.needsKey && !(options.sourceOptions && options.sourceOptions.instance))
+      throw new Error("для этого источника нужен ваш ключ Copernicus — заведите его в настройках подложки");
     const range = tileRange({ source, bbox, zoom: choice.zoom });
     if (!range.count) throw new Error("рамка листа не накрывает ни одного тайла");
     if (range.count > 1200) throw new Error(`нужно ${range.count} тайлов — уменьшите масштаб или формат`);
@@ -136,7 +158,7 @@
       if (signal?.aborted) throw new Error("Сборка подложки отменена");
       await Promise.all(jobs.slice(i, i + batch).map(async ([x, y]) => {
         try {
-          const bitmap = await fetchTile(spec.url(choice.zoom, x, y), signal);
+          const bitmap = await fetchTile(spec.url(choice.zoom, x, y, options.sourceOptions || {}), signal);
           context.drawImage(bitmap, (x - range.x0) * TILE, (y - range.y0) * TILE);
           bitmap.close?.();
         } catch (error) { failed += 1; }
