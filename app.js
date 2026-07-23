@@ -1938,6 +1938,7 @@ function setBasemapSource(src) {
   basemap.source = src;
   basemap.attribution = basemap.attributions[src] || basemap.attribution;
   basemap.cache.clear();
+  _tileHealth.ok = 0; _tileHealth.failed = 0; _tileHealth.warned = false;
   draw();
 }
 
@@ -1982,8 +1983,8 @@ function tileImage(z, x, y) {
     return e;
   }
   e = { img: new Image(), loaded: false, failed: false };
-  e.img.onload = () => { e.loaded = true; draw(); };
-  e.img.onerror = () => { e.failed = true; };
+  e.img.onload = () => { e.loaded = true; _tileHealth.ok += 1; draw(); };
+  e.img.onerror = () => { e.failed = true; reportTileFailure(); };
   e.img.src = tileUrl(z, x, y);
   basemap.cache.set(key, e);
   while (basemap.cache.size > TILE_CACHE_MAX) {
@@ -1993,6 +1994,18 @@ function tileImage(z, x, y) {
   }
   return e;
 }
+// Тайлы падают молча: битая картинка просто не рисуется, и человек видит
+// пустую подложку без объяснения. Считаем провалы; десять подряд без единого
+// успешного — говорим один раз про источник и сеть.
+const _tileHealth = { ok: 0, failed: 0, warned: false };
+function reportTileFailure() {
+  _tileHealth.failed += 1;
+  if (_tileHealth.warned || _tileHealth.ok > 0 || _tileHealth.failed < 10) return;
+  _tileHealth.warned = true;
+  const source = basemap.source === "osm" ? "OSM (tile.openstreetmap.org)" : "ESRI (arcgisonline.com)";
+  toast(`Тайлы подложки не загружаются: ${source} недоступен из вашей сети. Попробуйте другой источник в панели «Подложка»`, "warn");
+}
+
 function tileUrl(z, x, y) {
   return window.gradoTileUrl
     ? window.gradoTileUrl(z, x, y, basemap.source)

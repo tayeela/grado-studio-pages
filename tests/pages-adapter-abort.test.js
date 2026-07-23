@@ -25,10 +25,16 @@ const context = vm.createContext({
   Request,
   Response,
   Error,
+  TypeError,
   Date,
   JSON,
   Math,
   Set,
+  // externalFetch: таймауты и объединение сигналов
+  AbortController,
+  AbortSignal,
+  setTimeout,
+  clearTimeout,
   localStorage: {
     getItem() { return null; },
     setItem() {},
@@ -65,9 +71,13 @@ vm.runInContext(adapterSource, context);
   });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(nativeCalls.length, 1, "adapter must start the underlying source request");
-  assert.equal(nativeCalls[0].signal, controller.signal,
-    "adapter must forward AbortSignal to the underlying request");
+  // Сигнал теперь ОБЪЕДИНЁННЫЙ (пользовательский + таймаут externalFetch),
+  // поэтому проверяется поведение, а не тождество: отмена обязана доехать.
+  assert.ok(nativeCalls[0].signal, "adapter must forward an AbortSignal");
+  assert.equal(nativeCalls[0].signal.aborted, false);
   controller.abort();
+  assert.equal(nativeCalls[0].signal.aborted, true,
+    "user abort must propagate to the underlying request");
   await assert.rejects(pending, error => error.name === "AbortError");
 
   await assert.rejects(context.window.fetch("/api/fetch-extent", {

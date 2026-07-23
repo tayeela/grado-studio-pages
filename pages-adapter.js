@@ -209,6 +209,34 @@
     return null;
   };
 
+  // Внешний хост из RU-сети может не просто отказать, а ПОВИСНУТЬ: без
+  // таймаута диалог «Данные» ждал бы вечно. Каждый внешний запрос идёт через
+  // эту обёртку: таймаут, имя источника в ошибке и человеческое «недоступен
+  // из вашей сети» вместо технического «Failed to fetch».
+  const EXTERNAL_TIMEOUT_MS = 45000;
+  async function externalFetch(sourceName, url, options = {}, timeoutMs = EXTERNAL_TIMEOUT_MS) {
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), timeoutMs);
+    const signal = options.signal && typeof AbortSignal.any === "function"
+      ? AbortSignal.any([options.signal, timeout.signal])
+      : (options.signal || timeout.signal);
+    try {
+      const response = await nativeFetch(url, { ...options, signal });
+      if (!response.ok)
+        throw new Error(`${sourceName}: сервер ответил HTTP ${response.status}`);
+      return response;
+    } catch (error) {
+      if (timeout.signal.aborted && !(options.signal && options.signal.aborted))
+        throw new Error(`${sourceName} не ответил за ${Math.round(timeoutMs / 1000)} с — попробуйте позже`);
+      if (options.signal && options.signal.aborted) throw error;   // отмена пользователя
+      if (error instanceof TypeError)
+        throw new Error(`${sourceName} недоступен из вашей сети (блокировка или нет соединения)`);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   const OVERPASS_URLS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
@@ -234,10 +262,10 @@
     for (const url of OVERPASS_URLS) {
       throwIfAborted(signal);
       try {
-        const response = await nativeFetch(url, { method: "POST",
+        const mirror = url.includes("mail.ru") ? "Overpass (maps.mail.ru)" : "Overpass (kumi.systems)";
+        const response = await externalFetch(mirror, url, { method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ data: query }).toString(), signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
       } catch (error) {
         if (error?.name === "AbortError" || signal?.aborted) throw abortError();
@@ -295,8 +323,7 @@
       if (hit && hit.at && (Date.now() - hit.at) < GISOGD_TTL_MS) return hit.data;
     } catch (error) { /* кэш недоступен — тянем из сети */ }
     throwIfAborted(signal);
-    const response = await nativeFetch(pagesCore.gisogdLayerUrl(code), { signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const response = await externalFetch(`ГИС ОГД (слой ${code})`, pagesCore.gisogdLayerUrl(code), { signal }, 120000);
     const { text, bytes } = await readWithProgress(response, code, name || code, signal);
     throwIfAborted(signal);
     const data = JSON.parse(text);
@@ -359,8 +386,7 @@
         return (gisogdCatalogCache = hit.data);
     } catch (error) { /* кэш недоступен — тянем из сети */ }
     throwIfAborted(signal);
-    const response = await nativeFetch(pagesCore.gisogdCatalogUrl(), { signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const response = await externalFetch("ГИС ОГД (каталог)", pagesCore.gisogdCatalogUrl(), { signal });
     const catalog = pagesCore.buildGisogdCatalog(await response.json());
     throwIfAborted(signal);
     gisogdCatalogCache = catalog;
@@ -405,10 +431,9 @@
       if (area > 12) throw new Error(`Область ${area.toFixed(1)} км² больше предела 12 км² для НСПД — приблизьте вид`);
       for (const source of nspdSources) {
         try {
-          const response = await nativeFetch(NSPD_EXTENT_URL, { method: "POST",
+          const response = await externalFetch("НСПД", NSPD_EXTENT_URL, { method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(pagesCore.buildNspdExtentRequest(bbox, source)), signal });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
           mergeExtent(result, pagesCore.importNspdExtent(await response.json(), source, bbox));
         } catch (error) {
           if (error?.name === "AbortError" || signal?.aborted) throw abortError();
