@@ -22,12 +22,16 @@ const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
 const data = fs.readFileSync(path.join(root, "app-data.js"), "utf8");
 const shell = fs.readFileSync(path.join(root, "redesign", "shell.css"), "utf8");
 const layersCss = fs.readFileSync(path.join(root, "redesign", "layers-studio.css"), "utf8");
+const atelier = fs.readFileSync(path.join(root, "redesign", "atelier.css"), "utf8");
 
 // ---------- 1. ни демо, ни экрана-гида ----------
 for (const trace of ["btn-demo", "start-guide", "start-demo", "start-draw", "start-unlock"])
   assert.ok(!html.includes(trace) && !app.includes(trace), `рудимент: ${trace}`);
-assert.match(html, /id="cv-empty"/, "пустой холст объясняется строкой");
-assert.match(shell, /\.cv-empty\{[^}]*pointer-events:none/, "подсказка не перехватывает мышь");
+// Подсказка «Холст пуст» с холста убрана: она висела посреди чертежа и
+// повторяла то, что и так видно по пустому списку слоёв.
+for (const trace of ["cv-empty", "start-basemap"])
+  assert.ok(!html.includes(trace) && !app.includes(trace) && !shell.includes(trace),
+    `рудимент подсказки на холсте: ${trace}`);
 // пустой проект больше не тупик: инструмент сам заводит слой
 const setToolAt = app.indexOf("function setTool(tool, opts = {}) {");
 const setTool = app.slice(setToolAt, app.indexOf("\nfunction ", setToolAt + 10));
@@ -49,6 +53,13 @@ assert.match(app, /setWidth\(config\.side === 'left' \? startW \+ dx : startW - 
 assert.match(app, /try \{ resizer\.setPointerCapture\(e\.pointerId\); \} catch \(error\) \{\}/,
   "захват указателя — удобство, а не условие: без него тянуть всё равно должно быть можно");
 assert.match(shell, /#layers-resizer\{[^}]*cursor:col-resize/, "разделитель обязан выглядеть как разделитель");
+
+// панель инструментов стоит от края панели слоёв и обязана ехать вместе с ней
+assert.match(atelier, /#toolbar\{[\s\S]{0,200}left:calc\(var\(--layer-panel-width\) \+ 12px\)/,
+  "рельс инструментов позиционируется от ширины панели слоёв");
+assert.match(app, /document\.documentElement\.style\.setProperty\('--layer-panel-width', value \+ 'px'\)/,
+  "ширину обязан получать КОРЕНЬ документа: #toolbar панели слоёв не потомок, " +
+  "и переменная, поставленная на саму панель, до него не доходила");
 
 // ---------- 3. содержимое кнопок не упирается в края ----------
 assert.match(shell, /\.iconbtn\{\s*\r?\n\s*flex:0 0 auto;/, "иконочная кнопка не должна сжиматься");
