@@ -5805,6 +5805,8 @@ function openLayerMenu(layer, x, y) {
     ["Сделать активным", () => setActiveLayer(layer.id)],
     ["Таблица атрибутов…", () => openAttributeTable(layer)],
     ["Присоединить таблицу…", () => window.openJoinTable && window.openJoinTable(layer)],
+    ["Выгрузить слой (GeoJSON + QML)", () => window.exportLayerFiles && window.exportLayerFiles(layer, "both")],
+    ["Выгрузить только стиль (QML)", () => window.exportLayerFiles && window.exportLayerFiles(layer, "qml")],
     ["Оформление слоя…", () => openLayerStyle(layer)],
     ["Приблизить к слою", () => zoomToLayer(layer.id)],
     ...(displayIndex > 0 ? [["Переместить выше", () =>
