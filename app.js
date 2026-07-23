@@ -3969,6 +3969,7 @@ function drawNow() {
   // находки проверки топологии поверх всего: app-topo.js грузится позже app.js,
   // поэтому обращение защищено (как и в node-тестах, где модуля нет вовсе)
   if (typeof topoDrawOverlay === "function") topoDrawOverlay(ctx);
+  if (typeof simplifyDrawOverlay === "function") simplifyDrawOverlay(ctx);
   drawSnapMarker();
   updateOverlay();
 }
@@ -6029,7 +6030,7 @@ function updateStartExperience() {
       button.title = !state.features.length ? "Сначала добавьте объект" : button.dataset.defaultTitle;
     }
   });
-  ["btn-join", "btn-buffer-open", "btn-merge"].forEach(id => {
+  ["btn-join", "btn-buffer-open", "btn-merge", "btn-simplify"].forEach(id => {
     const button = document.getElementById(id);
     if (!button) return;
     if (!button.dataset.defaultTitle) button.dataset.defaultTitle = button.title;

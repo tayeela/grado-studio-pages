@@ -199,6 +199,67 @@
     return { part: { ring: openRing(outer), holes: holes.map(openRing) }, reason: null };
   }
 
+  // ---------- упростить и сгладить ----------
+  // Упрощение — Дуглас-Пекер: выбрасываются вершины, отклоняющиеся от хорды
+  // меньше допуска. Выгрузки ОСМ и портала несут тысячи вершин на прямых
+  // участках — на чертеже это мёртвый вес.
+  function simplifyChain(points, tolerance, closed = false) {
+    const chain = [];
+    for (const p of points) {
+      const last = chain[chain.length - 1];
+      if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > 1e-9) chain.push(p);
+    }
+    if (closed && chain.length > 2 && same(chain[0], chain[chain.length - 1])) chain.pop();
+    if (chain.length < 3 || !(tolerance > 0)) return chain;
+    const work = closed ? [...chain, chain[0]] : chain;   // кольцо: фиксируем вершину 0
+    const keep = new Array(work.length).fill(false);
+    keep[0] = keep[work.length - 1] = true;
+    const stack = [[0, work.length - 1]];
+    while (stack.length) {
+      const [from, to] = stack.pop();
+      let worst = -1, at = -1;
+      for (let i = from + 1; i < to; i++) {
+        const q = nearestOnSegment(work[i], work[from], work[to]);
+        const d = Math.hypot(work[i][0] - q[0], work[i][1] - q[1]);
+        if (d > worst) { worst = d; at = i; }
+      }
+      if (worst > tolerance) {
+        keep[at] = true;
+        stack.push([from, at], [at, to]);
+      }
+    }
+    const out = work.filter((_, i) => keep[i]);
+    if (closed) out.pop();                                 // дубль замыкания
+    return out;
+  }
+
+  // Сглаживание — срез углов Чайкина (1/4 и 3/4): каждый проход заменяет
+  // каждый угол парой точек. Концы открытой линии не двигаются.
+  function smoothChain(points, iterations = 2, closed = false) {
+    let chain = points.map(p => [p[0], p[1]]);
+    if (closed && chain.length > 2 && same(chain[0], chain[chain.length - 1])) chain.pop();
+    for (let pass = 0; pass < Math.max(1, iterations); pass++) {
+      const out = [];
+      if (closed) {
+        for (let i = 0; i < chain.length; i++) {
+          const a = chain[i], b = chain[(i + 1) % chain.length];
+          out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+          out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+        }
+      } else {
+        out.push(chain[0]);
+        for (let i = 0; i + 1 < chain.length; i++) {
+          const a = chain[i], b = chain[i + 1];
+          out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+          out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+        }
+        out.push(chain[chain.length - 1]);
+      }
+      chain = out;
+    }
+    return chain;
+  }
+
   // ---------- изменить форму (reshape, как в QGIS) ----------
   // Ломаная пересекает контур дважды (или больше): участок контура между
   // первым и последним пересечением заменяется на путь ломаной. Куда ломаная
@@ -343,6 +404,125 @@
     return clean.length > 1 ? clean : null;
   }
 
-  root.GRADO_EDIT = { splitRing, splitPolygon, splitLine, mergePolygons, ringArea, pointInRing, crossings,
-    offsetChain, MITER_LIMIT, reshapeRing, reshapeLine };
+  root.GRADO_EDIT = { splitRing, splitPolygon, splitLine, mergePolygons, ringArea, pointInRing, crossings,
+    offsetChain, MITER_LIMIT, reshapeRing, reshapeLine, simplifyChain, smoothChain };
+
+  if (typeof document === "undefined") return;
+
+  // ---------- окно «Упростить / сгладить» ----------
+  // Предпросмотр обязателен: допуск в метрах на глаз не выбирается — надо
+  // видеть, что уходит, ДО записи в проект.
+  let preview = null;                          // { items: [{f, chain, closed}] }
+
+  function simplifyDrawOverlay(context) {
+    if (!preview || !preview.items.length || typeof w2s !== "function") return;
+    context.save();
+    context.strokeStyle = cvColor("selection", "#2f6fde");
+    context.lineWidth = 2;
+    context.setLineDash([6, 4]);
+    for (const item of preview.items) {
+      context.beginPath();
+      item.chain.forEach((p, i) => {
+        const [sx, sy] = w2s(p[0], p[1]);
+        if (i) context.lineTo(sx, sy); else context.moveTo(sx, sy);
+      });
+      if (item.closed) context.closePath();
+      context.stroke();
+    }
+    context.restore();
+  }
+  root.simplifyDrawOverlay = simplifyDrawOverlay;
+
+  function openSimplifyDialog() {
+    closePopups();
+    const chosen = state.selectedIds.size
+      ? state.features.filter(f => state.selectedIds.has(f.id))
+      : state.features.filter(f => layerOf(f) === activeLayer());
+    const targets = chosen.filter(f => {
+      const L = layerOf(f);
+      return L && !L.locked && (Array.isArray(f.ring) || Array.isArray(f.line));
+    });
+    if (!targets.length) {
+      toast("Выберите линии или полигоны (или сделайте активным слой с ними)", "warn");
+      return;
+    }
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal fmt-modal simplify-modal" role="dialog" aria-modal="true" aria-labelledby="sim-title">
+      <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Правка геометрии</span><span id="sim-title">Упростить / сгладить</span></div>
+        <button class="modal-x" aria-label="Закрыть упрощение"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+      <div class="modal-body vector-body">
+        <p class="vector-intro">Выбрано объектов: ${targets.length}. Пунктир на чертеже — предпросмотр результата; проект меняется только по кнопке.</p>
+        <div class="fmt-row">
+          <label>Действие<select id="sim-mode">
+            <option value="simplify">Упростить (Дуглас-Пекер)</option>
+            <option value="smooth">Сгладить (Чайкин)</option></select></label>
+          <label id="sim-tol-row">Допуск, м<input id="sim-tolerance" type="number" min="0.01" step="0.5" value="1"></label>
+          <label id="sim-pass-row" hidden>Проходов<input id="sim-passes" type="number" min="1" max="4" step="1" value="2"></label>
+        </div>
+        <div class="vector-summary" id="sim-summary" role="status" aria-live="polite"></div>
+      </div>
+      <div class="modal-actions"><span class="spacer"></span>
+        <button type="button" id="sim-cancel">Отмена</button>
+        <button type="button" id="sim-apply" class="primary">Применить</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const $id = sel => overlay.querySelector("#" + sel);
+    const summary = $id("sim-summary");
+
+    const rebuild = () => {
+      const mode = $id("sim-mode").value;
+      $id("sim-tol-row").hidden = mode !== "simplify";
+      $id("sim-pass-row").hidden = mode !== "smooth";
+      const tolerance = Math.max(0.01, Number($id("sim-tolerance").value) || 1);
+      const passes = Math.max(1, Math.min(4, Number($id("sim-passes").value) || 2));
+      const items = [];
+      let before = 0, after = 0, degenerate = 0;
+      for (const f of targets) {
+        const closed = Array.isArray(f.ring);
+        const source = closed ? f.ring : f.line;
+        const chain = mode === "simplify"
+          ? simplifyChain(source, tolerance, closed)
+          : smoothChain(source, passes, closed);
+        before += source.length;
+        if (closed ? (chain.length > 2 && Math.abs(ringArea(chain)) > EPS) : chain.length > 1) {
+          after += chain.length;
+          items.push({ f, chain, closed });
+        } else degenerate += 1;
+      }
+      preview = { items };
+      summary.classList.toggle("error", !items.length);
+      summary.innerHTML = items.length
+        ? `<b>Вершин: ${before} → ${after}</b><span>${ruCount(items.length, "объект", "объекта", "объектов")}` +
+          `${degenerate ? ` · ${degenerate} выродилось бы — они не тронутся` : ""}</span>`
+        : `<b>Все объекты выродились бы.</b><span>Уменьшите допуск</span>`;
+      $id("sim-apply").disabled = !items.length;
+      draw();
+    };
+    ["sim-mode", "sim-tolerance", "sim-passes"].forEach(id => {
+      $id(id).addEventListener("change", rebuild);
+      $id(id).addEventListener("input", rebuild);
+    });
+    const close = () => { preview = null; overlay.remove(); draw(); };
+    $id("sim-cancel").addEventListener("click", close);
+    overlay.querySelector(".modal-x").addEventListener("click", close);
+    overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+    overlay.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
+    $id("sim-apply").addEventListener("click", () => {
+      if (!preview || !preview.items.length) return;
+      snapshot();
+      for (const item of preview.items) {
+        if (item.closed) item.f.ring = item.chain.map(p => [p[0], p[1]]);
+        else item.f.line = item.chain.map(p => [p[0], p[1]]);
+      }
+      const touched = preview.items.length;
+      close();
+      afterChange();
+      toast(`Геометрия обновлена: ${ruCount(touched, "объект", "объекта", "объектов")}`);
+    });
+    rebuild();
+  }
+  root.openSimplifyDialog = openSimplifyDialog;
+  const simplifyTrigger = document.getElementById("btn-simplify");
+  if (simplifyTrigger) simplifyTrigger.addEventListener("click", openSimplifyDialog);
 })(typeof window !== "undefined" ? window : globalThis);

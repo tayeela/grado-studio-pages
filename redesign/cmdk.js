@@ -65,6 +65,7 @@
       { t: "Разрезать объекты", run: tool("split"), available: () => toolEnabled("split") },
       { t: "Изменить форму (reshape)", run: tool("reshape"), available: () => toolEnabled("reshape") },
       { t: "Объединить полигоны", run: () => click("btn-merge"), available: () => buttonEnabled("btn-merge") },
+      { t: "Упростить / сгладить геометрию…", run: () => click("btn-simplify"), available: () => buttonEnabled("btn-simplify") },
       { t: "Проверка топологии…", run: () => click("btn-topo-check"), available: () => buttonEnabled("btn-topo-check") },
       { t: "Выбрать по выражению…", run: () => window.openSelectBy && window.openSelectBy("expression"), available: () => buttonEnabled("btn-select-by") },
       { t: "Выбрать по расположению…", run: () => window.openSelectBy && window.openSelectBy("location"), available: () => buttonEnabled("btn-select-by") },
