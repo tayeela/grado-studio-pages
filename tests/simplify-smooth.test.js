@@ -84,7 +84,7 @@ const area = ring => {
     "допуск в метрах на глаз не выбирается — предпросмотр обязателен");
   assert.match(edit, /выродилось бы — они не тронутся/,
     "вырожденные объекты пропускаются с объяснением, а не молча");
-  assert.match(app, /"btn-join", "btn-buffer-open", "btn-merge", "btn-simplify"\]/,
+  assert.match(app, /"btn-join", "btn-buffer-open", "btn-merge", "btn-simplify", "btn-array"\]/,
     "кнопка гаснет в пустом проекте");
 }
 
