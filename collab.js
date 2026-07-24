@@ -372,9 +372,9 @@
     if (authOverlay) authOverlay.remove();
     mode = mode || "login";
     const isReg = mode === "register";
-    authOverlay = overlay(`<div class="modal collab-auth">
+    authOverlay = overlay(`<div class="modal collab-auth" role="dialog" aria-modal="true" aria-labelledby="collab-auth-title">
       <div class="collab-brand">ГРАДО <span>Студия</span></div>
-      <div class="collab-sub">${isReg ? "Регистрация по инвайт-коду" : "Вход в совместную работу"}</div>
+      <div class="collab-sub" id="collab-auth-title">${isReg ? "Регистрация по инвайт-коду" : "Вход в совместную работу"}</div>
       <div class="collab-err" id="au-err"></div>
       ${isReg ? `<label>Инвайт-код<input id="au-invite" autocomplete="off" placeholder="код от администратора"></label>` : ""}
       <label>Логин<input id="au-login" autocomplete="username" placeholder="латиница, 3-32 символа"></label>
@@ -426,8 +426,8 @@
           <button class="collab-del" data-pid="${p.id}" title="Удалить проект" aria-label="Удалить проект"><svg class="ic"><use href="#ic-close"/></svg></button>` : `<span class="muted">общий</span>`}
         </div>
       </div>`).join("") : `<div class="collab-empty">Пока нет проектов. Создайте первый.</div>`;
-    projOverlay = overlay(`<div class="modal collab-projects">
-      <div class="modal-head">Проекты · ${esc(Collab.user)}
+    projOverlay = overlay(`<div class="modal collab-projects" role="dialog" aria-modal="true" aria-labelledby="collab-projects-title">
+      <div class="modal-head"><span id="collab-projects-title">Проекты · ${esc(Collab.user)}</span>
         <span class="spacer"></span>
         ${Collab.admin ? `<button id="pj-invite" class="collab-mini" title="Создать инвайт-код для коллеги">+ инвайт</button>` : ""}
         <button id="pj-logout" class="collab-mini">Выйти</button></div>

@@ -6159,8 +6159,8 @@ function openShortcuts() {
     <div class="sc-group"><div class="sc-group-title">${escHtml(title)}</div>
     ${rows.map(([k, d]) => `<div class="sc-row"><kbd>${escHtml(k)}</kbd><span>${escHtml(d)}</span></div>`).join("")}
     </div>`).join("");
-  overlay.innerHTML = `<div class="modal fmt-modal-lg sc-modal">
-    <div class="modal-head">Горячие клавиши
+  overlay.innerHTML = `<div class="modal fmt-modal-lg sc-modal" role="dialog" aria-modal="true" aria-labelledby="sc-title">
+    <div class="modal-head"><span id="sc-title">Горячие клавиши</span>
       <button class="modal-x" aria-label="Закрыть горячие клавиши"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body sc-body">${groups}</div>
     <div class="modal-actions"><span class="spacer"></span>
@@ -6338,8 +6338,8 @@ function openNewLayerDialog(options = {}) {
   const suggestedGeom = suggestedBase?.geometry_type || "polygon";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  overlay.innerHTML = `<div class="modal new-layer-modal">
-    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Структура проекта</span><span>Новый слой</span></div>
+  overlay.innerHTML = `<div class="modal new-layer-modal" role="dialog" aria-modal="true" aria-labelledby="new-layer-title">
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Структура проекта</span><span id="new-layer-title">Новый слой</span></div>
       <button class="modal-x" aria-label="Закрыть создание слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact new-layer-body">
       <p class="new-layer-intro">Выберите назначение — Студия подставит правильную геометрию и знак. После создания можно сразу чертить.</p>
@@ -6567,8 +6567,8 @@ function openManageKinds() {
     persist(); renderList(); resetForm();
     toast(editing ? "Тип слоя изменён" : "Тип слоя добавлен");
   }
-  overlay.innerHTML = `<div class="modal fmt-modal-lg mk-modal">
-    <div class="modal-head">Свои типы слоёв
+  overlay.innerHTML = `<div class="modal fmt-modal-lg mk-modal" role="dialog" aria-modal="true" aria-labelledby="mk-title">
+    <div class="modal-head"><span id="mk-title">Свои типы слоёв</span>
       <button class="modal-x" aria-label="Закрыть свои типы слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="lib-hint">Свой тип слоя — это роль в расчёте и знак по умолчанию. Готовые роли (граница, зона, здание, ограничение и прочие) выбираются прямо при создании слоя, отдельного списка для них не нужно.</div>
@@ -6870,8 +6870,8 @@ function openAlbumConfig() {
     apo: 'Архитектурно-планировочная организация', tep: 'Технико-экономические показатели',
     ortho: 'Ортофотоплан', photo: 'Фотофиксация', parking: 'Парковки', greenery: 'Озеленение'
   };
-  let html = `<div class="modal fmt-modal album-modal">
-    <div class="modal-head">Состав альбома
+  let html = `<div class="modal fmt-modal album-modal" role="dialog" aria-modal="true" aria-labelledby="album-title">
+    <div class="modal-head"><span id="album-title">Состав альбома</span>
       <button class="modal-x" aria-label="Закрыть состав альбома"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body album-body">
       <div class="album-section-title">Листы и порядок</div>
@@ -7332,9 +7332,9 @@ function uiConfirm(msg, { title = "", ok = "OK", cancel = "Отмена", danger
     // do not close other modals — allow nested (e.g. create project style from inside layer style dialog)
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
-    overlay.innerHTML = `<div class="modal ask-modal">
+    overlay.innerHTML = `<div class="modal ask-modal" role="dialog" aria-modal="true" aria-labelledby="ask-confirm-msg">
       ${title ? `<div class="ask-title">${escHtml(title)}</div>` : ""}
-      <div class="ask-msg">${escHtml(msg)}</div>
+      <div class="ask-msg" id="ask-confirm-msg">${escHtml(msg)}</div>
       <div class="modal-actions"><span class="spacer"></span>
         <button class="ask-cancel">${escHtml(cancel)}</button>
         <button class="ask-ok ${danger ? "danger" : "primary"}">${escHtml(ok)}</button>
@@ -7359,9 +7359,9 @@ function uiChoice(msg, choices, { title = "", cancel = "Отмена" } = {}) {
     if (!safeChoices.length) { resolve(null); return; }
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
-    overlay.innerHTML = `<div class="modal ask-modal">
+    overlay.innerHTML = `<div class="modal ask-modal" role="dialog" aria-modal="true" aria-labelledby="ask-confirm-msg">
       ${title ? `<div class="ask-title">${escHtml(title)}</div>` : ""}
-      <div class="ask-msg">${escHtml(msg)}</div>
+      <div class="ask-msg" id="ask-confirm-msg">${escHtml(msg)}</div>
       <div class="modal-actions"><button class="ask-cancel">${escHtml(cancel)}</button>
         <span class="spacer"></span>${safeChoices.map((choice, index) =>
           `<button class="ask-choice${choice.primary ? " primary" : ""}" data-choice="${index}">${escHtml(choice.label)}</button>`
@@ -7393,8 +7393,8 @@ function uiPrompt(msg, def = "", { ok = "OK", placeholder = "" } = {}) {
     // do not close other modals — allow nested (e.g. create project style from inside layer style dialog)
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
-    overlay.innerHTML = `<div class="modal ask-modal">
-      <div class="ask-msg">${escHtml(msg)}</div>
+    overlay.innerHTML = `<div class="modal ask-modal" role="dialog" aria-modal="true" aria-labelledby="ask-prompt-msg">
+      <div class="ask-msg" id="ask-prompt-msg">${escHtml(msg)}</div>
       <input type="text" class="ask-input" placeholder="${escHtml(placeholder)}">
       <div class="modal-actions"><span class="spacer"></span>
         <button class="ask-cancel">Отмена</button>
@@ -7420,9 +7420,9 @@ function uiCopyText(msg, value, { title = "", copy = "Скопировать" } 
   return new Promise(resolve => {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
-    overlay.innerHTML = `<div class="modal ask-modal" role="dialog" aria-modal="true">
+    overlay.innerHTML = `<div class="modal ask-modal" role="dialog" aria-modal="true" aria-labelledby="ask-choice-msg">
       ${title ? `<div class="ask-title">${escHtml(title)}</div>` : ""}
-      <div class="ask-msg">${escHtml(msg)}</div>
+      <div class="ask-msg" id="ask-choice-msg">${escHtml(msg)}</div>
       <input type="text" class="ask-input" readonly aria-label="Значение для копирования">
       <div class="modal-actions"><span class="spacer"></span>
         <button class="ask-cancel">Закрыть</button>
@@ -7457,8 +7457,8 @@ window.uiCopyText = uiCopyText;
 async function openAutosaveRecovery() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  overlay.innerHTML = `<div class="modal recovery-modal" role="dialog" aria-modal="true" aria-label="Восстановление автосохранения">
-    <div class="modal-head">Восстановление автосохранения
+  overlay.innerHTML = `<div class="modal recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
+    <div class="modal-head"><span id="recovery-title">Восстановление автосохранения</span>
       <button class="modal-x" aria-label="Закрыть окно восстановления"><svg class="ic"><use href="#ic-close"/></svg></button>
     </div>
     <div class="modal-body recovery-body"><div class="recovery-empty">Загрузка копий…</div></div>
@@ -9255,8 +9255,8 @@ function showPreflightReport(report) {
       </div>`;
     }).join("");
     const blocked = report.errors.length > 0;
-    overlay.innerHTML = `<div class="modal preflight-modal" role="dialog" aria-modal="true" aria-label="Проверка проекта перед выпуском">
-      <div class="modal-head"><span>Проверка перед выпуском</span></div>
+    overlay.innerHTML = `<div class="modal preflight-modal" role="dialog" aria-modal="true" aria-labelledby="preflight-title">
+      <div class="modal-head"><span id="preflight-title">Проверка перед выпуском</span></div>
       <div class="modal-body">
         <div class="preflight-summary">Готово объектов: <b>${report.summary.exportable}</b> из ${report.summary.total}${report.summary.annotations ? ` · аннотаций на холсте: ${report.summary.annotations}` : ""}</div>
         <div class="preflight-list">${rows}</div>
