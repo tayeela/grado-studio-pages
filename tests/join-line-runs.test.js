@@ -126,8 +126,11 @@ assert.match(app, /for \(const key of feature\.srcKeys \|\| \[\]\) existingKeys\
 assert.match(app, /joinedFrom: segments > stagedFeatures\.length \? segments : 0/,
   "склейка меняет число объектов — об этом обязано быть сказано");
 const data = fs.readFileSync(path.join(root, "app-data.js"), "utf8");
-assert.equal((data.match(/склеено из \$\{joinedFrom\} отрезков/g) || []).length, 2,
-  "сообщение нужно на обоих путях импорта — по области и по подборке");
+// Ждали два вхождения, пока путей импорта было два: мастер и старое окно
+// openDataFetchLegacy. Второе окно давно не вызывалось ниоткуда и удалено —
+// значит и второе сообщение сторожило мёртвый код, а не путь пользователя.
+assert.equal((data.match(/склеено из \$\{joinedFrom\} отрезков/g) || []).length, 1,
+  "на живом пути импорта сообщение о склейке обязано быть");
 const core = fs.readFileSync(path.join(root, "pages-core.js"), "utf8");
 assert.match(core, /if \(Array\.isArray\(f\.line\)\) f\.joinable = true;/,
   "склейка включается источником, а не догадкой фронта");

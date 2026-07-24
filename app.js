@@ -1289,30 +1289,3 @@ function upgradeFeature(f, resolveLayer = layerOf) {
   return roundCoords(f);
 }
 
-// импорт объектов из источника (НСПД / OSM / ГИС ОГД) с дедупликацией:
-// каждый объект-источник несёт стабильный srcKey; повторная выгрузка той же
-// территории пропускает уже присутствующие (не плодит дубликаты). Возвращает
-// {added, dup, invalid}. Объекты без srcKey (напр. ручной импорт) добавляются
-// всегда, а одна повреждённая геометрия не прерывает импорт всей подборки.
-function importSourceFeatures(features) {
-  const seen = new Set();
-  for (const f of state.features) if (f.srcKey) seen.add(f.srcKey);
-  let added = 0, dup = 0, invalid = 0;
-  for (const f of features) {
-    if (f.srcKey && seen.has(f.srcKey)) { dup++; continue; }
-    let upgraded;
-    try {
-      upgraded = upgradeFeature({ id: state.nextId, ...f });
-    } catch (error) {
-      invalid++;
-      console.warn("Пропущен объект с некорректной геометрией", error, f);
-      continue;
-    }
-    if (f.srcKey) seen.add(f.srcKey);
-    state.nextId++;
-    state.features.push(upgraded);
-    added++;
-  }
-  return { added, dup, invalid };
-}
-
