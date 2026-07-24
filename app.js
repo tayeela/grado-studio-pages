@@ -1633,6 +1633,9 @@ function commitPreparedSourceImport(plan) {
     state.selected = null;
     renderSources();
     afterChange();
+    // первая геоданная в проекте с СК «авто» выбирает местную систему
+    // территории (guard: vm-вырезки тестов зовут commit без окружения)
+    if (typeof resolveAutoProjectCrs === "function") resolveAutoProjectCrs();
     return { added: plan.added, dup: plan.dup, invalid: plan.invalid, joinedFrom: plan.joinedFrom || 0 };
   } catch (error) {
     state.features.length = featureLength;
@@ -1699,6 +1702,7 @@ const state = {
   projectCustomKinds: [],         // пользовательские роли/типы слоёв для этого проекта
   albumConfig: JSON.parse(JSON.stringify(DEFAULT_ALBUM_CONFIG)),
   sheetLegend: null,              // группы легенды листа: { groups: [{title, layers:[id]}] }
+  projectCrsId: "auto",           // местная СК проекта; auto — подобрать по территории
   _fitted: false, _ix: null,
 };
 
@@ -1919,6 +1923,152 @@ function gridStep() {
 // «метров на градус» не учитывает сближение меридианов и сдвигает тайлы
 // по востоку/западу при удалении от точки ORIGIN.
 const exactCrs = window.GRADO_CRS;
+
+// ---------- проектная система координат ----------
+// Проект живёт в местной СК своей территории: Москва — МСК Москвы, область —
+// МСК-50, дальше — зоны Гаусса-Крюгера СК-42. Все загрузки автоматически
+// перепроецируются в СК проекта (конвейер единый — exactCrs), лист получает
+// честный масштаб (k=1 у местных СК против 0.9996 у UTM), а DXF — настоящие
+// координаты системы, в которой работают САПРы получателей.
+const PROJECT_CRS_CHOICES = [
+  { id: "utm37-legacy", title: "UTM 37N (историческая, по умолчанию у старых проектов)",
+    origin: [413000, 6178000], legacy: true },
+  { id: "msk-moscow", title: "МСК Москвы", origin: [0, 0] },
+  { id: "msk50-2", title: "МСК-50 зона 2 (Московская область)", origin: [2250000, 480000] },
+  ...[6, 7, 8].map(z => ({ id: "gk" + z, title: `Гаусса-Крюгера зона ${z} (СК-42)`,
+    origin: [z * 1e6 + 500000, 6170000] })),
+];
+function projectCrsEntry(id) {
+  return PROJECT_CRS_CHOICES.find(item => item.id === id) || PROJECT_CRS_CHOICES[0];
+}
+function projectCrsConverters(entry) {
+  if (entry.legacy) return null;                      // встроенная UTM37 в crs.js
+  const R = window.GRADO_CRS_RU;
+  const def = (R.KNOWN.find(k => k.id === entry.id) || {}).def;
+  if (!def) return null;
+  const [ox, oy] = entry.origin;
+  return {
+    id: entry.id,
+    fromWgs84: ([lon, lat]) => {
+      const [x, y] = R.fromWgs84(lon, lat, def);
+      return [x - ox, y - oy];
+    },
+    toWgs84: ([x, y]) => R.toWgs84(x + ox, y + oy, def),
+  };
+}
+// пересчёт всех координат проекта из СК в СК; история очищается: снимки
+// прошлой СК рядом с новой геометрией дали бы кашу после Undo
+function applyProjectCrs(id, { reproject = true, silent = false } = {}) {
+  const entry = projectCrsEntry(id);
+  const current = state.projectCrsId || "utm37-legacy";
+  if (entry.id === current && reproject) return false;
+  const convert = pt => exactCrs.wgs84ToLocal(exactCrs.localToWgs84(pt));
+  let viewCenter = null;
+  if (reproject) {
+    try { viewCenter = s2w(viewportW() / 2, viewportH() / 2); } catch (e) {}
+    // сначала запоминаем WGS84-положение всего, ПОТОМ включаем новую СК
+    const staged = [];
+    for (const f of state.features) {
+      if (f.circle) staged.push([f, "c", exactCrs.localToWgs84([f.circle.cx, f.circle.cy])]);
+      else if (f.arc) staged.push([f, "a", exactCrs.localToWgs84([f.arc.cx, f.arc.cy])]);
+      else for (const p of featureMovablePts(f)) staged.push([p, "p", exactCrs.localToWgs84(p)]);
+    }
+    const viewWgs = viewCenter ? exactCrs.localToWgs84(viewCenter) : null;
+    const sheetHook = typeof window.reprojectSheet === "function"
+      ? window.reprojectSheet(pt => exactCrs.localToWgs84(pt)) : null;
+    exactCrs.setProjectCrs(projectCrsConverters(entry));
+    for (const [target, kindTag, wgs] of staged) {
+      const [x, y] = exactCrs.wgs84ToLocal(wgs);
+      if (kindTag === "p") { target[0] = x; target[1] = y; }
+      else if (kindTag === "c") { target.circle.cx = x; target.circle.cy = y; }
+      else { target.arc.cx = x; target.arc.cy = y; }
+    }
+    if (sheetHook) sheetHook(wgs => exactCrs.wgs84ToLocal(wgs));
+    if (viewWgs && viewCenter) {
+      const [nx, ny] = exactCrs.wgs84ToLocal(viewWgs);
+      state.view.tx += (viewCenter[0] - nx) * state.view.k;
+      state.view.ty -= (viewCenter[1] - ny) * state.view.k;
+    }
+    state.undo = []; state.redo = [];
+  } else {
+    exactCrs.setProjectCrs(projectCrsConverters(entry));
+  }
+  state.projectCrsId = entry.id;
+  state._ix = null; state._snapIndex = null;
+  if (typeof syncHistoryControls === "function") syncHistoryControls();
+  if (!silent) {
+    persist();
+    draw(); renderLayers(); renderProps();
+    toast(`Система координат проекта: ${entry.title}${reproject ? " — все слои перепроецированы" : ""}`);
+  }
+  return true;
+}
+// авто: местная СК подбирается по территории при первой загрузке геоданных
+function resolveAutoProjectCrs() {
+  if ((state.projectCrsId || "auto") !== "auto") return;
+  const geo = state.features.find(f => f.prov || String(f.layer_id || "").startsWith("source."));
+  if (!geo) return;
+  let lon, lat;
+  try {
+    const pts = geo.circle ? [[geo.circle.cx, geo.circle.cy]]
+      : geo.arc ? [[geo.arc.cx, geo.arc.cy]] : featureMovablePts(geo);
+    [lon, lat] = exactCrs.localToWgs84(pts[0]);
+  } catch (e) { return; }
+  // Москва (с ТиНАО) → МСК Москвы; Подмосковье в полосе зоны 2 → МСК-50-2;
+  // дальше — зона Гаусса-Крюгера СК-42 по долготе
+  const id = lon >= 36.7 && lon <= 38.1 && lat >= 55.05 && lat <= 56.1 ? "msk-moscow"
+    : lon >= 35.0 && lon <= 40.6 && lat >= 54.2 && lat <= 57.0 ? "msk50-2"
+    : (() => { const z = Math.floor(lon / 6) + 1; return z >= 6 && z <= 8 ? "gk" + z : "utm37-legacy"; })();
+  applyProjectCrs(id, { reproject: true });
+}
+function openProjectCrsDialog() {
+  closePopups();
+  const currentId = state.projectCrsId === "auto" ? "auto" : projectCrsEntry(state.projectCrsId).id;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal find-modal" role="dialog" aria-modal="true" aria-labelledby="pcrs-title">
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Проект</span><span id="pcrs-title">Система координат проекта</span></div>
+      <button class="modal-x" aria-label="Закрыть выбор системы координат"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body select-body">
+      <p class="vector-intro">Все слои и загрузки живут в местной системе территории и
+        перепроецируются автоматически; DXF выгружается в её настоящих координатах.
+        Смена системы пересчитывает весь проект и очищает историю отмен.</p>
+      <label class="select-row">Система координат<select id="pcrs-pick">
+        <option value="auto"${currentId === "auto" ? " selected" : ""}>Автоматически по территории</option>
+        ${PROJECT_CRS_CHOICES.map(item =>
+          `<option value="${item.id}"${item.id === currentId ? " selected" : ""}>${escHtml(item.title)}</option>`).join("")}
+      </select></label>
+    </div>
+    <div class="modal-actions"><span class="spacer"></span>
+      <button type="button" id="pcrs-cancel">Отмена</button>
+      <button type="button" id="pcrs-apply" class="primary">Применить</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector("#pcrs-cancel").addEventListener("click", close);
+  overlay.querySelector(".modal-x").addEventListener("click", close);
+  overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+  overlay.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
+  overlay.querySelector("#pcrs-apply").addEventListener("click", () => {
+    const value = overlay.querySelector("#pcrs-pick").value;
+    close();
+    if (value === "auto") {
+      state.projectCrsId = "auto";
+      resolveAutoProjectCrs();
+      if (state.projectCrsId === "auto") toast("СК подберётся при первой загрузке геоданных");
+      persist();
+      return;
+    }
+    applyProjectCrs(value, { reproject: true });
+  });
+}
+on("btn-project-crs", "click", openProjectCrsDialog);
+window.openProjectCrsDialog = openProjectCrsDialog;
+window.applyProjectCrs = applyProjectCrs;
+window.projectCrsInfo = () => {
+  const entry = projectCrsEntry(state.projectCrsId || "utm37-legacy");
+  return { id: entry.id, title: entry.title, origin: entry.origin };
+};
 if (!exactCrs) throw new Error("Не загружен модуль точных преобразований координат");
 const basemap = {
   on: false, source: "osm", opacity: 0.85, originLon: null, originLat: null,
@@ -4216,6 +4366,7 @@ function historySmallState() {
   delete saved.accessRadii;
   delete saved.albumConfig;
   delete saved.sheetLegend;
+  delete saved.projectCrsId;
   return JSON.stringify({ history_version: 2, ...saved });
 }
 // ---------------------------------------------------------------------------
@@ -4501,6 +4652,7 @@ function collectState(opts = {}) {
     accessRadii: state.accessRadii,
     albumConfig: state.albumConfig,
     sheetLegend: state.sheetLegend || null,
+    projectCrsId: state.projectCrsId || "utm37-legacy",
   };
 }
 // Настройки, которые должны ехать внутри .grado вместе с геометрией. Без
@@ -6285,6 +6437,8 @@ function resetProjectState(name = "Новый проект") {
   state.accessRadii = { on: false, r: 300 };
   state.albumConfig = JSON.parse(JSON.stringify(DEFAULT_ALBUM_CONFIG));
   state.sheetLegend = null;
+  state.projectCrsId = "auto";
+  exactCrs.setProjectCrs(null);
   state.activeLayerId = null;
   state.drawing = null;
   state.drag = null;
@@ -9708,6 +9862,10 @@ function applyRestoredState(d) {
   }
   state.sheetLegend = isRecord(d.sheetLegend) && Array.isArray(d.sheetLegend.groups)
     ? d.sheetLegend : null;
+  // координаты в файле уже в СК проекта — только включаем преобразования
+  state.projectCrsId = typeof d.projectCrsId === "string" ? d.projectCrsId : "utm37-legacy";
+  if (state.projectCrsId !== "auto")
+    applyProjectCrs(state.projectCrsId, { reproject: false, silent: true });
   state.osnap = d.osnap !== false;
   setTopoEdit(d.topoEdit === true, true);
   state.gridSnap = d.gridSnap !== false;

@@ -62,9 +62,15 @@
 
   const pair = (code, value) => `${code}\n${value}\n`;
   const num = value => (Math.round((Number(value) || 0) * 1000) / 1000).toString();
+  let dxfOrigin = [0, 0];
+  const numX = value => num(Number(value) + dxfOrigin[0]);
+  const numY = value => num(Number(value) + dxfOrigin[1]);
 
   // ---------- сборка файла ----------
-  function buildDxf({ features = [], layers = [], styleOf, layerOf, labelOf } = {}) {
+  function buildDxf({ features = [], layers = [], styleOf, layerOf, labelOf, origin = [0, 0] } = {}) {
+    // origin проектной СК: в файл идут НАСТОЯЩИЕ координаты системы (МСК/ГК),
+    // а не внутренние смещённые — получателю в САПР не нужно ничего двигать
+    dxfOrigin = [Number(origin[0]) || 0, Number(origin[1]) || 0];
     const used = new Map();                      // слой → { name, aci }
     layers.forEach((layer, index) => {
       const style = (styleOf && styleOf(null, layer)) || layer.fmt || {};
@@ -92,18 +98,18 @@
         writeChain(feature.line, info.name, aci, false);
         counts.polyline += 1;
       } else if (Array.isArray(feature.point)) {
-        write("POINT", info.name, pair(62, aci) + pair(10, num(feature.point[0])) +
-          pair(20, num(feature.point[1])) + pair(30, "0"));
+        write("POINT", info.name, pair(62, aci) + pair(10, numX(feature.point[0])) +
+          pair(20, numY(feature.point[1])) + pair(30, "0"));
         counts.point += 1;
       } else if (feature.circle) {
-        write("CIRCLE", info.name, pair(62, aci) + pair(10, num(feature.circle.cx)) +
-          pair(20, num(feature.circle.cy)) + pair(30, "0") + pair(40, num(feature.circle.r)));
+        write("CIRCLE", info.name, pair(62, aci) + pair(10, numX(feature.circle.cx)) +
+          pair(20, numY(feature.circle.cy)) + pair(30, "0") + pair(40, num(feature.circle.r)));
         counts.circle += 1;
       } else if (feature.arc) {
         const a = feature.arc;
         const start = a.a0 * 180 / Math.PI;
         const end = (a.a0 + a.sweep) * 180 / Math.PI;
-        write("ARC", info.name, pair(62, aci) + pair(10, num(a.cx)) + pair(20, num(a.cy)) +
+        write("ARC", info.name, pair(62, aci) + pair(10, numX(a.cx)) + pair(20, numY(a.cy)) +
           pair(30, "0") + pair(40, num(a.r)) +
           pair(50, num(a.sweep >= 0 ? start : end)) + pair(51, num(a.sweep >= 0 ? end : start)));
         counts.arc += 1;
@@ -115,9 +121,9 @@
       if (label !== undefined && label !== null && String(label).trim()) {
         const anchor = textAnchor(feature);
         if (anchor) {
-          write("TEXT", info.name, pair(62, aci) + pair(10, num(anchor[0])) + pair(20, num(anchor[1])) +
+          write("TEXT", info.name, pair(62, aci) + pair(10, numX(anchor[0])) + pair(20, numY(anchor[1])) +
             pair(30, "0") + pair(40, num(textHeight(style))) + pair(1, String(label).slice(0, 250)) +
-            pair(72, "1") + pair(11, num(anchor[0])) + pair(21, num(anchor[1])) + pair(31, "0"));
+            pair(72, "1") + pair(11, numX(anchor[0])) + pair(21, numY(anchor[1])) + pair(31, "0"));
           counts.text += 1;
         }
       }
@@ -131,7 +137,7 @@
         pair(10, "0") + pair(20, "0") + pair(30, "0");
       for (const point of points)
         entities += pair(0, "VERTEX") + pair(8, layer) +
-          pair(10, num(point[0])) + pair(20, num(point[1])) + pair(30, "0");
+          pair(10, numX(point[0])) + pair(20, numY(point[1])) + pair(30, "0");
       entities += pair(0, "SEQEND") + pair(8, layer);
     }
 
@@ -179,9 +185,10 @@
     if (!features.length) { toast("Проект пуст — сначала добавьте объекты", "warn"); return; }
     const layers = LAYERS_V2.filter(layer => layer.visible !== false &&
       features.some(feature => layerOf(feature) === layer));
+    const crsInfo = typeof window.projectCrsInfo === "function" ? window.projectCrsInfo() : null;
     const { text, counts, layers: names } = buildDxf({ features, layers,
       styleOf: feature => feature ? styleOf(feature) : {},
-      layerOf, labelOf });
+      layerOf, labelOf, origin: crsInfo ? crsInfo.origin : [0, 0] });
     const blob = new Blob([text], { type: "application/dxf" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

@@ -98,6 +98,24 @@
   }
 
   const ORIGIN_WGS84 = Object.freeze(utm37nToWgs84(ORIGIN_UTM));
+
+  /* Проектная система координат. По умолчанию проект живёт в исторической
+     UTM 37N минус origin; setProjectCrs подменяет преобразования на местную
+     СК территории (МСК Москвы, МСК-50, ГК-зону) — и ВЕСЬ конвейер (импорт,
+     тайлы, холст) автоматически работает в ней: и pages-core, и app.js
+     зовут одни и те же wgs84ToLocal/localToWgs84 отсюда. */
+  let projectCrs = null;   // { id, fromWgs84([lon,lat])→[x,y], toWgs84([x,y])→[lon,lat] }
+  function setProjectCrs(next) { projectCrs = next || null; }
+  function projectCrsId() { return projectCrs ? projectCrs.id : "utm37-legacy"; }
+  function wgs84ToLocalProject(point) {
+    return projectCrs ? projectCrs.fromWgs84(finitePair(point)) : wgs84ToLocal(point);
+  }
+  function localToWgs84Project(point) {
+    return projectCrs ? projectCrs.toWgs84(finitePair(point)) : localToWgs84(point);
+  }
   return { ORIGIN_UTM, ORIGIN_WGS84, wgs84ToUtm37n, utm37nToWgs84,
-    wgs84ToLocal, localToWgs84, mercatorToWgs84, wgs84ToMercator };
+    wgs84ToLocal: wgs84ToLocalProject, localToWgs84: localToWgs84Project,
+    legacyWgs84ToLocal: wgs84ToLocal, legacyLocalToWgs84: localToWgs84,
+    setProjectCrs, projectCrsId,
+    mercatorToWgs84, wgs84ToMercator };
 });
