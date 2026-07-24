@@ -92,4 +92,21 @@ assert.match(cat, /Date\.now\(\) - hit\.at\) < GISOGD_CATALOG_TTL_MS/,
 assert.ok(cat.indexOf("catch (error) { /* не влез") > 0,
   "недоступное хранилище не должно ронять выгрузку");
 
+// ---------- гонка библиотеки знаков ----------
+// Выгрузка каталога из кэша обгоняла загрузку styles.json: LineCode не
+// превращался в style_id и красные линии рисовались чёрными. Любой импорт
+// ГИС ОГД обязан сначала дождаться библиотеку одним общим промисом.
+{
+  const adapter = fs.readFileSync(path.join(root, "pages-adapter.js"), "utf8");
+  assert.match(adapter, /function ensureLgrStyles\(\)/, "одноразовый загрузчик библиотеки есть");
+  assert.match(adapter, /Библиотека знаков не загрузилась — объекты без знаков/,
+    "выгрузка по области ждёт знаки и честно предупреждает при сбое");
+  assert.match(adapter, /ensureLgrStyles\(\); \} catch \(error\) \{ \/\* фолбэк по имени слоя \*\//,
+    "ручной импорт GeoJSON тоже ждёт");
+  assert.ok(!/response\.clone\(\)\.json\(\)/.test(adapter),
+    "маршрут /api/styles переиспользует общий загрузчик, а не свой");
+  assert.match(adapter, /lgrStylesPromise = null; throw error/,
+    "ошибка сбрасывает промис — следующая попытка перечитает файл");
+}
+
 console.log("gisogd-attrs-and-catalog: OK");
