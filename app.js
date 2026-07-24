@@ -442,13 +442,17 @@ function toggleLayerLock(layer) {
 // Стили выше — встроенный fallback; на старте они переопределяются из
 // /api/styles (единый источник styles/default.json — тот же, что PDF и DXF).
 async function initStyles() {
+  // встроенная библиотека (styles-lib.js) вливается сразу и без сети: у части
+  // пользователей запрос styles.json блокируется, и знаки ЛГР не применялись
+  if (window.GRADO_STYLES_LIB)
+    for (const id of Object.keys(GRADO_STYLES_LIB)) STYLES_V2[id] = GRADO_STYLES_LIB[id];
   try {
     const r = await fetch("/api/styles");
     if (!r.ok) return;
     const lib = await r.json();
     for (const id of Object.keys(lib)) STYLES_V2[id] = lib[id];
     draw(); renderLayers();
-  } catch (e) { /* сервер без /api/styles — холст на встроенных стилях */ }
+  } catch (e) { /* сервер без /api/styles — холст на встроенной библиотеке */ }
 }
 
 function layerOf(f) { return LAYER_BY_ID[f.layer_id] || LAYER_BY_KIND[f.kind] || null; }
@@ -6014,6 +6018,30 @@ function openShortcuts() {
 function closePopups() {
   document.querySelectorAll(".ctx-menu, .modal-overlay").forEach(n => n.remove());
 }
+// ---------- совмещение слоя: сдвиг по двум точкам ----------
+// Источники расходятся между собой на метры (ЕГРН ↔ ОСМ ↔ пересчёт портала
+// из МСК Москвы — наш замер: медианно ~4.8 м по центру города; конвейер
+// сверен с pyproj до миллиметра). Когда выгрузки надо посадить друг на
+// друга, слой двигают целиком: клик по опорной точке слоя, клик по месту,
+// где она должна оказаться, — все объекты слоя едут на этот вектор.
+function shiftLayerFeatures(layerId, dx, dy) {
+  let moved = 0;
+  for (const f of state.features) {
+    const L = layerOf(f);
+    if (!L || L.id !== layerId) continue;
+    if (f.circle) { f.circle.cx += dx; f.circle.cy += dy; }
+    else if (f.arc) { f.arc.cx += dx; f.arc.cy += dy; }
+    else for (const p of featureMovablePts(f)) { p[0] += dx; p[1] += dy; }
+    moved += 1;
+  }
+  return moved;
+}
+function startLayerAlign(layer) {
+  state.layerAlign = { layerId: layer.id, title: layer.title, a: null };
+  setTool("layeralign");
+  toast(`Совмещение «${layer.title}»: кликните опорную точку слоя (привязка работает), затем — куда её посадить. Esc — отмена`);
+}
+
 function openLayerMenu(layer, x, y) {
   closePopups();
   const menu = document.createElement("div");
@@ -6028,6 +6056,7 @@ function openLayerMenu(layer, x, y) {
     ["Выгрузить только стиль (QML)", () => window.exportLayerFiles && window.exportLayerFiles(layer, "qml")],
     ["Оформление слоя…", () => openLayerStyle(layer)],
     ["Приблизить к слою", () => zoomToLayer(layer.id)],
+    ["Совместить слой (сдвиг по двум точкам)…", () => startLayerAlign(layer)],
     ...(displayIndex > 0 ? [["Переместить выше", () =>
       reorderLayer(layer.id, displayed[displayIndex - 1].id, true)]] : []),
     ...(displayIndex >= 0 && displayIndex < displayed.length - 1
@@ -8080,6 +8109,23 @@ cv.addEventListener("pointerdown", e => {
   if (e.button !== 0) return;
   const s = cursorPoint(wxr, wyr);
   if (state.tool === "identify") { openIdentify(wxr, wyr, ex, ey); return; }
+  if (state.tool === "layeralign" && state.layerAlign) {
+    const ctx3 = state.layerAlign;
+    if (!ctx3.a) {
+      ctx3.a = s.p;                                  // опорная точка (со снапом)
+      toast("Теперь кликните, куда должна встать эта точка");
+      draw();
+      return;
+    }
+    const [dx, dy] = [s.p[0] - ctx3.a[0], s.p[1] - ctx3.a[1]];
+    snapshot();
+    const moved = shiftLayerFeatures(ctx3.layerId, dx, dy);
+    state.layerAlign = null;
+    setTool("select");
+    afterChange();
+    toast(`Слой «${ctx3.title}» сдвинут на ${fmtLen(Math.hypot(dx, dy))} (${ruCount(moved, "объект", "объекта", "объектов")})`);
+    return;
+  }
   if (state.tool === "sheet" && typeof sheetPointerDown === "function"
       && sheetPointerDown(wxr, wyr)) return;
   if (state.tool === "select") {
@@ -8615,6 +8661,7 @@ document.addEventListener("keydown", e => {
     if (state.typed) { state.typed = ""; draw(); return; }
     if (state.drawing) { state.drawing = null; draw(); return; }
     if (state.measureArea) { state.measureArea = null; draw(); return; }
+  if (state.layerAlign) { state.layerAlign = null; setTool("select"); draw(); return; }
     if (state.measure) { state.measure = null; draw(); return; }
     if (state.trimCtx && (state.trimCtx.boundary.size || state.trimCtx.ready)) {
       state.trimCtx = { boundary: new Set(), ready: false }; draw();
@@ -8686,6 +8733,7 @@ function updateLayerStatus() {
 function setTool(tool, opts = {}) {
   state.tool = tool; state.drawing = null; state.drag = null;
   state.edit = null; state.typed = "";
+  if (tool !== "layeralign") state.layerAlign = null;
   if (tool !== "measure") state.measure = null;
   if (tool !== "marea") state.measureArea = null;
   // Подсказка режима видна в статус-строке, пока режим активен: тост исчезает

@@ -413,6 +413,13 @@
   // библиотеку; промис один на страницу, при ошибке сбрасывается для повтора.
   let lgrStylesPromise = null;
   function ensureLgrStyles() {
+    // встроенная библиотека — мгновенно и без сети; сетевой styles.json нужен
+    // только как источник обновлений поверх (и для десктопного сервера)
+    if (window.GRADO_STYLES_LIB && !lgrStylesPromise) {
+      pagesCore.setLgrCodeStyles(window.GRADO_STYLES_LIB);
+      lgrStylesPromise = Promise.resolve(window.GRADO_STYLES_LIB);
+      return lgrStylesPromise;
+    }
     if (!lgrStylesPromise) lgrStylesPromise = (async () => {
       const stylesUrl = new URL("./styles.json", window.location.href);
       const release = window.__GRADO_ASSET_VERSION__;
