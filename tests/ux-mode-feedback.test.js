@@ -25,7 +25,7 @@ assert.doesNotMatch(app, /getElementById\("st-core"\)/,
   "запись в удалённый узел уронит расчёт");
 
 // --- внутренние id инструментов не утекают в интерфейс ---
-const setTool = app.slice(app.indexOf("function setTool("), app.indexOf("function setTool(") + 2600);
+const setTool = app.slice(app.indexOf("function setTool("), app.indexOf("function ", app.indexOf("function setTool(") + 1));
 assert.doesNotMatch(setTool, /Режим \$\{tool\}/,
   "название инструмента обязано подставляться по-русски, а не внутренним id");
 for (const ru of ["Обрезать", "Продлить", "Сопрячь"])
