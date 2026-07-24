@@ -78,7 +78,11 @@
     });
 
     let entities = "";
-    let counts = { polyline: 0, point: 0, text: 0, circle: 0, arc: 0, skipped: 0 };
+    // decor — зоны, у которых на холсте есть штриховка или заливка. В DXF R12
+    // нет ни HATCH, ни SOLID-заливки по контуру: зона придёт в AutoCAD пустым
+    // контуром. Молчать об этом нельзя — человек увидит другой чертёж, чем
+    // выпускал, и не поймёт почему.
+    let counts = { polyline: 0, point: 0, text: 0, circle: 0, arc: 0, skipped: 0, decor: 0 };
 
     const write = (type, layer, body) => {
       entities += pair(0, type) + pair(8, layer) + body;
@@ -91,6 +95,9 @@
       const aci = toAci(style && style.stroke) || info.aci;
 
       if (Array.isArray(feature.ring) && feature.ring.length > 2) {
+        const fill = style && style.fill;
+        if (style && (style.hatch || (fill && fill !== "transparent" && fill !== "none")))
+          counts.decor += 1;
         writeRing(feature.ring, info.name, aci);
         for (const hole of feature.holes || []) if (hole && hole.length > 2) writeRing(hole, info.name, aci);
         counts.polyline += 1;
@@ -199,9 +206,17 @@
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     const skipped = counts.skipped ? `, пропущено ${counts.skipped}` : "";
+    // Контуры уходят целиком, а вот заливка и штриховка — нет: в DXF R12 такой
+    // сущности не существует. Называем ограничение прямо и говорим, что делать
+    // в AutoCAD, иначе человек решит, что чертёж выгрузился неверно.
+    const decor = counts.decor
+      ? ` · заливка и штриховка ${ruCount(counts.decor, "зоны", "зон", "зон")} не переносятся ` +
+        "в DXF R12 — задайте их в AutoCAD штриховкой по контуру"
+      : "";
     toast(`DXF: ${ruCount(names.length, "слой", "слоя", "слоёв")}, ` +
       `${ruCount(counts.polyline + counts.point + counts.circle + counts.arc, "объект", "объекта", "объектов")}, ` +
-      `${ruCount(counts.text, "подпись", "подписи", "подписей")}${skipped}`);
+      `${ruCount(counts.text, "подпись", "подписи", "подписей")}${skipped}${decor}`,
+      counts.decor ? "warn" : undefined);
   }
 
   root.exportDxf = exportDxf;
