@@ -2040,8 +2040,8 @@ function openProjectCrsDialog() {
           `<option value="${item.id}"${item.id === currentId ? " selected" : ""}>${escHtml(item.title)}</option>`).join("")}
       </select></label>
       <label class="chk"><input type="checkbox" id="pcrs-align"${state.alignOgd !== false ? " checked" : ""}>
-        Сажать выгрузки ГИС ОГД на границы участков ЕГРН (локальная точность портала
-        гуляет по районам на 1–3 м; сдвиг применяется только когда подтверждён опорными границами)</label>
+        Датум-поправка ГИС ОГД (портал публикует координаты со сдвигом ≈7,4 м от ЕГРН
+        и спутника; поправка −5,0/+5,45 м сажает их на место — по умолчанию включена)</label>
     </div>
     <div class="modal-actions"><span class="spacer"></span>
       <button type="button" id="pcrs-cancel">Отмена</button>

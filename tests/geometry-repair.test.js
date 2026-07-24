@@ -24,7 +24,7 @@ const src = fs.readFileSync(path.join(root, "pages-core.js"), "utf8");
 for (const fn of ["importNspd(payload = {}) {", "importGeoJson(payload = {}, filename",
   "importOsmExtent(payload = {}, sources = [], bbox = []) {",
   "importNspdExtent(payload = {}, source, bbox = []) {",
-  "importGisogdExtent(payload = {}, layer = {}, bbox = []) {"]) {
+  "importGisogdExtent(payload = {}, layer = {}, bbox = [], options = {}) {"]) {
   const at = src.indexOf(fn);
   assert.ok(at > 0, `не найден импорт ${fn}`);
   assert.match(src.slice(at, at + 200), /geomFixReset\(\)/,
