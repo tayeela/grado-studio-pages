@@ -25,7 +25,8 @@ const ЛЮФТ = 20;            // насколько бюджет может о
 const БЮДЖЕТ = {
   "app-style-ui.js openLayerStyle": 633,   // 847 → 734 → 633: разметка и редактор категории вынесены
   "app-data.js openDataFetch": 520,     // 556 → 520: строители шагов вынесены
-  "app-labels-place.js drawNow": 523,
+  "app-labels-place.js drawNow": 306,   // 523 -> 306: пикетаж и живые подсказки вынесены
+  "app-labels-place.js drawLiveHints": 204,  // вынесено из drawNow целиком, дословно
   "app-layer-panel.js renderLayers": 270,
   "app-style-ui.js openStyleLibrary": 258,
   "app-layer-ui.js openVariants": 206,

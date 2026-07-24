@@ -481,6 +481,239 @@ function draw() {
   if (_drawPending) return;
   _drawPending = requestAnimationFrame(() => { _drawPending = 0; drawNow(); });
 }
+// Пикетаж красных линий: засечки поперёк оси и подписи ПК. Часть сцены, но
+// живёт отдельно от слоёв: считается по объектам, а не по оформлению слоя.
+function drawStationing() {
+  // пикетаж красных линий: засечки поперёк + подписи ПК
+  for (const f of state.features) {
+    if (f.kind !== "redline" || !(f.props.pk_step > 0) || !f.props._stations) continue;
+    if (isHidden(f)) continue;
+    ctx.strokeStyle = cvColor("redline", "#d91a1a"); ctx.lineWidth = 1;
+    ctx.fillStyle = cvColor("redline", "#8c1414"); ctx.font = "600 10px sans-serif"; ctx.textAlign = "center";
+    for (const st of f.props._stations) {
+      const [sx, sy] = w2s(st.x, st.y);
+      const nx = -Math.sin(st.a), ny = Math.cos(st.a);   // нормаль к касательной
+      ctx.beginPath();
+      ctx.moveTo(sx - nx * 5, sy + ny * 5);
+      ctx.lineTo(sx + nx * 5, sy - ny * 5);
+      ctx.stroke();
+      const pk = `ПК${Math.floor(st.s / 100)}+${String(Math.round(st.s % 100)).padStart(2, "0")}`;
+      ctx.fillText(pk, sx + nx * 16, sy - ny * 16 + 3);
+    }
+  }
+
+}
+
+// Живые подсказки поверх сцены: направляющие привязки, пунктир склейки,
+// незаконченное черчение, превью окружности, рамка выделения и измерения.
+// Это не содержимое проекта, а обратная связь на текущее действие — но
+// рисуются они и при выводе на лист, как было в едином drawNow. Каждый блок
+// сам решает, показываться ли, по своему полю в state.
+function drawLiveHints() {
+  // направляющие выравнивания
+  if (state.guides.length) {
+    ctx.strokeStyle = cvColor("shared", "#12a150"); ctx.lineWidth = 0.8; ctx.setLineDash([4, 4]);
+    for (const [a, b] of state.guides) { drawChain([a, b], false); ctx.stroke(); }
+    ctx.setLineDash([]);
+  }
+
+  // наглядность для склейки: пунктир между близкими концами выбранных
+  if (!state.trimCtx && state.selectedIds.size > 1) {
+    const sels = selectionFeatures().filter(f => f.line || f.arc);
+    if (sels.length > 1) {
+      const tol = 15 / state.view.k;
+      ctx.strokeStyle = cvColor("accent", "#2f6fde");
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3,2]);
+      for (let i=0; i<sels.length; i++) {
+        for (let j=i+1; j<sels.length; j++) {
+          const c1 = sels[i].line || (sels[i].arc ? featurePts(sels[i]) : null);
+          const c2 = sels[j].line || (sels[j].arc ? featurePts(sels[j]) : null);
+          if (!c1 || !c2 || c1.length<2 || c2.length<2) continue;
+          const ends1 = [c1[0], c1[c1.length-1]];
+          const ends2 = [c2[0], c2[c2.length-1]];
+          for (let e1 of ends1) for (let e2 of ends2) {
+            if (Math.hypot(e1[0]-e2[0], e1[1]-e2[1]) < tol) {
+              ctx.beginPath();
+              ctx.moveTo(...w2s(...e1));
+              ctx.lineTo(...w2s(...e2));
+              ctx.stroke();
+            }
+          }
+        }
+      }
+      ctx.setLineDash([]);
+    }
+  }
+
+  // черчение в процессе + живой размер
+  if (state.drawing && Array.isArray(state.drawing.pts) && state.drawing.pts.length) {
+    const st = styleForDrawing();
+    ctx.strokeStyle = st.stroke || cvColor("boundary", "#000"); ctx.lineWidth = st.width || 1; ctx.setLineDash([5, 4]);
+    const pts = state.mouse ? [...state.drawing.pts, state.mouse] : state.drawing.pts;
+    drawChain(pts, false); ctx.stroke(); ctx.setLineDash([]);
+    const base = lastDrawingPt();
+    if (base && state.mouse) {
+      const len = Math.hypot(state.mouse[0] - base[0], state.mouse[1] - base[1]);
+      const [mx, my] = w2s(...state.mouse);
+      ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
+      if (state.typed) {
+        // подпись по формату ввода: длина «N м», абсолют «X,Y», полярно «L<A°»
+        const label = /[<>]/.test(state.typed) ? state.typed.replace(/[<>]/, " < ") + "°"
+          : /[;\s]/.test(state.typed) ? "X,Y: " + state.typed.trim()
+          : state.typed + " м";
+        ctx.fillStyle = cvColor("selection", "#1c1c1a");
+        ctx.fillRect(mx + 10, my - 24, ctx.measureText(label).width + 12, 18);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(label, mx + 16, my - 11);
+      } else {
+        ctx.fillStyle = cvColor("label", "#8b8a85");
+        ctx.fillText(fmtLen(len), mx + 12, my - 10);
+      }
+    }
+    // замыкание: подсветка первой точки
+    const drawingPts = state.drawing.pts;
+    if (TOOL_GEOM[state.tool] === "polygon" && Array.isArray(drawingPts) && drawingPts.length > 2 && state.mouse) {
+      const first = drawingPts[0];
+      if (Math.hypot(first[0] - state.mouse[0], first[1] - state.mouse[1]) < 12 / state.view.k) {
+        const [fx, fy] = w2s(...first);
+        ctx.strokeStyle = cvColor("shared", "#12a150"); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(fx, fy, 8, 0, 7); ctx.stroke();
+      }
+    }
+    // превью дуги
+    if (state.tool === "arc" && Array.isArray(drawingPts) && drawingPts.length >= 2 && state.mouse) {
+      const pts = [...drawingPts, state.mouse];
+      if (pts.length >= 3) {
+        const a = arcFrom3Pts(pts[0], pts[1], pts[2]);
+        if (a) {
+          const k = state.view.k;
+          const cx = state.view.tx + a.cx * k;
+          const cy = state.view.ty - a.cy * k;
+          ctx.beginPath();
+          ctx.arc(cx, cy, a.r * k, ...arcScreenArgs(a));
+          ctx.stroke();
+          // visual center cross for arc
+          ctx.beginPath();
+          ctx.moveTo(cx - 4, cy); ctx.lineTo(cx + 4, cy);
+          ctx.moveTo(cx, cy - 4); ctx.lineTo(cx, cy + 4);
+          ctx.stroke();
+          // больше визуалов: показываем радиус 3-point дуги
+          ctx.fillStyle = cvColor("label", "#8b8a85");
+          ctx.fillText(`r=${fmtLen(a.r)}`, cx + 8, cy - 8);
+        }
+      } else {
+        drawChain(pts, false); ctx.stroke();
+      }
+    }
+  }
+
+  // превью окружности вне блока pts (отдельное состояние drawing для circle)
+  if (state.tool === "circle" && state.drawing && state.drawing.center) {
+    const st = styleForDrawing();
+    ctx.strokeStyle = st.stroke || cvColor("boundary", "#000"); ctx.lineWidth = st.width || 1;
+    const k = state.view.k;
+    const cx = state.view.tx + state.drawing.center[0] * k;
+    const cy = state.view.ty - state.drawing.center[1] * k;
+    let r;
+    if (state.typed) {
+      const tr = parseFloat(state.typed.replace(",", "."));
+      if (isFinite(tr) && tr > 0) r = tr * k;
+    }
+    if (!r && state.mouse) {
+      r = Math.hypot(state.mouse[0] - state.drawing.center[0], state.mouse[1] - state.drawing.center[1]) * k;
+    }
+    if (r && r > 2) {
+      ctx.save();
+      ctx.setLineDash([4, 2]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.restore();
+      const [mx, my] = state.mouse ? w2s(...state.mouse) : [cx + r, cy];
+      ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
+      ctx.fillStyle = state.typed ? cvColor("selection", "#1c1c1a") : cvColor("label", "#8b8a85");
+      const txt = (state.typed || (r/k).toFixed(1)) + " м";
+      if (state.typed) {
+        ctx.fillRect(mx + 10, my - 24, ctx.measureText(txt).width + 12, 18);
+        ctx.fillStyle = "#fff";
+      }
+      ctx.fillText(txt, mx + 16, my - 11);
+    }
+  }
+
+  if (state.drag && state.drag.rect) {
+    const { a, b } = state.drag;
+    const [sx1, sy1] = w2s(...a), [sx2, sy2] = w2s(...b);
+    const bst = styleForDrawing();
+    ctx.strokeStyle = bst.stroke || cvColor("label", "#888");
+    ctx.fillStyle = (bst.fill || cvColor("zoneB", "#cccccc")) + (bst.fill ? "88" : "");
+    ctx.fillRect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
+    ctx.strokeRect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
+    ctx.fillStyle = cvColor("label", "#5c5a54"); ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(`${fmtCoord(Math.abs(b[0] - a[0]))} × ${fmtCoord(Math.abs(b[1] - a[1]))} м`,
+                 Math.max(sx1, sx2) + 8, Math.min(sy1, sy2) - 6);
+  }
+  // рамка выделения (мультивыбор инструментом «Выбор»)
+  if (state.drag && state.drag.marquee) {
+    const { a, b } = state.drag;
+    const [sx1, sy1] = w2s(...a), [sx2, sy2] = w2s(...b);
+    const x = Math.min(sx1, sx2), y = Math.min(sy1, sy2);
+    const w = Math.abs(sx2 - sx1), h = Math.abs(sy2 - sy1);
+    ctx.save();
+    ctx.strokeStyle = cvColor("selection", "#2f6fde");
+    ctx.fillStyle = cvColor("selection", "#2f6fde") + "18";
+    ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
+    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    ctx.restore();
+  }
+  // измерение площади: контур за курсором, площадь и периметр у последней точки
+  if (state.measureArea && state.measureArea.pts.length) {
+    const m = state.measureArea;
+    const chain = m.done || !state.mouse ? m.pts : [...m.pts, state.mouse];
+    ctx.save();
+    ctx.strokeStyle = cvColor("selection", "#2f6fde");
+    ctx.fillStyle = cvColor("selection", "#2f6fde") + "22";
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([6, 3]);
+    drawChain(chain, chain.length > 2);
+    if (chain.length > 2) ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (chain.length > 1) {
+      let per = 0;
+      for (let i = 0; i + 1 < chain.length; i++)
+        per += Math.hypot(chain[i + 1][0] - chain[i][0], chain[i + 1][1] - chain[i][1]);
+      const closing = chain.length > 2
+        ? Math.hypot(chain[0][0] - chain[chain.length - 1][0], chain[0][1] - chain[chain.length - 1][1]) : 0;
+      const area = chain.length > 2 ? Math.abs(ringArea(chain)) : 0;
+      const last = chain[chain.length - 1];
+      const [mx, my] = w2s(last[0], last[1]);
+      ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
+      ctx.fillStyle = cvColor("selection", "#2f6fde");
+      const text = area > 0
+        ? `${fmtAreaHa(area)} (${Math.round(area).toLocaleString("ru-RU")} м²) · периметр ${fmtLen(per + closing)}`
+        : fmtLen(per);
+      ctx.fillText(text, mx + 12, my - 10);
+    }
+    ctx.restore();
+  }
+  // измерение
+  if (state.measure) {
+    const a = state.measure.a;
+    const b = state.measure.b || state.mouse;
+    if (b) {
+      ctx.strokeStyle = cvColor("selection", "#2f6fde"); ctx.lineWidth = 1.2; ctx.setLineDash([6, 3]);
+      drawChain([a, b], false); ctx.stroke(); ctx.setLineDash([]);
+      const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const [mx, my] = w2s((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      ctx.fillStyle = cvColor("selection", "#2f6fde"); ctx.font = "600 12px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(fmtLen(dist), mx, my - 6);
+    }
+  }
+  xfDrawOverlay(ctx);
+}
+
 function drawNow() {
   const w = viewportW(), h = viewportH();
   ctx.clearRect(0, 0, w, h);
@@ -776,226 +1009,9 @@ function drawNow() {
   // рамка листа — только на экране: на самом листе её быть не должно
   if (!_renderTarget && typeof sheetDrawOverlay === "function") sheetDrawOverlay(ctx);
 
-  // пикетаж красных линий: засечки поперёк + подписи ПК
-  for (const f of state.features) {
-    if (f.kind !== "redline" || !(f.props.pk_step > 0) || !f.props._stations) continue;
-    if (isHidden(f)) continue;
-    ctx.strokeStyle = cvColor("redline", "#d91a1a"); ctx.lineWidth = 1;
-    ctx.fillStyle = cvColor("redline", "#8c1414"); ctx.font = "600 10px sans-serif"; ctx.textAlign = "center";
-    for (const st of f.props._stations) {
-      const [sx, sy] = w2s(st.x, st.y);
-      const nx = -Math.sin(st.a), ny = Math.cos(st.a);   // нормаль к касательной
-      ctx.beginPath();
-      ctx.moveTo(sx - nx * 5, sy + ny * 5);
-      ctx.lineTo(sx + nx * 5, sy - ny * 5);
-      ctx.stroke();
-      const pk = `ПК${Math.floor(st.s / 100)}+${String(Math.round(st.s % 100)).padStart(2, "0")}`;
-      ctx.fillText(pk, sx + nx * 16, sy - ny * 16 + 3);
-    }
-  }
+  drawStationing();
+  drawLiveHints();
 
-  // направляющие выравнивания
-  if (state.guides.length) {
-    ctx.strokeStyle = cvColor("shared", "#12a150"); ctx.lineWidth = 0.8; ctx.setLineDash([4, 4]);
-    for (const [a, b] of state.guides) { drawChain([a, b], false); ctx.stroke(); }
-    ctx.setLineDash([]);
-  }
-
-  // наглядность для склейки: пунктир между близкими концами выбранных
-  if (!state.trimCtx && state.selectedIds.size > 1) {
-    const sels = selectionFeatures().filter(f => f.line || f.arc);
-    if (sels.length > 1) {
-      const tol = 15 / state.view.k;
-      ctx.strokeStyle = cvColor("accent", "#2f6fde");
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3,2]);
-      for (let i=0; i<sels.length; i++) {
-        for (let j=i+1; j<sels.length; j++) {
-          const c1 = sels[i].line || (sels[i].arc ? featurePts(sels[i]) : null);
-          const c2 = sels[j].line || (sels[j].arc ? featurePts(sels[j]) : null);
-          if (!c1 || !c2 || c1.length<2 || c2.length<2) continue;
-          const ends1 = [c1[0], c1[c1.length-1]];
-          const ends2 = [c2[0], c2[c2.length-1]];
-          for (let e1 of ends1) for (let e2 of ends2) {
-            if (Math.hypot(e1[0]-e2[0], e1[1]-e2[1]) < tol) {
-              ctx.beginPath();
-              ctx.moveTo(...w2s(...e1));
-              ctx.lineTo(...w2s(...e2));
-              ctx.stroke();
-            }
-          }
-        }
-      }
-      ctx.setLineDash([]);
-    }
-  }
-
-  // черчение в процессе + живой размер
-  if (state.drawing && Array.isArray(state.drawing.pts) && state.drawing.pts.length) {
-    const st = styleForDrawing();
-    ctx.strokeStyle = st.stroke || cvColor("boundary", "#000"); ctx.lineWidth = st.width || 1; ctx.setLineDash([5, 4]);
-    const pts = state.mouse ? [...state.drawing.pts, state.mouse] : state.drawing.pts;
-    drawChain(pts, false); ctx.stroke(); ctx.setLineDash([]);
-    const base = lastDrawingPt();
-    if (base && state.mouse) {
-      const len = Math.hypot(state.mouse[0] - base[0], state.mouse[1] - base[1]);
-      const [mx, my] = w2s(...state.mouse);
-      ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
-      if (state.typed) {
-        // подпись по формату ввода: длина «N м», абсолют «X,Y», полярно «L<A°»
-        const label = /[<>]/.test(state.typed) ? state.typed.replace(/[<>]/, " < ") + "°"
-          : /[;\s]/.test(state.typed) ? "X,Y: " + state.typed.trim()
-          : state.typed + " м";
-        ctx.fillStyle = cvColor("selection", "#1c1c1a");
-        ctx.fillRect(mx + 10, my - 24, ctx.measureText(label).width + 12, 18);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(label, mx + 16, my - 11);
-      } else {
-        ctx.fillStyle = cvColor("label", "#8b8a85");
-        ctx.fillText(fmtLen(len), mx + 12, my - 10);
-      }
-    }
-    // замыкание: подсветка первой точки
-    const drawingPts = state.drawing.pts;
-    if (TOOL_GEOM[state.tool] === "polygon" && Array.isArray(drawingPts) && drawingPts.length > 2 && state.mouse) {
-      const first = drawingPts[0];
-      if (Math.hypot(first[0] - state.mouse[0], first[1] - state.mouse[1]) < 12 / state.view.k) {
-        const [fx, fy] = w2s(...first);
-        ctx.strokeStyle = cvColor("shared", "#12a150"); ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(fx, fy, 8, 0, 7); ctx.stroke();
-      }
-    }
-    // превью дуги
-    if (state.tool === "arc" && Array.isArray(drawingPts) && drawingPts.length >= 2 && state.mouse) {
-      const pts = [...drawingPts, state.mouse];
-      if (pts.length >= 3) {
-        const a = arcFrom3Pts(pts[0], pts[1], pts[2]);
-        if (a) {
-          const k = state.view.k;
-          const cx = state.view.tx + a.cx * k;
-          const cy = state.view.ty - a.cy * k;
-          ctx.beginPath();
-          ctx.arc(cx, cy, a.r * k, ...arcScreenArgs(a));
-          ctx.stroke();
-          // visual center cross for arc
-          ctx.beginPath();
-          ctx.moveTo(cx - 4, cy); ctx.lineTo(cx + 4, cy);
-          ctx.moveTo(cx, cy - 4); ctx.lineTo(cx, cy + 4);
-          ctx.stroke();
-          // больше визуалов: показываем радиус 3-point дуги
-          ctx.fillStyle = cvColor("label", "#8b8a85");
-          ctx.fillText(`r=${fmtLen(a.r)}`, cx + 8, cy - 8);
-        }
-      } else {
-        drawChain(pts, false); ctx.stroke();
-      }
-    }
-  }
-
-  // превью окружности вне блока pts (отдельное состояние drawing для circle)
-  if (state.tool === "circle" && state.drawing && state.drawing.center) {
-    const st = styleForDrawing();
-    ctx.strokeStyle = st.stroke || cvColor("boundary", "#000"); ctx.lineWidth = st.width || 1;
-    const k = state.view.k;
-    const cx = state.view.tx + state.drawing.center[0] * k;
-    const cy = state.view.ty - state.drawing.center[1] * k;
-    let r;
-    if (state.typed) {
-      const tr = parseFloat(state.typed.replace(",", "."));
-      if (isFinite(tr) && tr > 0) r = tr * k;
-    }
-    if (!r && state.mouse) {
-      r = Math.hypot(state.mouse[0] - state.drawing.center[0], state.mouse[1] - state.drawing.center[1]) * k;
-    }
-    if (r && r > 2) {
-      ctx.save();
-      ctx.setLineDash([4, 2]);
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, 2 * Math.PI);
-      ctx.stroke();
-      ctx.restore();
-      const [mx, my] = state.mouse ? w2s(...state.mouse) : [cx + r, cy];
-      ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
-      ctx.fillStyle = state.typed ? cvColor("selection", "#1c1c1a") : cvColor("label", "#8b8a85");
-      const txt = (state.typed || (r/k).toFixed(1)) + " м";
-      if (state.typed) {
-        ctx.fillRect(mx + 10, my - 24, ctx.measureText(txt).width + 12, 18);
-        ctx.fillStyle = "#fff";
-      }
-      ctx.fillText(txt, mx + 16, my - 11);
-    }
-  }
-
-  if (state.drag && state.drag.rect) {
-    const { a, b } = state.drag;
-    const [sx1, sy1] = w2s(...a), [sx2, sy2] = w2s(...b);
-    const bst = styleForDrawing();
-    ctx.strokeStyle = bst.stroke || cvColor("label", "#888");
-    ctx.fillStyle = (bst.fill || cvColor("zoneB", "#cccccc")) + (bst.fill ? "88" : "");
-    ctx.fillRect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
-    ctx.strokeRect(Math.min(sx1, sx2), Math.min(sy1, sy2), Math.abs(sx2 - sx1), Math.abs(sy2 - sy1));
-    ctx.fillStyle = cvColor("label", "#5c5a54"); ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
-    ctx.fillText(`${fmtCoord(Math.abs(b[0] - a[0]))} × ${fmtCoord(Math.abs(b[1] - a[1]))} м`,
-                 Math.max(sx1, sx2) + 8, Math.min(sy1, sy2) - 6);
-  }
-  // рамка выделения (мультивыбор инструментом «Выбор»)
-  if (state.drag && state.drag.marquee) {
-    const { a, b } = state.drag;
-    const [sx1, sy1] = w2s(...a), [sx2, sy2] = w2s(...b);
-    const x = Math.min(sx1, sx2), y = Math.min(sy1, sy2);
-    const w = Math.abs(sx2 - sx1), h = Math.abs(sy2 - sy1);
-    ctx.save();
-    ctx.strokeStyle = cvColor("selection", "#2f6fde");
-    ctx.fillStyle = cvColor("selection", "#2f6fde") + "18";
-    ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
-    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
-    ctx.restore();
-  }
-  // измерение площади: контур за курсором, площадь и периметр у последней точки
-  if (state.measureArea && state.measureArea.pts.length) {
-    const m = state.measureArea;
-    const chain = m.done || !state.mouse ? m.pts : [...m.pts, state.mouse];
-    ctx.save();
-    ctx.strokeStyle = cvColor("selection", "#2f6fde");
-    ctx.fillStyle = cvColor("selection", "#2f6fde") + "22";
-    ctx.lineWidth = 1.4;
-    ctx.setLineDash([6, 3]);
-    drawChain(chain, chain.length > 2);
-    if (chain.length > 2) ctx.fill();
-    ctx.stroke();
-    ctx.setLineDash([]);
-    if (chain.length > 1) {
-      let per = 0;
-      for (let i = 0; i + 1 < chain.length; i++)
-        per += Math.hypot(chain[i + 1][0] - chain[i][0], chain[i + 1][1] - chain[i][1]);
-      const closing = chain.length > 2
-        ? Math.hypot(chain[0][0] - chain[chain.length - 1][0], chain[0][1] - chain[chain.length - 1][1]) : 0;
-      const area = chain.length > 2 ? Math.abs(ringArea(chain)) : 0;
-      const last = chain[chain.length - 1];
-      const [mx, my] = w2s(last[0], last[1]);
-      ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
-      ctx.fillStyle = cvColor("selection", "#2f6fde");
-      const text = area > 0
-        ? `${fmtAreaHa(area)} (${Math.round(area).toLocaleString("ru-RU")} м²) · периметр ${fmtLen(per + closing)}`
-        : fmtLen(per);
-      ctx.fillText(text, mx + 12, my - 10);
-    }
-    ctx.restore();
-  }
-  // измерение
-  if (state.measure) {
-    const a = state.measure.a;
-    const b = state.measure.b || state.mouse;
-    if (b) {
-      ctx.strokeStyle = cvColor("selection", "#2f6fde"); ctx.lineWidth = 1.2; ctx.setLineDash([6, 3]);
-      drawChain([a, b], false); ctx.stroke(); ctx.setLineDash([]);
-      const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const [mx, my] = w2s((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
-      ctx.fillStyle = cvColor("selection", "#2f6fde"); ctx.font = "600 12px sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(fmtLen(dist), mx, my - 6);
-    }
-  }
-  xfDrawOverlay(ctx);
   // находки проверки топологии поверх всего: app-topo.js грузится позже app.js,
   // поэтому обращение защищено (как и в node-тестах, где модуля нет вовсе)
   if (typeof topoDrawOverlay === "function") topoDrawOverlay(ctx);
