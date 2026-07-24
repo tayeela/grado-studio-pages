@@ -70,7 +70,21 @@
       if (count) count.textContent = query || layerFilter !== 'all'
         ? `${visibleRows}/${groupRows.length}` : String(groupRows.length);
     });
-    if (layerSearchEmpty) layerSearchEmpty.hidden = shown > 0;
+    if (layerSearchEmpty) {
+      layerSearchEmpty.hidden = shown > 0;
+      // девственно пустой проект — не «слои не найдены по фильтру», а
+      // приглашение начать: прежний текст выглядел сломанным поиском
+      const pristine = rows.length === 0 && !query && layerFilter === 'all';
+      layerSearchEmpty.classList.toggle('pristine', pristine);
+      const strongEl = layerSearchEmpty.querySelector('strong');
+      const hintEl = layerSearchEmpty.querySelector('span');
+      const resetEl = document.getElementById('layer-search-reset');
+      if (strongEl) strongEl.textContent = pristine ? 'Слоёв пока нет' : 'Слои не найдены';
+      if (hintEl) hintEl.textContent = pristine
+        ? 'Создайте слой или перетащите файлы: SHP, MapInfo TAB, MIF, GeoJSON.'
+        : 'Измените запрос или фильтр.';
+      if (resetEl) resetEl.textContent = pristine ? 'Создать слой' : 'Сбросить фильтры';
+    }
     if (layersCard) layersCard.hidden = shown === 0;
     layerFilterButtons.forEach(button => {
       const active = button.dataset.layerFilter === layerFilter;
@@ -96,7 +110,14 @@
     try { localStorage.setItem('grado_layer_filter', layerFilter); } catch (_) {}
     filterLayers();
   }));
-  layerSearchReset?.addEventListener('click', () => {
+  layerSearchReset?.addEventListener('click', event => {
+    if (layerSearchEmpty?.classList.contains('pristine')) {
+      // не дать этому же клику всплыть до document и закрыть только что
+      // открытое меню создания
+      event.stopPropagation();
+      document.getElementById('btn-layer-create-menu')?.click();
+      return;
+    }
     if (layerSearch) layerSearch.value = '';
     layerFilter = 'all';
     try { localStorage.setItem('grado_layer_filter', layerFilter); } catch (_) {}

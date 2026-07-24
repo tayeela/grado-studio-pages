@@ -12,7 +12,7 @@
 .layer-create-main .ic{width:15px;height:15px}.layer-create-main .caret{margin-left:auto}
 .layer-create-main span{margin-left:auto}
 body[data-layer-view="legend"] .layer-create-main,body[data-layer-view="legend"] .layer-search,body[data-layer-view="legend"] .layer-filter-bar{display:none}
-.layer-create-menu{position:absolute;left:12px;right:12px;top:130px;z-index:calc(var(--z-menu) + 2);padding:5px;background:var(--glass-strong);border:1px solid var(--hairline-2);box-shadow:var(--shadow-md);border-radius:var(--r-md)}
+.layer-create-menu{position:absolute;left:12px;right:12px;z-index:calc(var(--z-menu) + 2);padding:5px;background:var(--glass-strong);border:1px solid var(--hairline-2);box-shadow:var(--shadow-md);border-radius:var(--r-md)}
 .layer-create-menu button{width:100%;display:flex;align-items:center;gap:10px;padding:9px;border-radius:var(--r-sm);text-align:left}
 .layer-create-menu button:hover,.layer-create-menu button:focus-visible{background:var(--accent-weak);outline:none}
 .layer-create-menu .ic{width:18px;height:18px;color:var(--accent);flex:0 0 auto}
@@ -189,7 +189,7 @@ body.layers-panel-hidden .layer-style-overlay{left:0}
   .category-style-grid{grid-template-columns:1fr}
 }
 @media (max-width:760px){
-  .layer-create-menu{top:130px}
+
   .project-style-create-body{grid-template-columns:1fr}.project-style-create-preview{border-right:0;border-bottom:1px solid var(--hairline)}.project-style-preview-canvas{height:100px}.project-style-create-form{grid-template-columns:1fr}.project-style-field-wide,.project-style-id-hint,.project-style-create-form .form-error{grid-column:1}
   .ps-geometry{display:none}
   .modal-overlay .modal.lib-modal{width:calc(100vw - 18px);max-height:calc(100vh - 18px)}.lib-modal .modal-body{overflow:auto}.lib-modal .lib-body{min-height:620px;max-height:none;flex-direction:column;overflow:visible}.lib-modal .lib-side{width:100%;flex:0 0 390px;border-right:0;border-bottom:1px solid var(--hairline)}.lib-modal .lib-edit{width:100%;flex:0 0 auto;min-height:360px;overflow:visible}
