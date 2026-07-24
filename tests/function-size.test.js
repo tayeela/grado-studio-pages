@@ -27,7 +27,8 @@ const БЮДЖЕТ = {
   "app-data.js openDataFetch": 520,     // 556 → 520: строители шагов вынесены
   "app-labels-place.js drawNow": 306,   // 523 -> 306: пикетаж и живые подсказки вынесены
   "app-labels-place.js drawLiveHints": 204,  // вынесено из drawNow целиком, дословно
-  "app-layer-panel.js renderLayers": 270,
+  "app-layer-panel.js renderLayers": 110,   // 270 -> 110: строка слоя вынесена
+  "app-layer-panel.js layerPanelRow": 166,  // вынесено из renderLayers дословно
   "app-style-ui.js openStyleLibrary": 258,
   "app-layer-ui.js openVariants": 206,
   "app-shell.js applyRestoredState": 182,

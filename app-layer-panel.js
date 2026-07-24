@@ -213,7 +213,31 @@ function renderLayers() {
   const displayedLayers = layerRowsTopFirst(new Set(statsByLayer.keys()));
   const presentGroups = new Set(displayedLayers.map(layerGroupKey));
   Object.keys(LAYER_GROUPS).filter(key => presentGroups.has(key)).forEach(groupHostForKey);
-  for (const layer of displayedLayers) {
+  // Строку слоя строит layerPanelRow. В ctx уходит всё, что она читает из
+  // общего прохода по объектам: считать статистику заново на каждую строку
+  // — это O(слои × объекты), ровно то, от чего здесь избавлялись.
+  const rowCtx = { el, statsByLayer, catsOf, sampleByLayer, groupHostForKey };
+  for (const layer of displayedLayers) layerPanelRow(layer, rowCtx);
+  // слои, которых больше нет в панели, из кэша убираем — иначе он растёт вечно
+  const displayedIds = new Set(displayedLayers.map(l => l.id));
+  for (const id of [..._layerRowCache.keys()])
+    if (!displayedIds.has(id)) _layerRowCache.delete(id);
+  groupHosts.forEach(body => {
+    const section = body.closest(".layer-stack-group");
+    section.querySelector(".layer-group-count").textContent = body.querySelectorAll(":scope > .layer-row").length;
+  });
+  renderLayerLegend(sampleByLayer, statsByLayer);
+  updateLayerStatus();   // чип «куда я черчу» — синхрон с активным слоем
+  updateStartExperience();
+}
+
+// Одна строка панели слоёв: свотч знака, счётчик объектов, видимость, замок
+// и подпункты по знакам внутри слоя. Кэш строк (_layerRowCache) живёт
+// снаружи: при совпадении сигнатуры узлы переиспользуются, а не строятся
+// заново. Функция стоит ПОСЛЕ renderLayers сознательно — проверки кэша в
+// tests/layers-panel-perf смотрят весь код, начиная с renderLayers.
+function layerPanelRow(layer, ctx) {
+  const { el, statsByLayer, catsOf, sampleByLayer, groupHostForKey } = ctx;
     const groupHost = groupHostForKey(layerGroupKey(layer));
     const count = statsByLayer.get(layer.id)?.count || 0;
     // QGIS-логика: если в слое объекты с РАЗНЫМИ знаками — показываем подпункты
@@ -233,7 +257,7 @@ function renderLayers() {
     if (cached && cached.sig === sig) {
       // содержимое не изменилось — переносим готовые узлы, не пересобирая
       for (const node of cached.nodes) groupHost.appendChild(node);
-      continue;
+      return;   // строка взята из кэша
     }
     const row = document.createElement("div");
     row.className = "layer-row" + (isActive ? " active" : "") +
@@ -377,18 +401,6 @@ function renderLayers() {
       rowNodes.push(crow);
     }
     _layerRowCache.set(layer.id, { sig, nodes: rowNodes });
-  }
-  // слои, которых больше нет в панели, из кэша убираем — иначе он растёт вечно
-  const displayedIds = new Set(displayedLayers.map(l => l.id));
-  for (const id of [..._layerRowCache.keys()])
-    if (!displayedIds.has(id)) _layerRowCache.delete(id);
-  groupHosts.forEach(body => {
-    const section = body.closest(".layer-stack-group");
-    section.querySelector(".layer-group-count").textContent = body.querySelectorAll(":scope > .layer-row").length;
-  });
-  renderLayerLegend(sampleByLayer, statsByLayer);
-  updateLayerStatus();   // чип «куда я черчу» — синхрон с активным слоем
-  updateStartExperience();
 }
 
 function initCollapsiblePanel() {
