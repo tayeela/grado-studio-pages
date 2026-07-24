@@ -406,6 +406,26 @@
     return row ? [{ code, name: row.name }] : [];
   }
 
+  // Библиотека знаков (styles.json) — источник таблицы «код ЛГР → знак».
+  // Раньше она наполнялась только когда фронт сам запрашивал /api/styles, и
+  // выгрузка каталога из КЭША успевала раньше: красные линии приезжали без
+  // style_id и рисовались чёрными. Теперь любой импорт ГИС ОГД сначала ждёт
+  // библиотеку; промис один на страницу, при ошибке сбрасывается для повтора.
+  let lgrStylesPromise = null;
+  function ensureLgrStyles() {
+    if (!lgrStylesPromise) lgrStylesPromise = (async () => {
+      const stylesUrl = new URL("./styles.json", window.location.href);
+      const release = window.__GRADO_ASSET_VERSION__;
+      if (release) stylesUrl.searchParams.set("v", release);
+      const response = await nativeFetch(stylesUrl);
+      if (!response.ok) throw new Error(`styles.json: HTTP ${response.status}`);
+      const styles = await response.json();
+      pagesCore.setLgrCodeStyles(styles);
+      return styles;
+    })().catch(error => { lgrStylesPromise = null; throw error; });
+    return lgrStylesPromise;
+  }
+
   async function browserFetchExtent(payload, signal) {
     throwIfAborted(signal);
     const bbox = payload && payload.bbox;
@@ -446,6 +466,11 @@
     // группа обязана сохранить собственные layer_id/title/fields до commit.
     const ogdSources = sources.filter(s => s.startsWith("gisogd.") || s.startsWith("gisogd:"));
     if (ogdSources.length) {
+      // без библиотеки знаков LineCode не превратится в style_id — линии
+      // будут чёрными; при недоступной библиотеке остаётся маршрут по имени
+      try { await ensureLgrStyles(); } catch (error) {
+        result.notes.push("Библиотека знаков не загрузилась — объекты без знаков");
+      }
       if (area > 80) throw new Error(`Область ${area.toFixed(1)} км² больше предела 80 км² для ГИС ОГД — приблизьте вид`);
       for (const source of ogdSources) {
         throwIfAborted(signal);
@@ -519,15 +544,10 @@
     if (path === "/api/inbox") return json({ bridge: true, items: [] });
     if (path === "/api/sources") return json([]);
     if (path === "/api/styles") {
-      const stylesUrl = new URL("./styles.json", window.location.href);
-      const release = window.__GRADO_ASSET_VERSION__;
-      if (release) stylesUrl.searchParams.set("v", release);
-      const response = await nativeFetch(stylesUrl, options);
-      // Таблица «код ЛГР → знак» для маршрутизации по LineCode строится из самой
-      // библиотеки знаков — не дублируем её в коде (источник: moscow_lgr.json).
-      try { pagesCore.setLgrCodeStyles(await response.clone().json()); }
-      catch (e) { /* без библиотеки останется маршрут по имени слоя */ }
-      return response;
+      // тот же одноразовый загрузчик, что и у импорта: таблица «код ЛГР → знак»
+      // наполняется здесь же (источник правды — moscow_lgr.json)
+      const styles = await ensureLgrStyles();
+      return json(styles);
     }
     if (path === "/api/basemap-info") return json({
       origin_lon: pagesCore.originWgs84[0], origin_lat: pagesCore.originWgs84[1],
@@ -721,6 +741,7 @@
       let payload;
       try { payload = JSON.parse(text); }
       catch (error) { return json({ error: "Файл не является корректным GeoJSON" }, 400); }
+      try { await ensureLgrStyles(); } catch (error) { /* фолбэк по имени слоя */ }
       let sourceTitle = requestHeader(input, options, "X-Grado-Source-Title") || null;
       if (sourceTitle) { try { sourceTitle = decodeURIComponent(sourceTitle); } catch (error) { sourceTitle = null; } }
       try { return json(pagesCore.importGeoJson(payload, filename, sourceTitle)); }
