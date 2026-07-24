@@ -169,6 +169,59 @@ function mergeExtentSourceBatches(batches) {
   return merged;
 }
 
+// Шаг «Область»: чем ограничен каждый источник на текущем виде карты.
+function dataAreaStepHtml(v) {
+  const { icon, sourceOrder, groupUi, groupDisabled, unavailable, overLimit } = v;
+    return `<section class="data-area-step"><div class="data-area-hero">${icon("i-poly")}<div><h2>Проверьте область загрузки</h2>
+      <p>Источники вернут только объекты, пересекающие текущий вид карты.</p></div></div>
+      <div class="data-readiness-list">${sourceOrder.map(gi => {
+        const group = DATA_SOURCE_GROUPS[gi], disabled = groupDisabled(group);
+        return `<div class="data-readiness-row"><span>${icon(groupUi[gi].icon)}</span><div><b>${escHtml(group.title)}</b><small>${escHtml(group.hint)}</small></div>
+          <strong class="${disabled ? "warning" : "success"}">${unavailable(group) ? "недоступен" : overLimit(group) ? `до ${group.maxKm2} км²` : "доступен"}</strong>
+          ${overLimit(group) ? `<button data-action="zoom" data-target="${group.maxKm2}">Приблизить</button>` : ""}</div>`;
+      }).join("")}</div></section>`;
+}
+
+// Шаг «Проверка»: что именно уйдёт в проект и в каком состоянии загрузка.
+function dataReviewStepHtml(v) {
+  const { icon, sourceOrder, groupUi, selectedRows, selectedSourceCount, loadProgress,
+    importing, areaTxt } = v;
+    const rows = selectedRows();
+    const groups = sourceOrder.map(gi => ({ gi, rows: rows.filter(row => row.gi === gi) })).filter(group => group.rows.length);
+    const stateLabel = progress => progress?.state === "loading" ? "Загружается"
+      : progress?.state === "done" ? `${progress.count || 0} объектов`
+      : progress?.state === "failed" ? "Ошибка"
+      : progress?.state === "cancelled" ? "Отменено" : "Ожидает";
+    return `<section class="data-review-step"><div class="data-review-head"><div><h2>${importing ? "Загружаем выбранные данные" : "Проверьте состав загрузки"}</h2>
+      <p>${importing ? "Проект изменится один раз — только после успешной загрузки всех источников." : "Каждый источник создаст отдельные слои. Повторная загрузка не создаёт дубликатов."}</p></div>
+      <button data-action="clear-selection"${rows.length && !importing ? "" : " disabled"}>Снять всё</button></div>
+      <div class="data-review-grid"><div class="data-review-list">${groups.length ? groups.map(({ gi, rows: groupRows }) =>
+        `<section><header>${icon(groupUi[gi].icon)}<b>${escHtml(DATA_SOURCE_GROUPS[gi].title)}</b><span>${groupRows.length}</span></header>
+          ${groupRows.map(row => { const progress = loadProgress.get(row.key); return `<div class="data-review-row${progress ? ` is-${progress.state}` : ""}">
+            <span class="data-review-label">${escHtml(row.label)}</span>
+            ${importing || progress ? `<span class="data-load-state ${progress?.state || "pending"}" aria-label="${stateLabel(progress)}">${stateLabel(progress)}</span>` : ""}
+            <button data-remove="${escHtml(row.key)}" aria-label="Убрать ${escHtml(row.label)}"${importing ? " disabled" : ""}>${icon("ic-close")}</button></div>`; }).join("")}</section>`).join("")
+        : `<div class="data-empty"><b>Нет выбранных слоёв</b><span>Вернитесь к источникам и отметьте нужные данные.</span></div>`}</div>
+        <aside class="data-review-summary"><h3>Итого</h3><dl><div><dt>Слоёв</dt><dd>${rows.length}</dd></div><div><dt>Источников</dt><dd>${selectedSourceCount()}</dd></div>
+          <div><dt>Область</dt><dd>${areaTxt} км²</dd></div><div><dt>Система координат</dt><dd>WGS 84</dd></div></dl>
+          <div class="data-review-ok">${icon("ic-check")}<span>${importing ? "Частичные результаты не попадут в проект" : "Все выбранные источники доступны для этой области"}</span></div></aside></div></section>`;
+}
+
+// Кнопки подвала: набор зависит от шага и от того, идёт ли загрузка.
+function dataActionsHtml(v) {
+  const { importing, step, loadMessage, selected, layerNoun } = v;
+  const count = selected.size;
+  const resultClass = loadMessage ? " data-result-status" : "";
+    if (importing) return `<span class="data-status data-progress-status" role="status" aria-live="polite">${escHtml(loadMessage || "Подготавливаем загрузку…")}</span><span class="spacer"></span>
+      <button data-action="cancel-load">Отменить загрузку</button>`;
+    else if (step === 1) return `<span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
+      <button data-action="cancel">Отмена</button><button class="primary" data-action="next-sources">Продолжить к источникам</button>`;
+    else if (step === 2) return `<button data-action="back-area">Назад</button><span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
+      <button class="primary" data-action="next-review"${count ? "" : " disabled"}>Продолжить к проверке</button>`;
+    else return `<button data-action="back-sources">Назад</button><span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
+      <button class="primary data-load" data-action="load"${count ? "" : " disabled"}>Загрузить ${count} ${layerNoun(count)}</button>`;
+}
+
 async function openDataFetch() {
   if (!basemap.originLon) { try { await initBasemap(); } catch (e) {} }
   if (!basemap.originLon) { toast("Нет системы координат — включите подложку", "warn"); return; }
@@ -386,51 +439,15 @@ async function openDataFetch() {
       ${rows.length ? `<span class="data-selection-more">Показать все</span>` : ""}</button>`;
   }
 
-  function areaStepHtml() {
-    return `<section class="data-area-step"><div class="data-area-hero">${icon("i-poly")}<div><h2>Проверьте область загрузки</h2>
-      <p>Источники вернут только объекты, пересекающие текущий вид карты.</p></div></div>
-      <div class="data-readiness-list">${sourceOrder.map(gi => {
-        const group = DATA_SOURCE_GROUPS[gi], disabled = groupDisabled(group);
-        return `<div class="data-readiness-row"><span>${icon(groupUi[gi].icon)}</span><div><b>${escHtml(group.title)}</b><small>${escHtml(group.hint)}</small></div>
-          <strong class="${disabled ? "warning" : "success"}">${unavailable(group) ? "недоступен" : overLimit(group) ? `до ${group.maxKm2} км²` : "доступен"}</strong>
-          ${overLimit(group) ? `<button data-action="zoom" data-target="${group.maxKm2}">Приблизить</button>` : ""}</div>`;
-      }).join("")}</div></section>`;
-  }
-
-  function reviewStepHtml() {
-    const rows = selectedRows();
-    const groups = sourceOrder.map(gi => ({ gi, rows: rows.filter(row => row.gi === gi) })).filter(group => group.rows.length);
-    const stateLabel = progress => progress?.state === "loading" ? "Загружается"
-      : progress?.state === "done" ? `${progress.count || 0} объектов`
-      : progress?.state === "failed" ? "Ошибка"
-      : progress?.state === "cancelled" ? "Отменено" : "Ожидает";
-    return `<section class="data-review-step"><div class="data-review-head"><div><h2>${importing ? "Загружаем выбранные данные" : "Проверьте состав загрузки"}</h2>
-      <p>${importing ? "Проект изменится один раз — только после успешной загрузки всех источников." : "Каждый источник создаст отдельные слои. Повторная загрузка не создаёт дубликатов."}</p></div>
-      <button data-action="clear-selection"${rows.length && !importing ? "" : " disabled"}>Снять всё</button></div>
-      <div class="data-review-grid"><div class="data-review-list">${groups.length ? groups.map(({ gi, rows: groupRows }) =>
-        `<section><header>${icon(groupUi[gi].icon)}<b>${escHtml(DATA_SOURCE_GROUPS[gi].title)}</b><span>${groupRows.length}</span></header>
-          ${groupRows.map(row => { const progress = loadProgress.get(row.key); return `<div class="data-review-row${progress ? ` is-${progress.state}` : ""}">
-            <span class="data-review-label">${escHtml(row.label)}</span>
-            ${importing || progress ? `<span class="data-load-state ${progress?.state || "pending"}" aria-label="${stateLabel(progress)}">${stateLabel(progress)}</span>` : ""}
-            <button data-remove="${escHtml(row.key)}" aria-label="Убрать ${escHtml(row.label)}"${importing ? " disabled" : ""}>${icon("ic-close")}</button></div>`; }).join("")}</section>`).join("")
-        : `<div class="data-empty"><b>Нет выбранных слоёв</b><span>Вернитесь к источникам и отметьте нужные данные.</span></div>`}</div>
-        <aside class="data-review-summary"><h3>Итого</h3><dl><div><dt>Слоёв</dt><dd>${rows.length}</dd></div><div><dt>Источников</dt><dd>${selectedSourceCount()}</dd></div>
-          <div><dt>Область</dt><dd>${areaTxt} км²</dd></div><div><dt>Система координат</dt><dd>WGS 84</dd></div></dl>
-          <div class="data-review-ok">${icon("ic-check")}<span>${importing ? "Частичные результаты не попадут в проект" : "Все выбранные источники доступны для этой области"}</span></div></aside></div></section>`;
-  }
-
+  // Модель вида: всё, что нужно строителям разметки. Собирается заново на
+  // каждую перерисовку — строители не знают о внутренностях окна.
+  const wizardView = () => ({ icon, sourceOrder, groupUi, groupDisabled, unavailable,
+    overLimit, selectedRows, selectedSourceCount, loadProgress, importing, step,
+    loadMessage, selected, areaTxt, layerNoun });
+  const areaStepHtml = () => dataAreaStepHtml(wizardView());
+  const reviewStepHtml = () => dataReviewStepHtml(wizardView());
   function renderActions() {
-    const actions = overlay.querySelector(".data-wizard-actions");
-    const count = selected.size;
-    const resultClass = loadMessage ? " data-result-status" : "";
-    if (importing) actions.innerHTML = `<span class="data-status data-progress-status" role="status" aria-live="polite">${escHtml(loadMessage || "Подготавливаем загрузку…")}</span><span class="spacer"></span>
-      <button data-action="cancel-load">Отменить загрузку</button>`;
-    else if (step === 1) actions.innerHTML = `<span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
-      <button data-action="cancel">Отмена</button><button class="primary" data-action="next-sources">Продолжить к источникам</button>`;
-    else if (step === 2) actions.innerHTML = `<button data-action="back-area">Назад</button><span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
-      <button class="primary" data-action="next-review"${count ? "" : " disabled"}>Продолжить к проверке</button>`;
-    else actions.innerHTML = `<button data-action="back-sources">Назад</button><span class="data-status muted${resultClass}" role="status">${escHtml(loadMessage)}</span><span class="spacer"></span>
-      <button class="primary data-load" data-action="load"${count ? "" : " disabled"}>Загрузить ${count} ${layerNoun(count)}</button>`;
+    overlay.querySelector(".data-wizard-actions").innerHTML = dataActionsHtml(wizardView());
   }
 
   // Окно перерисовывает своё тело целиком, а вместе с ним пропадал элемент, на
