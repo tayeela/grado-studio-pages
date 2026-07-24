@@ -374,22 +374,22 @@
   justify-content:space-between;margin-top:10px;font-size:var(--fs-11);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.035em}
 .data-catalog-head b{font-size:var(--fs-10);font-weight:500}.data-quick-list{margin-top:6px}
 /* кэш слоёв портала: слой качается целиком и лежит неделю — видно, что занимает место */
-.data-cache{margin-top:10px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--field-bg)}
+.data-cache{margin-top:10px;border:1px solid var(--field-border);border-radius:var(--r-sm);background:var(--field-bg)}
 .modal-overlay .data-cache-head{display:flex;align-items:center;gap:8px;width:100%;height:auto;padding:8px 10px;
   background:none;border:0;text-align:left;cursor:pointer}
 .data-cache-head b{font-size:var(--fs-11);font-weight:600}
 .data-cache-head small{flex:1;font-size:var(--fs-10);color:var(--muted)}
 .data-cache-head .ic{width:14px;height:14px;color:var(--muted);transition:transform var(--dur-1) var(--ease-out)}
 .data-cache.open .data-cache-head .ic{transform:rotate(90deg)}
-.data-cache-list{border-top:1px solid var(--line);max-height:190px;overflow-y:auto}
-.data-cache-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line)}
+.data-cache-list{border-top:1px solid var(--hairline);max-height:190px;overflow-y:auto}
+.data-cache-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--hairline)}
 .data-cache-row:last-child{border-bottom:0}
 .data-cache-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .data-cache-copy b{font-size:var(--fs-11);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .data-cache-copy small{font-size:var(--fs-10);color:var(--muted)}
 .data-cache-row.stale .data-cache-copy small{color:var(--warn,var(--muted))}
 .modal-overlay .data-cache-drop{height:24px;padding:0 9px;font-size:var(--fs-10);border-radius:var(--r-sm)}
-.data-cache-actions{padding:8px 10px;border-top:1px solid var(--line)}
+.data-cache-actions{padding:8px 10px;border-top:1px solid var(--hairline)}
 .modal-overlay .data-cache-actions button{height:28px;padding:0 10px;font-size:var(--fs-10)}
 .data-topic-chips{display:flex;gap:6px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}.data-topic-chips::-webkit-scrollbar{display:none}
 .modal-overlay .data-topic-chips button{height:32px;padding:0 11px;border-radius:var(--r-sm);background:var(--field-bg);white-space:nowrap;
@@ -892,7 +892,7 @@
 .var-current{display:grid;grid-template-columns:minmax(210px,.8fr) minmax(0,1.2fr);gap:18px;align-items:center;
   padding:15px 16px;border:1px solid var(--accent-line);border-radius:var(--r-md);background:var(--accent-weak)}
 .var-current-copy{display:flex;min-width:0;flex-direction:column;gap:3px}
-.var-current-copy b{font-size:var(--fs-14);font-weight:650;color:var(--text)}
+.var-current-copy b{font-size:var(--fs-15);font-weight:650;color:var(--text)}
 .var-current-copy small{font-size:var(--fs-10);line-height:1.35;color:var(--muted)}
 .var-eyebrow{font-size:var(--fs-9);line-height:1.2;text-transform:uppercase;letter-spacing:.08em;font-weight:650;color:var(--accent)}
 .var-toolbar{display:flex;align-items:center;gap:8px;padding:0 2px}
@@ -903,7 +903,7 @@
 .var-list{display:flex;max-height:36vh;overflow-y:auto;flex-direction:column;gap:8px;padding:0 2px 2px;background:none;border:0}
 .var-item{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 12px;
   border:1px solid var(--field-border);border-radius:var(--r-md);background:var(--panel);transition:border-color var(--dur-1) var(--ease-out),background var(--dur-1) var(--ease-out)}
-.var-item:hover{background:var(--field-bg);border-color:var(--hairline-strong)}
+.var-item:hover{background:var(--field-bg);border-color:var(--accent-line)}
 .var-item.baseline{border-color:var(--accent-line);box-shadow:inset 3px 0 0 var(--accent)}
 .var-select{display:block!important;width:18px!important;height:18px!important;position:relative;cursor:pointer}
 .var-select input{position:absolute;opacity:0;pointer-events:none}

@@ -243,8 +243,8 @@ function openAttributeTable(layer) {
   let editMode = false, filter = "all";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  overlay.innerHTML = `<div class="modal attr-modal">
-    <div class="modal-head">Таблица атрибутов · ${escHtml(layer.title)}
+  overlay.innerHTML = `<div class="modal attr-modal" role="dialog" aria-modal="true" aria-labelledby="at-title">
+    <div class="modal-head"><span id="at-title">Таблица атрибутов · ${escHtml(layer.title)}</span>
       <span class="muted" id="at-count"></span>
       <button class="modal-x" aria-label="Закрыть таблицу атрибутов"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="attr-toolbar">
@@ -455,8 +455,8 @@ function openFieldStats(layer, filtered) {
 function openAddFieldDialog(layer, onDone) {
   const ov = document.createElement("div");
   ov.className = "modal-overlay";
-  ov.innerHTML = `<div class="modal fmt-modal ask-modal">
-    <div class="modal-head">Новое поле · ${escHtml(layer.title)}
+  ov.innerHTML = `<div class="modal fmt-modal ask-modal" role="dialog" aria-modal="true" aria-labelledby="af-title">
+    <div class="modal-head"><span id="af-title">Новое поле · ${escHtml(layer.title)}</span>
       <button class="modal-x" aria-label="Закрыть создание поля"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <label>Имя поля<input type="text" id="af-name" placeholder="напр. население"></label>
@@ -519,8 +519,8 @@ function openManageFieldsDialog(layer, onDone) {
     ov.querySelectorAll(".mf-dn").forEach(el => el.onclick = () => { syncInputs(); const i = +el.dataset.i; [work[i + 1], work[i]] = [work[i], work[i + 1]]; render(); });
     ov.querySelectorAll(".mf-del").forEach(el => el.onclick = () => { syncInputs(); work.splice(+el.dataset.i, 1); render(); });
   };
-  ov.innerHTML = `<div class="modal fmt-modal fmt-modal-lg">
-    <div class="modal-head">Поля слоя · ${escHtml(layer.title)}
+  ov.innerHTML = `<div class="modal fmt-modal fmt-modal-lg" role="dialog" aria-modal="true" aria-labelledby="mf-title">
+    <div class="modal-head"><span id="mf-title">Поля слоя · ${escHtml(layer.title)}</span>
       <button class="modal-x" aria-label="Закрыть поля слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="fc-help">Имя, тип, порядок и значение по умолчанию своих полей. Значение по умолчанию заполняет пустые ячейки и новые объекты.</div>
@@ -574,8 +574,8 @@ function openFieldCalc(layer, getFeats, onDone) {
   const cols = attrColumns(layer), existing = cols.filter(c => !c.virtual);
   const ov = document.createElement("div");
   ov.className = "modal-overlay";
-  ov.innerHTML = `<div class="modal fmt-modal fmt-modal-lg fc-modal">
-    <div class="modal-head">Калькулятор полей · ${escHtml(layer.title)}
+  ov.innerHTML = `<div class="modal fmt-modal fmt-modal-lg fc-modal" role="dialog" aria-modal="true" aria-labelledby="fc-title">
+    <div class="modal-head"><span id="fc-title">Калькулятор полей · ${escHtml(layer.title)}</span>
       <button class="modal-x" aria-label="Закрыть калькулятор полей"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
     <div class="fmt-sub">Куда записать</div>
