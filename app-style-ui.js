@@ -252,32 +252,12 @@ function makeColorField(host, initial, onChange) {
 // / categorized). «Единый стиль» пишет layer.fmt и очищает правила; «По
 // значению поля» сохраняет layer.rules (категории) поверх layer.fmt, который
 // служит стилем по умолчанию для объектов без совпадения.
-function openLayerStyle(layer, opts = {}) {
-  closePopups();
-  const historyBefore = window.captureHistoryState ? window.captureHistoryState() : null;
-  const clone = value => value == null ? null : JSON.parse(JSON.stringify(value));
-  const origFmt = clone(layer.fmt);   // для отмены
-  const origRules = clone(layer.rules);
-  let mode = opts.mode || (origRules && origRules.length ? "rules" : "single");
-  const cur = layerStyle(layer);
-  const categoryStyles = clone((layer.fmt && layer.fmt.cat_styles) || {}) || {};
-  const categoryStyleOf = catId => {
-    const patch = categoryStyles[catId] || {};
-    const refId = patch.style_ref || catId;
-    const base = state.projectStyles[refId] || STYLES_V2[refId] || {};
-    const layerFmt = typeof categoryLayerVisualFormat === "function"
-      ? categoryLayerVisualFormat(layer) : {};
-    return { ...base, ...layerFmt, ...patch };
-  };
-  let uniformStyleDirty = false;
-  // Категории слоя: слой повторяет слой-источник, поэтому классы объектов
-  // (дороги OSM по тегу highway, знаки ОГД по LineCode/имени) живут ВНУТРИ него
-  // и гасятся здесь, а не отдельными слоями-знаками. Список — по РЕАЛЬНО
-  // выгруженным объектам (layerCats), а не по библиотеке: показывать 26 классов
-  // дорог, когда выгружено три, — мусор. Меньше двух категорий — секции нет.
-  const cats = typeof layerCats === "function" ? layerCats(layer) : [];
-  const catsOffSet = new Set((layer.fmt && layer.fmt.cats_off) || []);
-  const catsSection = cats.length < 2 ? "" : `
+// Секция «Категории слоя»: классы объектов внутри слоя-источника (дороги
+// OSM по highway, знаки ОГД по LineCode). Список — по РЕАЛЬНО выгруженным
+// объектам, а не по библиотеке: 26 классов дорог при трёх выгруженных —
+// мусор. Меньше двух категорий — секции нет.
+function layerCategoriesSection(cats, catsOffSet, categoryStyleOf) {
+  return cats.length < 2 ? "" : `
       <section class="style-section style-categories-section">
         <div class="style-section-head"><span><b>Категории слоя</b><small>Что показывать из выгруженного слоя (${cats.length})</small></span></div>
         <div class="fmt-body style-category-list" id="fmt-cats">${cats.map(c =>
@@ -289,11 +269,13 @@ function openLayerStyle(layer, opts = {}) {
             <button type="button" class="style-category-edit" data-category-id="${escHtml(c.id)}" aria-label="Оформление категории «${escHtml(c.title)}»">Оформление</button>
           </div>`
         ).join("")}</div>
-      </section>`;
-  // Масштабная видимость: городская выгрузка не нужна на обзорном масштабе.
-  // Пресеты — рабочие знаменатели ЛГР, «всегда» снимает ограничение.
-  const scaleMaxNow = (layer.fmt && layer.fmt.scale_max) || 0;
-  const scaleSection = `
+      </section>`
+}
+
+// Секция «Показывать до масштаба»: городская выгрузка не нужна на обзорном
+// масштабе. Пресеты — рабочие знаменатели ЛГР, «всегда» снимает ограничение.
+function layerScaleSection(scaleMaxNow) {
+  return `
       <section class="style-section">
         <div class="style-section-head"><span><b>Показывать до масштаба</b><small>Слой скроется при отдалении — обзор не тормозит на больших выгрузках</small></span></div>
         <div class="fmt-body">
@@ -303,54 +285,15 @@ function openLayerStyle(layer, opts = {}) {
               .map(([v, t]) => `<option value="${v}"${scaleMaxNow === v ? " selected" : ""}>${t}</option>`).join("")}
           </select>
         </div>
-      </section>`;
-  const hasFill = cur.fill != null && cur.fill !== "transparent";
-  const opacity = boundedNumber(Math.round((cur.fillOpacity != null ? cur.fillOpacity : 1) * 100), 10, 100, 100);
-  const dp = dashPresetOf(cur.dash);
-  const hObj = cur.hatch && typeof cur.hatch === "object" ? cur.hatch : null;
-  const hAngle = hObj ? (hObj.cross ? "cross" : String(hObj.angle ?? 45)) : "45";
-  const hDens = hObj ? hatchDensOf(hObj.spacing_px || 9) : "normal";
-  let baseMarker = cur.line_marker || null, baseLabel = cur.line_label || null,
-      baseDouble = cur.double || null;
-  const targets = LAYERS_V2.filter(l => l !== layer && !l.annotation && !l.import_only);
-  const targetOriginals = new Map(targets.map(target => [target, clone(target.fmt)]));
-  const copiedTargets = new Set();
-  const opt = (sel, v, lbl) => `<option value="${escHtml(v)}"${sel === v ? " selected" : ""}>${escHtml(lbl)}</option>`;
-  // рабочая копия правил для режима «по значению поля»
-  const fieldCols = attrColumns(layer).filter(c => !c.virtual);
-  // подпись объектов: поле + шрифт (кегль/цвет/семейство). Раньше секция была
-  // только у полигонов — холст умел подписывать лишь их. Теперь подписываются и
-  // точки (соцобъекты, номера домов), и линии, поэтому поле доступно всем, кроме
-  // размерных: у тех подпись — сама длина.
-  const isPoly = layer.geometry_type === "polygon";
-  const canLabel = layer.kind !== "dim";
-  const curLF = cur.label_field || "";
-  const lfFont = cur.label_font || {};
-  const labelCols = fieldCols.slice();
-  if (curLF && !labelCols.some(c => c.name === curLF))
-    labelCols.push({ name: curLF, label: curLF });
-  let work = (layer.rules || []).map(r => ({ op: "=", ...r }));
-  // Градуированная символика: числовые поля слоя и настройки прошлого расчёта.
-  // Числовым считаем поле, у которого есть числовые значения на объектах —
-  // тип в схеме у выгрузок портала не всегда проставлен.
-  const SYMBOLOGY = (typeof window !== "undefined" && window.GRADO_SYMBOLOGY) || null;
-  const layerFeatures = state.features.filter(f => layerOf(f) === layer);
-  const numericCols = !SYMBOLOGY ? [] : fieldCols.filter(column =>
-    SYMBOLOGY.numericValues(layerFeatures, column.name).length >= 2);
-  const gradSaved = (layer.fmt && layer.fmt.graduated) || {};
-  if (mode !== "rules" && gradSaved.field) mode = "graduated";
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.innerHTML = `<div class="modal fmt-modal fmt-modal-lg style-editor-modal" role="dialog" aria-modal="true" aria-labelledby="style-editor-title">
-    <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Стиль слоя</span><span id="style-editor-title">Оформление · ${escHtml(layer.title)}</span></span>
-      <button class="modal-x" aria-label="Закрыть оформление слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
-    <div class="modal-body compact style-editor-body">
-    <div class="seg" id="ls-mode" role="tablist" aria-label="Режим оформления">
-      <button type="button" id="style-mode-single" role="tab" aria-controls="ls-single" aria-selected="${mode === "single"}" tabindex="${mode === "single" ? "0" : "-1"}" class="seg-btn${mode === "single" ? " active" : ""}" data-mode="single">Единый стиль</button>
-      <button type="button" id="style-mode-rules" role="tab" aria-controls="ls-rules" aria-selected="${mode === "rules"}" tabindex="${mode === "rules" ? "0" : "-1"}" class="seg-btn${mode === "rules" ? " active" : ""}" data-mode="rules">По значению поля</button>
-      <button type="button" id="style-mode-graduated" role="tab" aria-controls="ls-graduated" aria-selected="${mode === "graduated"}" tabindex="${mode === "graduated" ? "0" : "-1"}" class="seg-btn${mode === "graduated" ? " active" : ""}" data-mode="graduated">По диапазонам</button>
-    </div>
-    <div id="ls-single" role="tabpanel" aria-labelledby="style-mode-single"${mode === "single" ? "" : " hidden"}>
+      </section>`
+}
+
+// Панель «Единый стиль»: заливка, обводка, штриховка, маркеры линии,
+// подпись объектов и копирование оформления на другие слои.
+function styleSingleModePanel(ctx) {
+  const { mode, layer, catsSection, scaleSection, hasFill, opacity, cur, dp, opt, hAngle,
+    hDens, baseMarker, baseLabel, canLabel, labelCols, curLF, lfFont, targets } = ctx;
+  return `    <div id="ls-single" role="tabpanel" aria-labelledby="style-mode-single"${mode === "single" ? "" : " hidden"}>
       <label class="style-preset-label"><span>Базовый знак</span><select id="fmt-preset">${stylePickerOptions(layer.fmt && layer.fmt.style_ref)}</select></label>
       ${catsSection}
       ${scaleSection}
@@ -413,16 +356,28 @@ function openLayerStyle(layer, opts = {}) {
           <p>Изменения сразу отображаются на холсте. «Отмена» вернёт исходный стиль.</p>
         </aside>
       </div>
-    </div>
-    <div id="ls-rules" role="tabpanel" aria-labelledby="style-mode-rules"${mode === "rules" ? "" : " hidden"}>
+    </div>`;
+}
+
+// Панель «По значению поля»: правила «атрибут — знак», первое совпавшее
+// побеждает.
+function styleRulesModePanel(ctx) {
+  const { mode, fieldCols } = ctx;
+  return `    <div id="ls-rules" role="tabpanel" aria-labelledby="style-mode-rules"${mode === "rules" ? "" : " hidden"}>
       <div class="fc-help" id="cr-help">${fieldCols.length
         ? "Знак объекта выбирается по значению его атрибута. Первое совпавшее правило побеждает; объекты без совпадения рисуются единым стилем слоя (вкладка слева)."
         : "В этом слое пока нет полей. Сначала добавьте поле через таблицу атрибутов слоя — после этого здесь можно будет создать правило."}</div>
       <div class="mf-table-wrap"><table class="attr-table mf-table"><thead><tr><th>Поле</th><th>Оп</th><th>Значение</th><th>Знак</th><th></th></tr></thead>
         <tbody id="cr-body"></tbody></table></div>
       <button id="cr-add" class="fmt-copy-btn" aria-describedby="cr-help"${fieldCols.length ? "" : " disabled"}>+ правило</button>
-    </div>
-    <div id="ls-graduated" role="tabpanel" aria-labelledby="style-mode-graduated"${mode === "graduated" ? "" : " hidden"}>
+    </div>`;
+}
+
+// Панель «По диапазонам»: градуированная символика по числовому полю и
+// свойства по выражению (толщина, размер знака, кегль подписи).
+function styleGraduatedModePanel(ctx) {
+  const { mode, layer, opt, numericCols, gradSaved, SYMBOLOGY } = ctx;
+  return `    <div id="ls-graduated" role="tabpanel" aria-labelledby="style-mode-graduated"${mode === "graduated" ? "" : " hidden"}>
       <div class="fc-help">Числовое поле разбивается на диапазоны, каждому — свой цвет. Категории для этого не годятся: у 20 000 зданий сорок разных этажностей.</div>
       <div class="fmt-row">
         <label>Поле<select id="gr-field">${numericCols.length
@@ -448,7 +403,93 @@ function openLayerStyle(layer, opts = {}) {
         <label>Кегль подписи = <input type="text" id="gr-label-expr" placeholder="напр. if(этажность > 9, 14, 10)" value="${escHtml((layer.fmt && layer.fmt.label_size_expr) || "")}"></label>
       </div>
       <div class="form-error" id="gr-expr-error" role="alert" hidden></div>
+    </div>`;
+}
+
+function openLayerStyle(layer, opts = {}) {
+  closePopups();
+  const historyBefore = window.captureHistoryState ? window.captureHistoryState() : null;
+  const clone = value => value == null ? null : JSON.parse(JSON.stringify(value));
+  const origFmt = clone(layer.fmt);   // для отмены
+  const origRules = clone(layer.rules);
+  let mode = opts.mode || (origRules && origRules.length ? "rules" : "single");
+  const cur = layerStyle(layer);
+  const categoryStyles = clone((layer.fmt && layer.fmt.cat_styles) || {}) || {};
+  const categoryStyleOf = catId => {
+    const patch = categoryStyles[catId] || {};
+    const refId = patch.style_ref || catId;
+    const base = state.projectStyles[refId] || STYLES_V2[refId] || {};
+    const layerFmt = typeof categoryLayerVisualFormat === "function"
+      ? categoryLayerVisualFormat(layer) : {};
+    return { ...base, ...layerFmt, ...patch };
+  };
+  let uniformStyleDirty = false;
+  // Категории слоя: слой повторяет слой-источник, поэтому классы объектов
+  // (дороги OSM по тегу highway, знаки ОГД по LineCode/имени) живут ВНУТРИ него
+  // и гасятся здесь, а не отдельными слоями-знаками. Список — по РЕАЛЬНО
+  // выгруженным объектам (layerCats), а не по библиотеке: показывать 26 классов
+  // дорог, когда выгружено три, — мусор. Меньше двух категорий — секции нет.
+  const cats = typeof layerCats === "function" ? layerCats(layer) : [];
+  const catsOffSet = new Set((layer.fmt && layer.fmt.cats_off) || []);
+  const catsSection = layerCategoriesSection(cats, catsOffSet, categoryStyleOf);
+  // Масштабная видимость: городская выгрузка не нужна на обзорном масштабе.
+  // Пресеты — рабочие знаменатели ЛГР, «всегда» снимает ограничение.
+  const scaleMaxNow = (layer.fmt && layer.fmt.scale_max) || 0;
+  const scaleSection = layerScaleSection(scaleMaxNow);
+  const hasFill = cur.fill != null && cur.fill !== "transparent";
+  const opacity = boundedNumber(Math.round((cur.fillOpacity != null ? cur.fillOpacity : 1) * 100), 10, 100, 100);
+  const dp = dashPresetOf(cur.dash);
+  const hObj = cur.hatch && typeof cur.hatch === "object" ? cur.hatch : null;
+  const hAngle = hObj ? (hObj.cross ? "cross" : String(hObj.angle ?? 45)) : "45";
+  const hDens = hObj ? hatchDensOf(hObj.spacing_px || 9) : "normal";
+  let baseMarker = cur.line_marker || null, baseLabel = cur.line_label || null,
+      baseDouble = cur.double || null;
+  const targets = LAYERS_V2.filter(l => l !== layer && !l.annotation && !l.import_only);
+  const targetOriginals = new Map(targets.map(target => [target, clone(target.fmt)]));
+  const copiedTargets = new Set();
+  const opt = (sel, v, lbl) => `<option value="${escHtml(v)}"${sel === v ? " selected" : ""}>${escHtml(lbl)}</option>`;
+  // рабочая копия правил для режима «по значению поля»
+  const fieldCols = attrColumns(layer).filter(c => !c.virtual);
+  // подпись объектов: поле + шрифт (кегль/цвет/семейство). Раньше секция была
+  // только у полигонов — холст умел подписывать лишь их. Теперь подписываются и
+  // точки (соцобъекты, номера домов), и линии, поэтому поле доступно всем, кроме
+  // размерных: у тех подпись — сама длина.
+  const isPoly = layer.geometry_type === "polygon";
+  const canLabel = layer.kind !== "dim";
+  const curLF = cur.label_field || "";
+  const lfFont = cur.label_font || {};
+  const labelCols = fieldCols.slice();
+  if (curLF && !labelCols.some(c => c.name === curLF))
+    labelCols.push({ name: curLF, label: curLF });
+  let work = (layer.rules || []).map(r => ({ op: "=", ...r }));
+  // Градуированная символика: числовые поля слоя и настройки прошлого расчёта.
+  // Числовым считаем поле, у которого есть числовые значения на объектах —
+  // тип в схеме у выгрузок портала не всегда проставлен.
+  const SYMBOLOGY = (typeof window !== "undefined" && window.GRADO_SYMBOLOGY) || null;
+  const layerFeatures = state.features.filter(f => layerOf(f) === layer);
+  const numericCols = !SYMBOLOGY ? [] : fieldCols.filter(column =>
+    SYMBOLOGY.numericValues(layerFeatures, column.name).length >= 2);
+  const gradSaved = (layer.fmt && layer.fmt.graduated) || {};
+  if (mode !== "rules" && gradSaved.field) mode = "graduated";
+  // Разметку окна собирают три строителя — по одному на режим. Значения,
+  // которые им нужны, передаются явно: так видно, от чего зависит панель.
+  const ctx = { mode, layer, catsSection, scaleSection, hasFill, opacity, cur, dp, opt,
+    hAngle, hDens, baseMarker, baseLabel, canLabel, labelCols, curLF, lfFont, targets,
+    fieldCols, numericCols, gradSaved, SYMBOLOGY };
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal fmt-modal fmt-modal-lg style-editor-modal" role="dialog" aria-modal="true" aria-labelledby="style-editor-title">
+    <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Стиль слоя</span><span id="style-editor-title">Оформление · ${escHtml(layer.title)}</span></span>
+      <button class="modal-x" aria-label="Закрыть оформление слоя"><svg class="ic"><use href="#ic-close"/></svg></button></div>
+    <div class="modal-body compact style-editor-body">
+    <div class="seg" id="ls-mode" role="tablist" aria-label="Режим оформления">
+      <button type="button" id="style-mode-single" role="tab" aria-controls="ls-single" aria-selected="${mode === "single"}" tabindex="${mode === "single" ? "0" : "-1"}" class="seg-btn${mode === "single" ? " active" : ""}" data-mode="single">Единый стиль</button>
+      <button type="button" id="style-mode-rules" role="tab" aria-controls="ls-rules" aria-selected="${mode === "rules"}" tabindex="${mode === "rules" ? "0" : "-1"}" class="seg-btn${mode === "rules" ? " active" : ""}" data-mode="rules">По значению поля</button>
+      <button type="button" id="style-mode-graduated" role="tab" aria-controls="ls-graduated" aria-selected="${mode === "graduated"}" tabindex="${mode === "graduated" ? "0" : "-1"}" class="seg-btn${mode === "graduated" ? " active" : ""}" data-mode="graduated">По диапазонам</button>
     </div>
+${styleSingleModePanel(ctx)}
+${styleRulesModePanel(ctx)}
+${styleGraduatedModePanel(ctx)}
     <div class="form-error style-form-error" id="style-form-error" role="alert" hidden></div>
     </div>
     <div class="modal-actions">
