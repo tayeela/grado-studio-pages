@@ -6177,6 +6177,49 @@ function openShortcuts() {
 function closePopups() {
   document.querySelectorAll(".ctx-menu, .modal-overlay").forEach(n => n.remove());
 }
+
+// ---------- единый контракт окон: Escape и клик мимо ----------
+// Каждое окно раньше заводило закрытие само, и 18 из 40 его не завели: одни
+// не закрывались Escape, другие — кликом мимо. Чинить по одному значит
+// воспроизвести беду на следующем окне, поэтому контракт живёт здесь и
+// действует на всё, включая окна, которые ещё не написаны.
+//
+// Закрываем НЕ удалением узла, а нажатием собственной кнопки закрытия окна:
+// тогда отрабатывает его собственная уборка — снимается предпросмотр, стиль
+// откатывается к исходному, рамка листа перестаёт рисоваться. Удаление —
+// только если у окна кнопки нет.
+function dismissOverlay(overlay) {
+  if (!overlay || !overlay.isConnected) return false;
+  const byText = [...overlay.querySelectorAll(".modal-actions button")]
+    .find(button => /^(отмена|закрыть)/i.test(button.textContent.trim()));
+  const button = overlay.querySelector(".modal-x") || byText;
+  if (button) button.click(); else overlay.remove();
+  return true;
+}
+function topOverlay() {
+  const all = document.querySelectorAll(".modal-overlay");
+  return all.length ? all[all.length - 1] : null;
+}
+// Escape — в фазе перехвата: окно поверх всего, и пока оно открыто, Escape
+// принадлежит ему, а не холсту (иначе он отменял бы черчение за спиной окна)
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  const overlay = topOverlay();
+  if (!overlay) {
+    const menu = document.querySelector(".ctx-menu");
+    if (!menu) return;                      // окон нет — Escape уходит холсту
+    menu.remove();
+  } else if (!dismissOverlay(overlay)) return;
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+// клик мимо окна — в фазе всплытия: если окно закрылось само своим
+// обработчиком, наш увидит уже отсоединённый узел и промолчит
+document.addEventListener("click", event => {
+  const overlay = event.target.classList && event.target.classList.contains("modal-overlay")
+    ? event.target : null;
+  if (overlay) dismissOverlay(overlay);
+});
 // ---------- совмещение слоя: сдвиг по двум точкам ----------
 // Источники расходятся между собой на метры (ЕГРН ↔ ОСМ ↔ пересчёт портала
 // из МСК Москвы — наш замер: медианно ~4.8 м по центру города; конвейер
