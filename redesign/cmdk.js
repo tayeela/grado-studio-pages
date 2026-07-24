@@ -83,6 +83,7 @@
     { sec: "Данные", items: [
       { t: "Данные по видимой области…", run: () => call("openDataFetch") },
       { t: "Импорт файлов: SHP, MapInfo TAB, MIF, GeoJSON…", run: () => click("btn-import-files") },
+      { t: "Система координат проекта…", run: () => window.openProjectCrsDialog && window.openProjectCrsDialog() },
       { t: isWeb ? "Импорт ГИС ОГД (GeoJSON)" : "Импорт ГИС ОГД (ZIP / GeoJSON / папка)", run: () => click("btn-gisogd") },
       { t: "Импорт НСПД (файл расширения)", run: () => click("btn-nspd") },
       { t: "Заполнить примером (демо)", run: () => click("btn-demo") },

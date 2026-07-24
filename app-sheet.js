@@ -297,6 +297,17 @@
   // Рамка — состояние вида, а не проекта: в .grado не пишется и историю не
   // засоряет (так же поступили с находками проверки топологии).
   let sheet = null;
+  // рамка листа при смене СК проекта: наружу отдаём тек. координаты в WGS84,
+  // обратно принимаем пересчитанные в новую СК
+  root.reprojectSheet = toWgs => {
+    if (!sheet) return null;
+    const wgs = toWgs([sheet.cx, sheet.cy]);
+    return fromWgs => {
+      const [x, y] = fromWgs(wgs);
+      sheet.cx = x; sheet.cy = y;
+      save();
+    };
+  };
   const load = () => {
     try {
       const saved = JSON.parse(localStorage.getItem("grado-sheet") || "null");

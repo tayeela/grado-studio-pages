@@ -142,6 +142,9 @@
   for (let z = 4; z <= 12; z++) KNOWN.push({ id: "gk" + z, title: `Гаусса-Крюгера зона ${z} (СК-42)`,
     def: { kind: "tmerc", ell: ELLIPSOIDS.krass, towgs84: TOWGS84_PULKOVO,
       lon0: z * 6 - 3, lat0: 0, k: 1, x0: z * 1e6 + 500000, y0: 0 } });
+  KNOWN.push({ id: "msk50-2", title: "МСК-50 зона 2 (Московская область)",
+    def: { kind: "tmerc", ell: ELLIPSOIDS.krass, towgs84: TOWGS84_PULKOVO,
+      lon0: 38.47916666666666, lat0: 0, k: 1, x0: 2250000, y0: -5712900.566 } });
   KNOWN.push({ id: "msk-moscow", title: "МСК Москвы (Бессель)",
     def: { kind: "tmerc", ell: ELLIPSOIDS.bessel,
       towgs84: [316.151, 78.924, 589.65, -1.57273, 2.69209, 2.34693, 8.4507],
