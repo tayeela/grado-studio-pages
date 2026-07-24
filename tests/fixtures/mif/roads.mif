@@ -1,0 +1,13 @@
+Version 300
+Charset "Neutral"
+Delimiter ","
+CoordSys Earth Projection 8, 9999, 3, 23.57, -140.95, -79.8, -0, -0.35, -0.79, -0.22, 0, "m", 38.4791666666667, 0, 1, 2250000, -5712900.566
+Columns 1
+  name Char(32)
+Data
+
+Pline 3
+2220000 484000
+2220500 484200
+2221000 484100
+    Pen (1,2,0)
