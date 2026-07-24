@@ -6160,7 +6160,7 @@ function openShortcuts() {
     ${rows.map(([k, d]) => `<div class="sc-row"><kbd>${escHtml(k)}</kbd><span>${escHtml(d)}</span></div>`).join("")}
     </div>`).join("");
   overlay.innerHTML = `<div class="modal fmt-modal-lg sc-modal" role="dialog" aria-modal="true" aria-labelledby="sc-title">
-    <div class="modal-head"><span id="sc-title">Горячие клавиши</span>
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Справка</span><span id="sc-title">Горячие клавиши</span></div>
       <button class="modal-x" aria-label="Закрыть горячие клавиши"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body sc-body">${groups}</div>
     <div class="modal-actions"><span class="spacer"></span>
@@ -6568,7 +6568,7 @@ function openManageKinds() {
     toast(editing ? "Тип слоя изменён" : "Тип слоя добавлен");
   }
   overlay.innerHTML = `<div class="modal fmt-modal-lg mk-modal" role="dialog" aria-modal="true" aria-labelledby="mk-title">
-    <div class="modal-head"><span id="mk-title">Свои типы слоёв</span>
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Структура проекта</span><span id="mk-title">Свои типы слоёв</span></div>
       <button class="modal-x" aria-label="Закрыть свои типы слоёв"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="lib-hint">Свой тип слоя — это роль в расчёте и знак по умолчанию. Готовые роли (граница, зона, здание, ограничение и прочие) выбираются прямо при создании слоя, отдельного списка для них не нужно.</div>
@@ -6871,7 +6871,7 @@ function openAlbumConfig() {
     ortho: 'Ортофотоплан', photo: 'Фотофиксация', parking: 'Парковки', greenery: 'Озеленение'
   };
   let html = `<div class="modal fmt-modal album-modal" role="dialog" aria-modal="true" aria-labelledby="album-title">
-    <div class="modal-head"><span id="album-title">Состав альбома</span>
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Выпуск</span><span id="album-title">Состав альбома</span></div>
       <button class="modal-x" aria-label="Закрыть состав альбома"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body album-body">
       <div class="album-section-title">Листы и порядок</div>
@@ -9256,7 +9256,7 @@ function showPreflightReport(report) {
     }).join("");
     const blocked = report.errors.length > 0;
     overlay.innerHTML = `<div class="modal preflight-modal" role="dialog" aria-modal="true" aria-labelledby="preflight-title">
-      <div class="modal-head"><span id="preflight-title">Проверка перед выпуском</span></div>
+      <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Выпуск</span><span id="preflight-title">Проверка перед выпуском</span></div></div>
       <div class="modal-body">
         <div class="preflight-summary">Готово объектов: <b>${report.summary.exportable}</b> из ${report.summary.total}${report.summary.annotations ? ` · аннотаций на холсте: ${report.summary.annotations}` : ""}</div>
         <div class="preflight-list">${rows}</div>
