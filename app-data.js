@@ -138,7 +138,8 @@ async function fetchExtentSourceBatches(bbox, sources, options = {}) {
     try {
       const response = await request("/api/fetch-extent", { method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bbox, sources: [source] }), signal });
+        body: JSON.stringify({ bbox, sources: [source],
+          alignOgd: typeof window === "undefined" || !(window.state && window.state.alignOgd === false) }), signal });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || (`HTTP ${response.status}`));
       const count = (data.groups || []).reduce((sum, group) => sum + (group.count || 0), 0);
@@ -450,6 +451,11 @@ async function openDataFetch() {
     const active = document.activeElement;
     const mark = focusMark(active);
     const caret = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
+    // окно перерисовывается целиком на каждый выбор; без сохранения прокрутки
+    // клик по слою в глубине каталога откидывал список к началу
+    const scrollKeep = [".ogdc-list", ".data-source-content", ".data-source-list",
+      ".data-area-step", ".data-review-step"]
+      .map(sel => [sel, overlay.querySelector(sel)?.scrollTop || 0]);
     renderSteps();
     renderAreaSummary();
     const view = overlay.querySelector(".data-step-view");
@@ -457,6 +463,11 @@ async function openDataFetch() {
     else if (step === 2) view.innerHTML = `<div class="data-workspace">${sourceNavHtml()}${activeSourceHtml()}</div>${selectionTrayHtml()}`;
     else view.innerHTML = reviewStepHtml();
     renderActions();
+    for (const [sel, top] of scrollKeep) {
+      if (!top) continue;
+      const el = overlay.querySelector(sel);
+      if (el) el.scrollTop = top;
+    }
     if (options.focusSearch && step === 2) {
       const input = overlay.querySelector(".data-search input");
       input?.focus(); input?.setSelectionRange(query.length, query.length);

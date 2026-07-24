@@ -42,8 +42,8 @@ vm.runInContext(source.slice(start, end), context);
   });
 
   assert.deepEqual(calls.map(call => call.body), [
-    { bbox, sources: ["osm.roads"] },
-    { bbox, sources: ["nspd.parcels"] },
+    { bbox, sources: ["osm.roads"], alignOgd: true },
+    { bbox, sources: ["nspd.parcels"], alignOgd: true },
   ], "each source must be fetched separately for real progress");
   assert.deepEqual(progress, [
     { source: "osm.roads", state: "loading", count: undefined },

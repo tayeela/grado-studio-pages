@@ -1427,7 +1427,95 @@
     return { groups: [group], notes, snapshots: [manifest], layers };
   }
 
-  return { setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
+  // ---------- автопривязка выгрузки к ЕГРН ----------
+  // Замер по городу: в центре красные линии портала лежат на границах
+  // участков ЕГРН с точностью сантиметров, но по районам оцифровка гуляет
+  // на 1–3 метра — локально, не датумом (иначе сдвиг был бы одинаковым
+  // всюду). Лечится локально: МНК-вектор по парам «сегмент выгрузки ↔
+  // параллельная граница участка рядом», применяется только если он
+  // ЗАМЕТЕН и ПОДТВЕРЖДЁН — после сдвига остатки должны уменьшиться.
+  function chainSegments(features, minLen) {
+    const out = [];
+    const seg = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (const f of features) {
+      const chains = [];
+      if (Array.isArray(f.line)) chains.push(f.line);
+      if (Array.isArray(f.ring)) chains.push([...f.ring, f.ring[0]]);
+      if (Array.isArray(f.holes)) for (const hole of f.holes) chains.push([...hole, hole[0]]);
+      for (const chain of chains)
+        for (let i = 0; i + 1 < chain.length; i++)
+          if (seg(chain[i], chain[i + 1]) >= minLen) out.push([chain[i], chain[i + 1]]);
+    }
+    return out;
+  }
+  function alignResiduals(sourceSegs, anchorSegs, dx, dy, maxDist) {
+    const res = [];
+    const seg = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (const [a0, b0] of sourceSegs) {
+      const a = [a0[0] + dx, a0[1] + dy], b = [b0[0] + dx, b0[1] + dy];
+      const len = seg(a, b);
+      const dir = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+      const nrm = [-dir[1], dir[0]];
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      let best = null;
+      for (const [c, d] of anchorSegs) {
+        const l2 = seg(c, d);
+        const dir2 = [(d[0] - c[0]) / l2, (d[1] - c[1]) / l2];
+        if (Math.abs(dir[0] * dir2[0] + dir[1] * dir2[1]) < 0.996) continue;
+        const t = (mid[0] - c[0]) * dir2[0] + (mid[1] - c[1]) * dir2[1];
+        if (t < -5 || t > l2 + 5) continue;
+        const dist = (mid[0] - (c[0] + dir2[0] * t)) * nrm[0]
+                   + (mid[1] - (c[1] + dir2[1] * t)) * nrm[1];
+        if (Math.abs(dist) > maxDist) continue;
+        if (best === null || Math.abs(dist) < Math.abs(best)) best = dist;
+      }
+      if (best !== null) res.push({ nrm, dist: best });
+    }
+    return res;
+  }
+  function computeEgrnAlign(sourceFeatures, parcelFeatures, options = {}) {
+    const maxDist = options.maxDist || 8;
+    const sourceSegs = chainSegments(sourceFeatures, options.minSourceSeg || 20);
+    const anchorSegs = chainSegments(parcelFeatures, options.minAnchorSeg || 12);
+    if (sourceSegs.length < 8 || anchorSegs.length < 8) return { ok: false, reason: "мало сегментов" };
+    const base = alignResiduals(sourceSegs, anchorSegs, 0, 0, maxDist);
+    if (base.length < options.minPairs || base.length < 15) return { ok: false, reason: "мало пар" };
+    let s00 = 0, s01 = 0, s11 = 0, r0 = 0, r1 = 0;
+    for (const { nrm, dist } of base) {
+      s00 += nrm[0] * nrm[0]; s01 += nrm[0] * nrm[1]; s11 += nrm[1] * nrm[1];
+      r0 += nrm[0] * -dist; r1 += nrm[1] * -dist;
+    }
+    const det = s00 * s11 - s01 * s01;
+    if (Math.abs(det) < 1e-6) return { ok: false, reason: "вырожденная геометрия" };
+    const dx = (r0 * s11 - r1 * s01) / det, dy = (r1 * s00 - r0 * s01) / det;
+    const norm = Math.hypot(dx, dy);
+    if (norm < (options.minShift ?? 0.7)) return { ok: false, reason: "сдвига нет", dx, dy };
+    if (norm > (options.maxShift ?? 8)) return { ok: false, reason: "сдвиг неправдоподобен", dx, dy };
+    const med = values => {
+      const sorted = values.map(v => Math.abs(v.dist)).sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)];
+    };
+    const after = alignResiduals(sourceSegs, anchorSegs, dx, dy, maxDist);
+    if (after.length < base.length * 0.6) return { ok: false, reason: "пары рассыпались", dx, dy };
+    const medBefore = med(base), medAfter = med(after);
+    if (medAfter >= medBefore * 0.75)
+      return { ok: false, reason: "сдвиг не подтверждён остатками", dx, dy, medBefore, medAfter };
+    return { ok: true, dx, dy, pairs: base.length, medBefore, medAfter };
+  }
+  function shiftFeaturesInPlace(features, dx, dy) {
+    for (const f of features) {
+      if (f.point) { f.point[0] += dx; f.point[1] += dy; }
+      if (Array.isArray(f.line)) for (const pt of f.line) { pt[0] += dx; pt[1] += dy; }
+      if (Array.isArray(f.ring)) for (const pt of f.ring) { pt[0] += dx; pt[1] += dy; }
+      if (Array.isArray(f.holes)) for (const hole of f.holes)
+        for (const pt of hole) { pt[0] += dx; pt[1] += dy; }
+      if (f.circle) { f.circle.cx += dx; f.circle.cy += dy; }
+      if (f.arc) { f.arc.cx += dx; f.arc.cy += dy; }
+    }
+  }
+
+  return { computeEgrnAlign, shiftFeaturesInPlace, chainSegments,
+    setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
     computeTep, preflightProject, webProject, importNspd, importGeoJson,
     gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent,
     GISOGD_WEB_LAYERS, sourceLayerId,
