@@ -29,7 +29,7 @@ const БЮДЖЕТ = {
   "app-labels-place.js drawLiveHints": 204,  // вынесено из drawNow целиком, дословно
   "app-layer-panel.js renderLayers": 110,   // 270 -> 110: строка слоя вынесена
   "app-layer-panel.js layerPanelRow": 166,  // вынесено из renderLayers дословно
-  "app-style-ui.js openStyleLibrary": 258,
+  "app-style-ui.js openStyleLibrary": 208,  // 258 -> 206: список, свотч и разметка вынесены
   "app-layer-ui.js openVariants": 206,
   "app-shell.js applyRestoredState": 182,
   "app-tep.js renderProps": 178,

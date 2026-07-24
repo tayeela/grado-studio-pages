@@ -1164,26 +1164,8 @@ async function loadStyleOverrides() {
 }
 // текущие px-поля знака из STYLES_V2 (уже с применёнными правками) → объект
 // для редактора; правка кладётся обратно в STYLES_V2 через canvasStyleToBackend
-function openStyleLibrary() {
-  closePopups();
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  // знаки с названием, сгруппированы (как в пикере)
-  const groups = new Map();
-  for (const [sid, s] of Object.entries(STYLES_V2)) {
-    if (!s.title) continue;
-    const g = s.group || "Базовые";
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(sid);
-  }
-  for (const arr of groups.values())
-    arr.sort((a, b) => (STYLES_V2[a].title || "").localeCompare(STYLES_V2[b].title || "", "ru"));
-  // изменённые в этой сессии (px-стиль) и помеченные на сброс к эталону
-  const edited = {}, resetSet = new Set();
-  const overridden = new Set(Object.keys(state.styleOverrides || {}));
-  let sel = null;
-  // swatchOf объявлен раньше listHtml — нужен при первой отрисовке списка
-  function swatchOf(sid) {
+// Свотч знака для списка библиотеки.
+function libSwatchHtml(sid) {
     const st = STYLES_V2[sid];
     if (st.fill) return st.fill;
     if (st.hatch && st.hatch.color) {
@@ -1191,18 +1173,12 @@ function openStyleLibrary() {
       return `repeating-linear-gradient(${90 - a}deg, ${st.hatch.color} 0 1px, transparent 1px 4px)`;
     }
     return "transparent";
-  }
-  // Аббревиатуры знаков живут в id латиницей (lgr.oozt, lgr.pk, lgr.szz), а
-  // ищут их кириллицей («ООЗТ», «ПК», «СЗЗ» — как в плейсхолдере). Транслит
-  // запроса → сверка с id, иначе поиск по собственному примеру давал пусто.
-  const _TR = { а:"a", б:"b", в:"v", г:"g", д:"d", е:"e", ё:"e", ж:"zh", з:"z",
-    и:"i", й:"y", к:"k", л:"l", м:"m", н:"n", о:"o", п:"p", р:"r", с:"s", т:"t",
-    у:"u", ф:"f", х:"kh", ц:"c", ч:"ch", ш:"sh", щ:"sch", ъ:"", ы:"y", ь:"",
-    э:"e", ю:"yu", я:"ya" };
-  const translit = s => s.replace(/[а-яё]/g, c => _TR[c] ?? c);
-  // Список + поиск — по системе окон студии (как каталог ОГД, beta.52):
-  // поле во всю ширину колонки 36px, focus-ring, фильтр мгновенный на input.
-  function listHtmlOf(query) {
+}
+
+// Список знаков с группировкой и поиском. Аббревиатуры живут в id
+// латиницей (lgr.oozt), а ищут их кириллицей — отсюда транслит запроса.
+function libListHtml(query, ctx) {
+  const { groups, translit, swatchOf, overridden, edited, resetSet, sel } = ctx;
     const low = (query || "").trim().toLowerCase();
     const tr = translit(low);
     const parts = [];
@@ -1229,8 +1205,12 @@ function openStyleLibrary() {
     if (!parts.length)
       return `<div class="lib-empty" role="status">Ничего не найдено</div>`;
     return parts.join("") + (low ? `<div class="lib-count" aria-live="polite">${n} знак(ов)</div>` : "");
-  }
-  overlay.innerHTML = `<div class="modal lib-modal" role="dialog" aria-modal="true" aria-labelledby="lib-modal-title">
+}
+
+// Разметка окна библиотеки: список слева, редактор знака справа.
+function libModalHtml(ctx) {
+  const { listHtml } = ctx;
+  return `<div class="modal lib-modal" role="dialog" aria-modal="true" aria-labelledby="lib-modal-title">
     <div class="modal-head modal-head-rich"><span class="modal-head-copy"><span class="modal-kicker">Библиотека</span><span id="lib-modal-title">Знаки ЛГР и базовые</span></span>
       <button class="modal-x" aria-label="Закрыть библиотеку знаков"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
@@ -1239,7 +1219,7 @@ function openStyleLibrary() {
         <div class="lib-side">
           <label class="lib-search"><span class="sr-only">Поиск знака</span>
             <input id="lib-q" class="lib-q" type="search" placeholder="поиск знака — например, ООЗТ" autocomplete="off" spellcheck="false"></label>
-          <div class="lib-list" id="lib-list" role="listbox" aria-label="Знаки">${listHtmlOf("")}</div>
+          <div class="lib-list" id="lib-list" role="listbox" aria-label="Знаки">${listHtml}</div>
         </div>
         <div class="lib-edit" id="lib-edit"><div class="muted" style="padding:var(--sp-4)">Выберите знак слева</div></div>
       </div>
@@ -1249,7 +1229,45 @@ function openStyleLibrary() {
       <span class="spacer"></span>
       <button id="lib-cancel">Отмена</button>
       <button id="lib-save" class="primary">Сохранить</button>
-    </div></div>`;
+    </div></div>`
+}
+
+function openStyleLibrary() {
+  closePopups();
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  // знаки с названием, сгруппированы (как в пикере)
+  const groups = new Map();
+  for (const [sid, s] of Object.entries(STYLES_V2)) {
+    if (!s.title) continue;
+    const g = s.group || "Базовые";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(sid);
+  }
+  for (const arr of groups.values())
+    arr.sort((a, b) => (STYLES_V2[a].title || "").localeCompare(STYLES_V2[b].title || "", "ru"));
+  // изменённые в этой сессии (px-стиль) и помеченные на сброс к эталону
+  const edited = {}, resetSet = new Set();
+  const overridden = new Set(Object.keys(state.styleOverrides || {}));
+  let sel = null;
+  // swatchOf объявлен раньше listHtml — нужен при первой отрисовке списка
+  const swatchOf = sid => libSwatchHtml(sid);
+  // Аббревиатуры знаков живут в id латиницей (lgr.oozt, lgr.pk, lgr.szz), а
+  // ищут их кириллицей («ООЗТ», «ПК», «СЗЗ» — как в плейсхолдере). Транслит
+  // запроса → сверка с id, иначе поиск по собственному примеру давал пусто.
+  const _TR = { а:"a", б:"b", в:"v", г:"g", д:"d", е:"e", ё:"e", ж:"zh", з:"z",
+    и:"i", й:"y", к:"k", л:"l", м:"m", н:"n", о:"o", п:"p", р:"r", с:"s", т:"t",
+    у:"u", ф:"f", х:"kh", ц:"c", ч:"ch", ш:"sh", щ:"sch", ъ:"", ы:"y", ь:"",
+    э:"e", ю:"yu", я:"ya" };
+  const translit = s => s.replace(/[а-яё]/g, c => _TR[c] ?? c);
+  // Список + поиск — по системе окон студии (как каталог ОГД, beta.52):
+  // поле во всю ширину колонки 36px, focus-ring, фильтр мгновенный на input.
+  // Строитель списка вынесен наверх. Модель собирается НА КАЖДЫЙ вызов:
+  // выбранный знак (sel) и правки меняются по ходу работы окна, и снимок,
+  // сделанный один раз при открытии, показывал бы устаревший список.
+  const listHtmlOf = query => libListHtml(query,
+    { groups, translit, swatchOf, overridden, edited, resetSet, sel });
+  overlay.innerHTML = libModalHtml({ listHtml: listHtmlOf("") });
   document.body.appendChild(overlay);
   overlay.addEventListener("click", ev => ev.stopPropagation());
   const $ = id => overlay.querySelector("#" + id);
