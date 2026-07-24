@@ -489,7 +489,8 @@
         for (const layer of sourceLayers) {
           try {
             const raw = await gisogdLayerJson(layer.code, result.notes, signal, layer.name);
-            const part = pagesCore.importGisogdExtent(raw, layer, bbox);
+            const part = pagesCore.importGisogdExtent(raw, layer, bbox,
+              { correctDatum: payload.alignOgd !== false });
             for (const group of (part.groups || [])) group.request_source = source;
             mergeExtent(result, part);
           } catch (error) {
@@ -501,41 +502,8 @@
     }
     if (sources.includes("terrain.contours"))
       result.notes.push("Рельеф по области пока требует настольную версию");
-    // ---- автопривязка выгрузки ГИС ОГД к ЕГРН ----
-    // Оцифровка портала по районам гуляет на 1–3 м ЛОКАЛЬНО (в центре — на
-    // сантиметры, датум ни при чём — сверено по городу). Якорь — границы
-    // участков ЕГРН этой же области: из этой же выгрузки или тихим запросом.
-    const ogdGroups = (result.groups || []).filter(g => String(g.source || "").startsWith("gisogd"));
-    if (ogdGroups.length && payload.alignOgd !== false) {
-      try {
-        let parcels = (result.groups || [])
-          .filter(g => String(g.layer_id || "") === "source.nspd.parcels")
-          .flatMap(g => g.features || []);
-        if (!parcels.length && bboxKm2(bbox) <= 12) {
-          const response = await externalFetch("НСПД", NSPD_EXTENT_URL, { method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(pagesCore.buildNspdExtentRequest(bbox, "nspd.parcels")), signal });
-          const part = pagesCore.importNspdExtent(await response.json(), "nspd.parcels", bbox);
-          parcels = (part.groups || []).flatMap(g => g.features || []);
-        }
-        if (parcels.length) {
-          const ogdFeatures = ogdGroups.flatMap(g => g.features || []);
-          const fit = pagesCore.computeEgrnAlign(ogdFeatures, parcels, { minPairs: 15 });
-          if (fit.ok) {
-            for (const group of ogdGroups) pagesCore.shiftFeaturesInPlace(group.features || [], fit.dx, fit.dy);
-            result.notes.push(`ГИС ОГД посажен на ЕГРН: сдвиг ${Math.hypot(fit.dx, fit.dy).toFixed(2)} м ` +
-              `(${fit.pairs} опорных границ, расхождение ${fit.medBefore.toFixed(2)} → ${fit.medAfter.toFixed(2)} м)`);
-          } else if (fit.reason === "сдвиг не подтверждён остатками" && fit.medBefore > 1.2) {
-            // заметное расхождение есть, но оно разнонаправленное — честно
-            // говорим; при согласованных данных (центр города) молчим
-            result.notes.push(`ГИС ОГД: расхождение с ЕГРН не подтвердилось как систематическое — координаты не тронуты`);
-          }
-        }
-      } catch (error) {
-        if (error?.name === "AbortError" || signal?.aborted) throw abortError();
-        // автопривязка — улучшение, а не условие выгрузки
-      }
-    }
+    // (датум-поправка ГИС ОГД применяется в importGisogdExtent — постоянная,
+    // без запроса ЕГРН; см. correctGisogdGeometry в pages-core)
     const gisogdPicked = sources.some(s => s.startsWith("gisogd"));
     if (!osmSources.length && !nspdSources.length && !gisogdPicked
         && !sources.includes("terrain.contours"))
