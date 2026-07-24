@@ -44,6 +44,8 @@
       <button type="button" role="menuitem" data-create="project-style"><svg class="ic"><use href="#ic-label"/></svg><span><b>Пользовательский знак</b><small>Хранится только в этом проекте</small></span></button>
       <button type="button" role="menuitem" data-create="library"><svg class="ic"><use href="#ic-format"/></svg><span><b>Библиотека стандартов</b><small>ЛГР, ЗОУИТ, Генплан и ОКН</small></span></button>`;
     createButton.insertAdjacentElement('afterend', menu);
+    // раскрывается сразу под кнопкой при любой раскладке панели
+    menu.style.top = `${createButton.offsetTop + createButton.offsetHeight + 6}px`;
     createButton.setAttribute('aria-expanded', 'true');
     const actions = {
       layer: () => document.getElementById('btn-new-layer')?.click(),

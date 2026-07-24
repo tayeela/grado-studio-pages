@@ -2860,14 +2860,19 @@ function drawGrid(w, h) {
   // крупные линии каждые 5 шагов
   ctx.lineWidth = 1;
   const gridAxis = cvColor("label", "#d5d2ca"), gridLine = cvColor("grid", "#eceae5");
+  // ось нулевых координат приглушаем: на пустом холсте жирная одинокая
+  // черта цветом подписей выглядела случайным артефактом вёрстки
   for (let x = Math.floor(wx0 / (g * 5)) * g * 5; x <= wx1; x += g * 5) {
     ctx.strokeStyle = x === 0 ? gridAxis : gridLine;
+    ctx.globalAlpha = x === 0 ? 0.45 : 1;
     ctx.beginPath(); ctx.moveTo(...w2s(x, wy0)); ctx.lineTo(...w2s(x, wy1)); ctx.stroke();
   }
   for (let y = Math.floor(wy0 / (g * 5)) * g * 5; y <= wy1; y += g * 5) {
     ctx.strokeStyle = y === 0 ? gridAxis : gridLine;
+    ctx.globalAlpha = y === 0 ? 0.45 : 1;
     ctx.beginPath(); ctx.moveTo(...w2s(wx0, y)); ctx.lineTo(...w2s(wx1, y)); ctx.stroke();
   }
+  ctx.globalAlpha = 1;
   // точки в узлах мелкого шага (как в Rayon)
   if (px >= 11) {
     ctx.fillStyle = cvColor("grid", "#c9c6bd");
