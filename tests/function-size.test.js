@@ -25,7 +25,11 @@ const ЛЮФТ = 20;            // насколько бюджет может о
 const БЮДЖЕТ = {
   "app-style-ui.js openLayerStyle": 633,   // 847 → 734 → 633: разметка и редактор категории вынесены
   "app-data.js openDataFetch": 520,     // 556 → 520: строители шагов вынесены
-  "app-labels-place.js drawNow": 306,   // 523 -> 306: пикетаж и живые подсказки вынесены
+  // 307, а не 306: одна строка — вызов drawTinyRing, куда вынесен уровень
+  // детализации. Рост на строку ради ИМЕНОВАННОГО куска — то, ради чего
+  // храповик и заведён; растёт он только так и только осознанно.
+  "app-labels-place.js drawNow": 307,
+  "app-labels-place.js drawTinyRing": 19,   // 523 -> 306: пикетаж и живые подсказки вынесены
   "app-labels-place.js drawLiveHints": 204,  // вынесено из drawNow целиком, дословно
   "app-layer-panel.js renderLayers": 110,   // 270 -> 110: строка слоя вынесена
   "app-layer-panel.js layerPanelRow": 166,  // вынесено из renderLayers дословно

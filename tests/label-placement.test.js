@@ -115,7 +115,10 @@ const job = (text, x, y, extra = {}) => ({ text, x, y, width: 40, height: 12, ..
   assert.match(app, /ctx\.strokeText\(job\.text, tx, ty\)/,
     "у подписи обязан быть ореол — иначе она не читается поверх заливки и снимка");
   // подписи собираются, а не рисуются на месте: иначе приоритет не работает
-  const jobs = app.slice(app.indexOf("if (st.label_field) {"), app.indexOf("if (state.selectedIds.has(f.id))"));
+  // Границу ищем ПОСЛЕ начала блока: проверка выделения встречается в исходнике
+  // не один раз (её же делает drawTinyRing), и срез от первой попавшейся уезжал.
+  const сборка = app.indexOf("if (st.label_field) {");
+  const jobs = app.slice(сборка, app.indexOf("if (state.selectedIds.has(f.id))", сборка));
   assert.match(jobs, /_labelJobs\.push\(applyLabelOffset\(job, f\)\)/,
     "подпись обязана попадать в общий список — с ручным смещением, если оно есть");
   assert.doesNotMatch(jobs, /ctx\.fillText/, "и не рисоваться сразу");

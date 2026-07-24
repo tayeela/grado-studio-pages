@@ -714,6 +714,45 @@ function drawLiveHints() {
   xfDrawOverlay(ctx);
 }
 
+// Порог уровня детализации в экранных пикселях: объект мельче этого показать
+// подробнее, чем пятном, физически невозможно.
+const LOD_PX = 2.5;
+// Уровень детализации: мелкий контур рисуется одним прямоугольником.
+//
+// На городском масштабе здание занимает пиксель-два: полный контур с обводкой
+// и штриховкой стоит столько же, сколько крупный квартал, а показывает пятно.
+// Замер на 100 000 зданий: растеризация — три четверти кадра (1306 мс из
+// 1710), из них заливка ~950. Упрощение дало 1504 → 252 мс на кадр, и картинка
+// при этом неотличима: средний цвет сдвинулся на единицу из 255, закрашенных
+// пикселей столько же.
+//
+// Возвращает true, если объект отрисован упрощённо. Условия — про
+// правильность, а не про скорость, и каждое стережёт tests/lod-heavy-layers:
+//   - на ЛИСТЕ (_renderTarget) никогда: выпуск обязан уходить полным, иначе
+//     чертёж уйдёт заказчику без деталей и никто этого не заметит;
+//   - выделенное никогда: человек рассматривает именно его;
+//   - только замкнутый контур с заливкой: у линии вся суть в обводке;
+//   - порог по ОБЕИМ сторонам: узкая, но длинная зона рисуется полностью.
+function drawTinyRing(f, st) {
+  if (_renderTarget || !f.ring || !st.fill || st.fill === "transparent") return false;
+  if (state.selectedIds.has(f.id)) return false;
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (const p of f.ring) {
+    if (p[0] < bx0) bx0 = p[0];
+    if (p[0] > bx1) bx1 = p[0];
+    if (p[1] < by0) by0 = p[1];
+    if (p[1] > by1) by1 = p[1];
+  }
+  const sw = (bx1 - bx0) * state.view.k, sh = (by1 - by0) * state.view.k;
+  if (!(sw < LOD_PX && sh < LOD_PX)) return false;
+  const [sx0, sy0] = w2s(bx0, by1);            // верхний левый угол на экране
+  ctx.fillStyle = st.fill;
+  if (st.fillOpacity != null) ctx.globalAlpha = st.fillOpacity;
+  ctx.fillRect(sx0, sy0, Math.max(1, sw), Math.max(1, sh));
+  if (st.fillOpacity != null) ctx.globalAlpha = 1;
+  return true;
+}
+
 function drawNow() {
   const w = viewportW(), h = viewportH();
   ctx.clearRect(0, 0, w, h);
@@ -763,6 +802,7 @@ function drawNow() {
       // читаемый режим поднимает волосок 1 px до разборчивого (см. lgrWidth)
       const stWidth = lgrWidth(st);
       ctx.lineWidth = stWidth; ctx.strokeStyle = canvasStrokeOf(f, st);
+      if (drawTinyRing(f, st)) continue;
       if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
         const [ax, ay] = w2s(...f.line[0]);
