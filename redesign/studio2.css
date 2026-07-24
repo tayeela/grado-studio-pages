@@ -517,6 +517,10 @@
 /* ---- Настройки расчёта ТЭП ---- */
 .modal-overlay .tep-editor-modal{width:min(704px,94vw)}
 .modal-head-rich{min-height:54px;padding-bottom:12px}
+/* Мастер данных задавал шапке свои 42px и кегль 18px. С плашкой раздела
+   содержимого в ней стало больше, чем в обычной шапке, а высота — меньше.
+   Держим единые метрики: раздел над заголовком и так задаёт иерархию. */
+.data-wizard .modal-head-rich{min-height:54px;padding-bottom:12px;font-size:var(--fs-15);letter-spacing:-.01em}
 .modal-head-copy{display:flex;flex-direction:column;gap:2px;min-width:0}
 .modal-kicker{font-size:var(--fs-10);line-height:1.1;text-transform:uppercase;letter-spacing:.075em;color:var(--accent);font-weight:650}
 .modal-overlay .new-layer-modal{width:min(590px,94vw)}

@@ -112,6 +112,10 @@ body.layers-panel-hidden .layer-style-overlay{left:0}
 .category-style-overlay{z-index:calc(var(--z-modal) + 8);left:0!important;top:0!important;padding:18px;background:color-mix(in srgb,var(--canvas-bg) 56%,transparent);backdrop-filter:blur(4px)}
 .modal-overlay .category-style-modal{width:min(620px,calc(100vw - 28px));max-height:min(680px,calc(100vh - 28px));padding:0;overflow:hidden}
 .category-style-modal .modal-head{height:52px;min-height:52px;padding:0 52px 0 16px;border-bottom:1px solid var(--hairline)}
+/* Над заголовком тут стоит плашка раздела: в жёстких 52px она помещалась,
+   но окно выбивалось из общего ряда (51px против 54). Высоту отпускаем до
+   общей, отступы под крестик сохраняем. */
+.category-style-modal .modal-head-rich{height:auto;min-height:54px;padding:0 52px 0 16px}
 .category-style-body{min-height:0;overflow:auto;padding:16px!important;gap:14px!important}
 .category-style-field{display:flex;flex-direction:column;gap:6px;min-width:0;color:var(--text-2);font-size:var(--fs-10)}.category-style-field>span{font-weight:550}.category-style-field input,.category-style-field select{width:100%;height:36px}
 .category-style-preview{height:78px;display:grid;place-items:center;overflow:hidden;border:1px solid var(--hairline);border-radius:var(--r-sm);background:var(--field-bg)}.category-style-preview svg{display:block;width:min(250px,90%);height:56px}

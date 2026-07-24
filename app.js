@@ -904,7 +904,7 @@ function openProjectStyles() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal fmt-modal" role="dialog" aria-modal="true" aria-labelledby="project-styles-title">
-    <div class="modal-head"><span id="project-styles-title">Стили проекта</span>
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Знак проекта</span><span id="project-styles-title">Стили проекта</span></div>
       <button class="modal-x" aria-label="Закрыть стили проекта"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body">
       <div class="ps-note">Собственные знаки хранятся вместе с проектом и доступны при оформлении слоёв и объектов.</div>
@@ -7502,7 +7502,7 @@ async function openAutosaveRecovery() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
-    <div class="modal-head"><span id="recovery-title">Восстановление автосохранения</span>
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Проект</span><span id="recovery-title">Восстановление автосохранения</span></div>
       <button class="modal-x" aria-label="Закрыть окно восстановления"><svg class="ic"><use href="#ic-close"/></svg></button>
     </div>
     <div class="modal-body recovery-body"><div class="recovery-empty">Загрузка копий…</div></div>

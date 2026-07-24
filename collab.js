@@ -427,7 +427,7 @@
         </div>
       </div>`).join("") : `<div class="collab-empty">Пока нет проектов. Создайте первый.</div>`;
     projOverlay = overlay(`<div class="modal collab-projects" role="dialog" aria-modal="true" aria-labelledby="collab-projects-title">
-      <div class="modal-head"><span id="collab-projects-title">Проекты · ${esc(Collab.user)}</span>
+      <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Совместная работа</span><span id="collab-projects-title">Проекты · ${esc(Collab.user)}</span></div>
         <span class="spacer"></span>
         ${Collab.admin ? `<button id="pj-invite" class="collab-mini" title="Создать инвайт-код для коллеги">+ инвайт</button>` : ""}
         <button id="pj-logout" class="collab-mini">Выйти</button></div>

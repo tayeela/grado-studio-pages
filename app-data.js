@@ -220,7 +220,7 @@ async function openDataFetch() {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `<div class="modal data-modal data-wizard" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
-    <div class="modal-head"><span id="data-modal-title">Данные по области</span>
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Данные</span><span id="data-modal-title">Данные по области</span></div>
       <button class="modal-x" aria-label="Закрыть данные по области"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body data-wizard-body">
       <nav class="data-steps" aria-label="Этапы добавления данных"></nav>
@@ -792,7 +792,7 @@ async function openDataFetchLegacy() {
     ? "выберите ранее скачанный слой с портала"
     : "скачайте выгрузку — студия подхватит её из «Загрузок» сама";
   overlay.innerHTML = `<div class="modal fmt-modal data-modal" role="dialog" aria-modal="true" aria-labelledby="data-modal-title">
-    <div class="modal-head"><span id="data-modal-title">Данные по области</span>
+    <div class="modal-head modal-head-rich"><div class="modal-head-copy"><span class="modal-kicker">Данные</span><span id="data-modal-title">Данные по области</span></div>
       <button class="modal-x" aria-label="Закрыть данные по области"><svg class="ic"><use href="#ic-close"/></svg></button></div>
     <div class="modal-body compact">
       <div class="data-area-bar"><span>Видимая область</span><b>${areaTxt} км²</b></div>

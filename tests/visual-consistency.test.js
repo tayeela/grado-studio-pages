@@ -91,4 +91,30 @@ const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
     problems.join("\n  "));
 }
 
+// ---------- 4. частное правило шапки не ужимает шапку с плашкой ----------
+{
+  // Шапка с плашкой раздела (.modal-head-rich) выше обычной: над заголовком
+  // появляется вторая строка. Окно, задавшее шапке собственную высоту (мастер
+  // данных держал 42px), с плашкой получает БОЛЬШЕ содержимого и МЕНЬШЕ места,
+  // чем все остальные, — то самое расхождение каркаса, ради которого затеян
+  // трек A. Если окно и переопределяет шапку, и показывает плашку, оно обязано
+  // переопределить и .modal-head-rich.
+  const sources = fs.readdirSync(root).filter(f => /\.(js|html)$/.test(f))
+    .map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n");
+
+  const problems = [];
+  for (const m of css.matchAll(/\.([\w-]+)\s+\.modal-head\s*\{([^}]*)\}/g)) {
+    const [, scope, body] = m;
+    if (!/min-height|height\s*:|padding-bottom/.test(body)) continue;
+    // окно с этим классом действительно рисует шапку с плашкой?
+    const usesRich = new RegExp(`${scope}[^\`]{0,400}?modal-head-rich`, "s").test(sources);
+    if (!usesRich) continue;
+    if (!new RegExp(`\\.${scope}\\s+\\.modal-head-rich\\s*\\{`).test(css))
+      problems.push(`.${scope}: шапка переопределена (${body.trim().slice(0, 60)}…), ` +
+        "а .modal-head-rich — нет: окно с плашкой окажется ниже остальных");
+  }
+  assert.equal(problems.length, 0,
+    "частное правило шапки конфликтует с плашкой раздела:\n  " + problems.join("\n  "));
+}
+
 console.log("visual-consistency: OK");
