@@ -721,7 +721,9 @@
       let payload;
       try { payload = JSON.parse(text); }
       catch (error) { return json({ error: "Файл не является корректным GeoJSON" }, 400); }
-      try { return json(pagesCore.importGeoJson(payload, filename)); }
+      let sourceTitle = requestHeader(input, options, "X-Grado-Source-Title") || null;
+      if (sourceTitle) { try { sourceTitle = decodeURIComponent(sourceTitle); } catch (error) { sourceTitle = null; } }
+      try { return json(pagesCore.importGeoJson(payload, filename, sourceTitle)); }
       catch (error) { return json({ error: error.message || "Не удалось разобрать GeoJSON" }, 400); }
     }
     if (path === "/api/grado") {

@@ -817,7 +817,7 @@
     : feature.arc ? "arc" : feature.circle ? "circle" : "polygon";
   const genericCodeForGeometry = geometry => `generic.${geometry === "polyline" ? "line" : geometry}`;
 
-  function importGeoJson(payload = {}, filename = "layer.geojson") {
+  function importGeoJson(payload = {}, filename = "layer.geojson", sourceTitle = null) {
     geomFixReset();
     if (!payload || typeof payload !== "object" || Array.isArray(payload))
       throw new Error("Файл не содержит объект GeoJSON");
@@ -830,7 +830,7 @@
     const [routedKind] = gisogdRoute(member);
     const kind = routedKind || "generic";
     const layerId = sourceLayerId("member", member);
-    const layerTitle = `ГИС ОГД: ${member}`;
+    const layerTitle = sourceTitle ? String(sourceTitle).slice(0, 80) : `ГИС ОГД: ${member}`;
     const fields = {}, features = [], notes = [];
     let skipped = 0, geometryError = null;
     inputFeatures.forEach((feature, index) => {
