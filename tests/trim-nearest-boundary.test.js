@@ -10,7 +10,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const app = require("./app-source");
 const fn = app.slice(app.indexOf("function trimLineAt("), app.indexOf("function extendLineAt("));
 assert.ok(fn.length > 0, "trimLineAt должна оставаться распознаваемой");
 

@@ -22,7 +22,7 @@ assert.match(source.slice(guard, write), /if \(base\)/,
   "без базы (первая запись вкладки) проверка не выполняется");
 
 // клиент: базу шлём, из ответа обновляем, на 409 останавливаем автосейв
-const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const app = require("./app-source");
 assert.match(app, /headers\["X-Grado-Base"\] = autosaveBase/,
   "клиент обязан присылать версию, поверх которой пишет");
 assert.match(app, /if \(result && result\.saved_at\) autosaveBase = result\.saved_at/,

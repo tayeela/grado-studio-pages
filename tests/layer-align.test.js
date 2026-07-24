@@ -10,7 +10,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 
 // ---------- чистая функция сдвига ----------
 {

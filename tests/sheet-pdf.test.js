@@ -161,7 +161,7 @@ const text = bytes => Buffer.from(bytes).toString("latin1");
 
 // ---------- проводка в приложении ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const sheet = fs.readFileSync(path.join(root, "app-sheet.js"), "utf8");
 

@@ -77,7 +77,7 @@ const ringArea = ring => {
 
 // ---------- проводка ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const cmdk = fs.readFileSync(path.join(root, "redesign", "cmdk.js"), "utf8");
   assert.match(html, /data-tool="offset"/, "инструмент обязан быть на панели «Правка»");

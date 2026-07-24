@@ -115,7 +115,7 @@ const close = (got, want, tol, msg) =>
 {
   const fs = require("node:fs");
   const adapter = fs.readFileSync(path.join(__dirname, "..", "pages-adapter.js"), "utf8");
-  const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  const app = require("./app-source");
   assert.match(adapter, /correctDatum: payload\.alignOgd !== false/,
     "по-области импорт передаёт флаг поправки");
   assert.doesNotMatch(adapter, /computeEgrnAlign/, "старая МНК-привязка удалена");

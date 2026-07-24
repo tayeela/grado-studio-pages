@@ -83,7 +83,7 @@ const hang = signal => new Promise((_, reject) => {
 
   // ---------- проводка ----------
   {
-    const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+    const app = require("./app-source");
     for (const name of ["НСПД", "ГИС ОГД (каталог)", "Overpass (kumi.systems)"])
       assert.ok(adapter.includes(name), `источник «${name}» обязан называться по имени`);
     assert.match(adapter, /externalFetch\(`ГИС ОГД \(слой \$\{code\}\)`/,

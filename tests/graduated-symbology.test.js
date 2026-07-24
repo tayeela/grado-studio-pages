@@ -103,7 +103,7 @@ for (const method of ["equal", "quantile", "jenks"]) {
 
 // ---------- проводка в приложении ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const ui = fs.readFileSync(path.join(root, "app-style-ui.js"), "utf8");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 

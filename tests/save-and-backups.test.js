@@ -12,7 +12,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 const adapter = fs.readFileSync(path.join(root, "pages-adapter.js"), "utf8");
 
 // ---------- сохранение проекта не зависит от проверки выпуска ----------

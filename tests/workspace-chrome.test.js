@@ -18,7 +18,7 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 const data = fs.readFileSync(path.join(root, "app-data.js"), "utf8");
 const shell = fs.readFileSync(path.join(root, "redesign", "shell.css"), "utf8");
 const layersCss = fs.readFileSync(path.join(root, "redesign", "layers-studio.css"), "utf8");

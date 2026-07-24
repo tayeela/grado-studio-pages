@@ -73,7 +73,7 @@ const legendRows = globalThis.GRADO_SHEET_CORE.legendRows;
 
 // ---------- проводка ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const sheetSrc = fs.readFileSync(path.join(root, "app-sheet.js"), "utf8");
   const cmdk = fs.readFileSync(path.join(root, "redesign", "cmdk.js"), "utf8");
   assert.match(app, /sheetLegend: state\.sheetLegend \|\| null,/,

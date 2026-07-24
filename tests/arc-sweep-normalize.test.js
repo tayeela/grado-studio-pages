@@ -10,7 +10,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const source = require("./app-source");
 const start = source.indexOf("function sweepLike(");
 const end = source.indexOf("function extendArcAt(", start);
 assert.ok(start >= 0 && end > start, "sweepLike must remain extractable for this test");

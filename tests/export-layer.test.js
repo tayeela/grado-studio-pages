@@ -141,7 +141,7 @@ const toLonLat = (x, y) => [37.6 + x / 1000, 55.75 + y / 1000];
 
 // ---------- проводка в приложении ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const exportJs = fs.readFileSync(path.join(root, "app-export.js"), "utf8");
   assert.match(app, /\["Выгрузить слой \(GeoJSON \+ QML\)"/, "выгрузка обязана быть в меню слоя");

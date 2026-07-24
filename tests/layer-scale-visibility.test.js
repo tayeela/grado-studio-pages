@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const source = require("./app-source");
 const start = source.indexOf("function lgrDenom(");
 const marker = "function layerDrawable(L)";
 const end = source.indexOf("\n", source.indexOf(marker));

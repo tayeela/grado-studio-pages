@@ -40,7 +40,7 @@ const L = globalThis.GRADO_LABELS;
 
 // ---------- проводка в приложении ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
 
   // подпись линии — вдоль самого длинного ребра, не вверх ногами
   assert.match(app, /Подпись линии идёт ВДОЛЬ неё — по самому длинному ребру/,

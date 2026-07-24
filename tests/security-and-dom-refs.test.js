@@ -12,7 +12,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 
 // --- валидатор цвета ---
@@ -62,7 +62,10 @@ assert.doesNotMatch(csp, /connect-src[^;]*\*/, "connect-src со звёздоч�
 
 // --- ни одной ссылки на удалённые узлы ---
 assert.doesNotMatch(html, /id="st-core"/, "узел удалён из разметки");
-for (const file of ["app.js", "app-import.js", "app-data.js", "app-attr.js", "app-style-ui.js"]) {
+// части холста (app.js разрезан) плюс крупные модули: обращение к удалённому
+// узлу роняет ВЕСЬ файл, поэтому проверяем каждый по отдельности
+for (const file of [...require("./app-source-parts"),
+  "app-import.js", "app-data.js", "app-attr.js", "app-style-ui.js"]) {
   const source = fs.readFileSync(path.join(root, file), "utf8");
   const live = source.split("\n").filter(line =>
     line.includes("st-core") && !line.trim().startsWith("//"));

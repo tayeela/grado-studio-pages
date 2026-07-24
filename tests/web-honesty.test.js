@@ -19,7 +19,7 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 const adapter = fs.readFileSync(path.join(root, "pages-adapter.js"), "utf8");
 const cmdk = fs.readFileSync(path.join(root, "redesign", "cmdk.js"), "utf8");
 const shell = fs.readFileSync(path.join(root, "redesign", "shell.css"), "utf8");

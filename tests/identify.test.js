@@ -15,7 +15,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 
 // вырезаем геометрические предикаты и саму проверку попадания
 const pieces = ["function pointInPolygon(x, y, f) {", "function pointInRing(x, y, ring) {",

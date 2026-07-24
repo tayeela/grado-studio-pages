@@ -12,7 +12,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const app = require("./app-source");
 
 // --- 1. индекс привязок не сбрасывается вслепую на каждом кадре ---
 const editBlock = app.slice(app.indexOf("  if (state.edit) {"),

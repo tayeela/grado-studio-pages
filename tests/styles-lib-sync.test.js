@@ -27,7 +27,7 @@ assert.equal(embedded["lgr.kl.uds"].lgr_code, 1, "КЛ УДС на месте с
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 assert.ok(html.indexOf("styles-lib.js") < html.indexOf('src="./app.js'),
   "styles-lib.js обязан грузиться раньше app.js");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 assert.match(app, /GRADO_STYLES_LIB\)\r?\n\s*for \(const id of Object.keys\(GRADO_STYLES_LIB\)\)/,
   "initStyles вливает встроенную библиотеку до сети");
 const adapter = fs.readFileSync(path.join(root, "pages-adapter.js"), "utf8");

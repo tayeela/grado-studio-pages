@@ -12,7 +12,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
-const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const app = require("./app-source");
 
 const start = app.indexOf("function inwardSign(ring) {");
 // рабочая копия бывает с CRLF — конец функции ищем по её последней строке

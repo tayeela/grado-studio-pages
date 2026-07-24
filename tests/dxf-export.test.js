@@ -108,7 +108,7 @@ const kinds = pairs => pairs.filter(pair => pair[0] === "0").map(pair => pair[1]
 
 // ---------- проводка ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const adapter = fs.readFileSync(path.join(root, "pages-adapter.js"), "utf8");
   const cmdk = fs.readFileSync(path.join(root, "redesign", "cmdk.js"), "utf8");
   assert.match(app, /if \(typeof exportDxf === "function"\) \{ exportDxf\(\); return; \}/,

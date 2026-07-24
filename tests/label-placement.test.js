@@ -94,7 +94,7 @@ const job = (text, x, y, extra = {}) => ({ text, x, y, width: 40, height: 12, ..
 
 // ---------- проводка в приложении ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const styleUi = fs.readFileSync(path.join(root, "app-style-ui.js"), "utf8");
 

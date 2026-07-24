@@ -130,7 +130,7 @@ const sum = parts => parts.reduce((total, part) =>
 
 // ---------- проводка в приложении ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const cmdk = fs.readFileSync(path.join(root, "redesign", "cmdk.js"), "utf8");
 

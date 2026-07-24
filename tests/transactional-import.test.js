@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const appSource = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const appSource = require("./app-source");
 const start = appSource.indexOf("function importedLayerGeometry(");
 const end = appSource.indexOf("const DEFAULT_ALBUM_CONFIG", start);
 assert.ok(start >= 0 && end > start, "transaction functions must remain extractable for this test");

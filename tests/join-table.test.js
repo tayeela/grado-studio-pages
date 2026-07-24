@@ -119,7 +119,7 @@ const xlsxChecks = async () => {
 
 // ---------- проводка в приложении ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const join = fs.readFileSync(path.join(root, "app-join.js"), "utf8");
   assert.match(app, /\["Присоединить таблицу…", \(\) => window\.openJoinTable && window\.openJoinTable\(layer\)\]/,

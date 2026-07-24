@@ -53,7 +53,7 @@ const close = (got, want, tol, msg) =>
 
 // ---------- проводка приложения ----------
 {
-  const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+  const app = require("./app-source");
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const dxf = fs.readFileSync(path.join(root, "app-dxf.js"), "utf8");
   assert.match(app, /projectCrsId: "auto"/, "новый проект подбирает СК по территории");

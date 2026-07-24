@@ -48,7 +48,7 @@ assert.equal(mixed.fact.spp, three.fact.spp,
 assert.ok(!floorsCheck(three), "без допущений проверка появляться не должна");
 
 // нормализация этажности во фронте помечает допущение
-const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const app = require("./app-source");
 const upgrade = app.slice(app.indexOf("function upgradeFeature("),
   app.indexOf("function upgradeFeature(") + 1200);
 assert.match(upgrade, /floors_assumed = true/,
