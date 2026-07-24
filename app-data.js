@@ -981,7 +981,8 @@ async function openDataFetchLegacy() {
       loadBtn.classList.remove("loading");
       boxes.forEach(b => b.disabled = false);
       refreshUI();
-      toast("Не удалось загрузить: " + String(err.message || err).slice(0, 180), "error");
+      toast("Не удалось загрузить: " + String(err.message || err).slice(0, 180)
+        + ". Проверьте связь и повторите — или снимите часть источников", "error");
     } finally {
       busyDone();          // гасим глобальный индикатор на любом исходе
     }

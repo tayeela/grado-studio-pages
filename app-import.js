@@ -102,7 +102,8 @@ on("nspd-file", "change", async e => {
       (dup ? ` · ${dup} уже были` : "") +
       (invalid ? ` · ${invalid} поврежд. пропущено` : ""), invalid ? "warn" : undefined);
   } catch (err) {
-    toast("Не удалось импортировать захват: " + String(err).slice(0, 200), "error");
+    toast("Не удалось импортировать захват: " + String(err).slice(0, 200)
+      + ". Повторите захват на портале НСПД и выберите файл заново", "error");
   } finally {
     nspdImportBusy = false;
     nspdBusy();

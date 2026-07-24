@@ -5221,7 +5221,8 @@ async function generateBuffers(selectedIds, dist, sides = "both") {
     toast(`Создано буферов: ${data.features.length}`);
     return true;
   } catch (err) {
-    toast("Не удалось сгенерировать буфер: " + String(err).slice(0, 150), "error");
+    toast("Не удалось построить буфер: " + String(err).slice(0, 150)
+      + ". Попробуйте другое расстояние или упростите геометрию", "error");
     return false;
   } finally {
     bufferRequestPending = false;
@@ -7564,7 +7565,8 @@ async function openAutosaveRecovery() {
             : `Восстановлена копия «${item.name}»`, skipped ? "warn" : "ok");
         } catch (error) {
           button.disabled = false;
-          toast("Не удалось восстановить копию", "error");
+          toast("Не удалось восстановить копию — выберите другую из списка "
+            + "или откройте проект файлом", "error");
         }
       };
     });
@@ -9023,7 +9025,8 @@ function setActiveLayer(id) {
   // import-only (источник) и аннотационные слои — не цели рисования: иначе
   // объект молча уходил бы в проектный слой (LAYER_BY_KIND по kind)
   if (L.import_only || L.annotation) {
-    toast(`Слой «${L.title}» заполняется только импортом — рисовать в него нельзя`);
+    toast(`Слой «${L.title}» заполняется только импортом — рисовать в него нельзя. `
+      + `Создайте свой слой: «Слой / знак» → «Новый слой»`);
     return;
   }
   if (L.locked) {
@@ -9393,7 +9396,8 @@ async function download(url, suffix) {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
     toast(url === "/api/grado" ? `Проект сохранён: ${filename}` : `Файл готов: ${filename}`);
   } catch (error) {
-    toast("Не удалось собрать файл: " + String(error.message || error).slice(0, 180), "error");
+    toast("Не удалось собрать файл: " + String(error.message || error).slice(0, 180)
+      + ". Сохраните проект файлом и повторите", "error");
   } finally {
     downloadInProgress = false;
     exportButtons.forEach(button => { button.disabled = false; });

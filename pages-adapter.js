@@ -851,7 +851,7 @@
       window.openSheetDialog();
       return;
     }
-    if (window.toast) window.toast("Функция требует настольную версию с сервером", "warn");
+    if (window.toast) window.toast("Модуль не загрузился — обновите страницу", "warn");
   }, true);
 
   window.addEventListener("DOMContentLoaded", () => {
