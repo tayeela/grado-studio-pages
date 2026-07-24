@@ -1703,6 +1703,7 @@ const state = {
   albumConfig: JSON.parse(JSON.stringify(DEFAULT_ALBUM_CONFIG)),
   sheetLegend: null,              // группы легенды листа: { groups: [{title, layers:[id]}] }
   projectCrsId: "auto",           // местная СК проекта; auto — подобрать по территории
+  alignOgd: true,                 // сажать выгрузки ГИС ОГД на границы участков ЕГРН
   _fitted: false, _ix: null,
 };
 
@@ -2038,6 +2039,9 @@ function openProjectCrsDialog() {
         ${PROJECT_CRS_CHOICES.map(item =>
           `<option value="${item.id}"${item.id === currentId ? " selected" : ""}>${escHtml(item.title)}</option>`).join("")}
       </select></label>
+      <label class="chk"><input type="checkbox" id="pcrs-align"${state.alignOgd !== false ? " checked" : ""}>
+        Сажать выгрузки ГИС ОГД на границы участков ЕГРН (локальная точность портала
+        гуляет по районам на 1–3 м; сдвиг применяется только когда подтверждён опорными границами)</label>
     </div>
     <div class="modal-actions"><span class="spacer"></span>
       <button type="button" id="pcrs-cancel">Отмена</button>
@@ -2051,6 +2055,7 @@ function openProjectCrsDialog() {
   overlay.addEventListener("keydown", event => { if (event.key === "Escape") close(); });
   overlay.querySelector("#pcrs-apply").addEventListener("click", () => {
     const value = overlay.querySelector("#pcrs-pick").value;
+    state.alignOgd = overlay.querySelector("#pcrs-align").checked;
     close();
     if (value === "auto") {
       state.projectCrsId = "auto";
@@ -4367,6 +4372,7 @@ function historySmallState() {
   delete saved.albumConfig;
   delete saved.sheetLegend;
   delete saved.projectCrsId;
+  delete saved.alignOgd;
   return JSON.stringify({ history_version: 2, ...saved });
 }
 // ---------------------------------------------------------------------------
@@ -4653,6 +4659,7 @@ function collectState(opts = {}) {
     albumConfig: state.albumConfig,
     sheetLegend: state.sheetLegend || null,
     projectCrsId: state.projectCrsId || "utm37-legacy",
+    alignOgd: state.alignOgd !== false,
   };
 }
 // Настройки, которые должны ехать внутри .grado вместе с геометрией. Без
@@ -9864,6 +9871,7 @@ function applyRestoredState(d) {
     ? d.sheetLegend : null;
   // координаты в файле уже в СК проекта — только включаем преобразования
   state.projectCrsId = typeof d.projectCrsId === "string" ? d.projectCrsId : "utm37-legacy";
+  state.alignOgd = d.alignOgd !== false;
   if (state.projectCrsId !== "auto")
     applyProjectCrs(state.projectCrsId, { reproject: false, silent: true });
   state.osnap = d.osnap !== false;
