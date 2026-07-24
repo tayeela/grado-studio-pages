@@ -277,6 +277,9 @@
   // ---- ГИС ОГД: слой качается целиком (портал не фильтрует по bbox) и живёт
   // в IndexedDB; повторная выгрузка любой площадки берёт его из кэша.
   const GISOGD_TTL_MS = 7 * 24 * 3600 * 1000;
+  // порог, за которым закачку слоя подтверждает человек: ниже него
+  // (буквально несколько секунд) спрашивать значит мешать
+  const BIG_LAYER_BYTES = 25 * 1024 * 1024;
   const GISOGD_KEY_PREFIX = "gisogd_layer_";
   const GISOGD_META_PREFIX = "gisogd_meta_";
   const gisogdCacheKey = code => `${GISOGD_KEY_PREFIX}${code}`;
@@ -315,6 +318,30 @@
     gisogdProgress(code, name, loaded, total || loaded);
     return { text, bytes: loaded };
   };
+  // Вес слоёв, узнанный по факту прошлой закачки. Живёт ОТДЕЛЬНО от самих
+  // слоёв: кэш чистят, чтобы освободить место, а знание о весе при этом
+  // терять незачем — именно оно и предупреждает о следующей стомегабайтной
+  // закачке. Запись крошечная: код слоя → число байт.
+  const LAYER_SIZES_KEY = "grado_gisogd_layer_sizes_v1";
+  async function readLayerSizes() {
+    try {
+      const stored = await storedProjectGet(LAYER_SIZES_KEY);
+      return isRecord(stored) ? stored : {};
+    } catch (error) { return {}; }
+  }
+  async function rememberedLayerBytes(code) {
+    const sizes = await readLayerSizes();
+    return Number(sizes[code]) || 0;
+  }
+  async function rememberLayerBytes(code, bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return;
+    try {
+      const sizes = await readLayerSizes();
+      sizes[code] = bytes;
+      await storedProjectSet(LAYER_SIZES_KEY, sizes);
+    } catch (error) { /* не влезло — предупреждение просто не появится */ }
+  }
+
   async function gisogdLayerJson(code, notes, signal, name) {
     throwIfAborted(signal);
     try {
@@ -323,8 +350,29 @@
       if (hit && hit.at && (Date.now() - hit.at) < GISOGD_TTL_MS) return hit.data;
     } catch (error) { /* кэш недоступен — тянем из сети */ }
     throwIfAborted(signal);
+    // Портал не фильтрует по области — слой приходит целиком, и «целиком» это
+    // 44 МБ у функциональных зон и 104 МБ у красных линий УДС. Раньше закачка
+    // начиналась молча. Спросить по заголовку ответа нельзя: Content-Length у
+    // портала не открыт через CORS, браузеру видны только cache-control,
+    // content-type, expires, last-modified и pragma (проверено). Зато вес
+    // известен по прошлой закачке — он переживает и очистку кэша слоёв, и
+    // истечение недельного срока, после которого слой качается заново.
+    const knownBytes = await rememberedLayerBytes(code);
+    if (knownBytes > BIG_LAYER_BYTES && typeof window.uiConfirm === "function") {
+      const go = await window.uiConfirm(
+        `Слой «${name || code}» весит около ${formatBytes(knownBytes)} — столько он занял в прошлый раз. ` +
+        `Портал отдаёт его целиком, по области он не режется. Скачать? ` +
+        `Дальше слой живёт в браузере ${GISOGD_TTL_MS / 86400000} дней и повторно качаться не будет.`,
+        { title: "Большой слой", ok: "Скачать", cancel: "Отмена" });
+      if (!go) {
+        const stop = new Error(`слой «${name || code}» (${formatBytes(knownBytes)}) не скачан по вашему выбору`);
+        stop.name = "GradoUserDeclined";
+        throw stop;
+      }
+    }
     const response = await externalFetch(`ГИС ОГД (слой ${code})`, pagesCore.gisogdLayerUrl(code), { signal }, 120000);
     const { text, bytes } = await readWithProgress(response, code, name || code, signal);
+    await rememberLayerBytes(code, bytes);
     throwIfAborted(signal);
     const data = JSON.parse(text);
     throwIfAborted(signal);
