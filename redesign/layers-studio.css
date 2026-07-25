@@ -219,3 +219,20 @@ body.layers-panel-hidden .layer-style-overlay{left:0}
   .layer-vis-toggle{width:32px;height:32px}
   .layer-group-visibility,.style-library-expand,.style-favorite{width:32px;height:32px}
 }
+
+/* Студия оформления в доке: одна колонка вместо двух. Ширина дока — 520px,
+   а двухколоночная сетка (280 предпросмотр + настройки) при ней ужимает
+   настройки до 240px, где не помещается ни одна пара полей. Предпросмотр
+   уходит наверх, настройки занимают всю ширину. */
+#dock .layer-style-overlay{position:static;left:auto;top:auto;padding:0;background:none;
+  backdrop-filter:none;display:flex;overflow:visible}
+#dock .layer-style-overlay .layer-style-studio{width:100%;max-width:none;height:100%;
+  max-height:none;flex:1;border:0;border-radius:0;box-shadow:none}
+#dock .layer-style-studio .modal-head{display:none}      /* заголовок даёт сам док */
+#dock .layer-style-studio .style-editor-grid{grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto minmax(0,1fr)}
+#dock .layer-style-studio .style-preview-panel{grid-column:1;grid-row:1;height:auto;
+  max-height:none;overflow:visible;border-bottom:1px solid var(--hairline);padding-bottom:12px}
+#dock .layer-style-studio .style-controls{grid-column:1;grid-row:2;border-left:0;
+  padding-inline:var(--sp-3)}
+#dock .layer-style-studio #ls-mode{display:flex;margin:10px var(--sp-3) 0}

@@ -16,17 +16,11 @@
 // осознанным исключением из списка ниже, либо токеном.
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
+const { читатьЧистый } = require("./_source");   // комментарии режет общий помощник
 
-const root = path.join(__dirname, "..");
 const ФАЙЛЫ = ["tokens.css", "redesign/shell.css", "redesign/studio2.css",
   "redesign/atelier.css", "redesign/layers-studio.css"];
-// Комментарии режем: в них сырые значения упоминаются как раз при объяснении,
-// почему так писать нельзя. Без этого сторож ловит собственное объяснение —
-// тот же промах, что уже был в window-lexical-globals.
-const безКомментариев = текст => текст.replace(/\/\*[\s\S]*?\*\//g, " ");
-const css = ФАЙЛЫ.map(f => безКомментариев(fs.readFileSync(path.join(root, f), "utf8"))).join("\n");
+const css = ФАЙЛЫ.map(читатьЧистый).join("\n");
 
 // Значения, которые токеном не выражаются и оставлены сознательно.
 const МОЖНО = {

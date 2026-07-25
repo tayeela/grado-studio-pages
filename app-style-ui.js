@@ -1157,6 +1157,7 @@ ${styleGraduatedModePanel(ctx)}
   });
   overlay.addEventListener("click", ev => { if (ev.target === overlay) restore(); });
   window.enhanceLayerStyleStudio?.(overlay, layer);
+  window.dockOverlay?.(overlay, { title: `Оформление · ${layer.title}`, width: 520 });
 }
 
 // ---------- библиотека знаков: редактор эталонных знаков ЛГР/базовых -------

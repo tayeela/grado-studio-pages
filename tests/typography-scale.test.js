@@ -30,9 +30,7 @@ for (const m of tokens.matchAll(/--fs-(\d+):\s*(\d+)px/g))
 const ALLOWED_RAW = new Set([8]);
 const offenders = [];
 for (const name of files) {
-  // Комментарии режем: пояснение «раньше здесь стояло font-size:11px» — не код.
-  const css = fs.readFileSync(path.join(root, "redesign", name), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, " "));   // строки сохраняем
+  const css = require("./_source").читатьЧистый("redesign/" + name);
   for (const m of css.matchAll(/font(?:-size)?:\s*(\d+)px/g)) {
     const size = Number(m[1]);
     if (ALLOWED_RAW.has(size)) continue;

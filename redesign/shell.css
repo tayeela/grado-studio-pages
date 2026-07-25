@@ -426,3 +426,34 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
    `display:none!important` из atelier.css, а класс .expanded не ставил никто:
    цепочка была порвана в двух местах, и инструменты просто исчезали.
    Рельс и так прокручивается (overflow:auto) — прятать нечего. */
+
+/* ==== РАБОЧАЯ ПАНЕЛЬ (ДОК) ====
+   Окна, в которых работают глядя на чертёж, стоят РЯДОМ с холстом, а не
+   поверх. Замер до: «Оформление слоя» закрывало 84% холста и не пропускало
+   клики; сверить правку с чертежом было нельзя ровно там, где это нужно. */
+#dock{flex:0 0 auto;width:var(--dock-width,440px);min-width:320px;max-width:min(760px,52vw);
+  display:flex;flex-direction:column;min-height:0;
+  background:var(--glass);backdrop-filter:var(--glass-blur);
+  box-shadow:var(--glass-hi),-1px 0 0 var(--hairline);z-index:var(--z-panel)}
+#dock[hidden]{display:none}
+.dock-head{height:44px;flex:0 0 auto;display:flex;align-items:center;gap:8px;
+  padding:0 var(--sp-3);box-shadow:0 1px 0 var(--hairline)}
+.dock-title{flex:1;min-width:0;font-size:var(--fs-13);font-weight:var(--fw-semibold);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock-close{width:28px;height:28px;flex:0 0 auto;display:grid;place-items:center;
+  border-radius:var(--r-sm);color:var(--muted)}
+.dock-close:hover{background:var(--field-bg);color:var(--text)}
+.dock-close .ic{width:16px;height:16px}
+.dock-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+
+/* Докированный оверлей перестаёт быть оверлеем: ни затемнения, ни центровки,
+   ни собственной рамки — рамку даёт сам док. Разметка окна не меняется. */
+.modal-overlay.docked{position:static;inset:auto;display:flex;flex-direction:column;
+  flex:1;min-height:0;padding:0;background:none;backdrop-filter:none}
+.modal-overlay.docked>.modal{width:100%;max-width:none;height:100%;max-height:none;
+  flex:1;min-height:0;margin:0;border:0;border-radius:0;box-shadow:none;background:none}
+
+/* Док и панель свойств — оба инспекторы, и вместе они съедают холст: замер на
+   окне 1400 показал 241px чертежа из 761. Пока док открыт, панель свойств
+   уступает место; закрытие дока возвращает её. */
+body.dock-open #panel,body.dock-open #panel-resizer{display:none}
