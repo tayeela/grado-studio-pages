@@ -8,7 +8,7 @@
 // быть той, что набрана, до миллиметра.
 
 const assert = require("node:assert/strict");
-const { parseInputLine, describeInputLine } = require("../app-input-line.js");
+const { parseInputLine, describeInputLine, constrainDirection } = require("../app-input-line.js");
 
 const близко = (a, b, ε, что) => assert.ok(Math.abs(a - b) < ε,
   `${что}: ожидалось ${b}, получено ${a}`);
@@ -117,6 +117,38 @@ const близко = (a, b, ε, что) => assert.ok(Math.abs(a - b) < ε,
     "недобранная геодезическая пара объясняет порядок осей");
   assert.match(describeInputLine("", {}), /длина.*угол.*приращение/,
     "пустая строка перечисляет формы ввода");
+}
+
+// ---------- режимы направления: орто и полярное отслеживание ----------
+{
+  // Режим держит УГОЛ, но не длину: человек тянет курсор на нужное расстояние,
+  // а приложение убирает дрожь руки. Поэтому расстояние обязано сохраняться.
+  const косо = constrainDirection([0, 0], 10, 3, { ortho: true });
+  близко(Math.hypot(косо[0], косо[1]), Math.hypot(10, 3), 1e-9,
+    "орто сохраняет расстояние до курсора");
+  близко(косо[1], 0, 1e-9, "орто кладёт точку на горизонталь");
+
+  const вверх = constrainDirection([0, 0], 3, 10, { ortho: true });
+  близко(вверх[0], 0, 1e-9, "ближе к вертикали — значит вертикаль");
+
+  // полярный шаг 45°: направление (10,3) это 16.7°, ближайшее кратное — 0°
+  const п0 = constrainDirection([0, 0], 10, 3, { polarStep: 45 });
+  близко(п0[1], 0, 1e-9, "16.7° округляется к 0°");
+  // а (10,9) это 42° — уже к 45°
+  const п45 = constrainDirection([0, 0], 10, 9, { polarStep: 45 });
+  близко(п45[0], п45[1], 1e-9, "42° округляется к 45°: восток равен северу");
+
+  // шаг 15° ловит то, что 45° пропускает
+  const п15 = constrainDirection([0, 0], 10, 3, { polarStep: 15 });
+  const угол = Math.atan2(п15[1], п15[0]) * 180 / Math.PI;
+  близко(угол, 15, 1e-6, "16.7° округляется к 15°");
+
+  // без режима и без начала — точка как есть
+  assert.deepEqual(constrainDirection([0, 0], 10, 3, {}), [10, 3], "без режима не трогаем");
+  assert.deepEqual(constrainDirection(null, 10, 3, { ortho: true }), [10, 3],
+    "без первой точки направление не от чего откладывать");
+  assert.deepEqual(constrainDirection([5, 5], 5, 5, { ortho: true }), [5, 5],
+    "курсор в той же точке — направления нет");
 }
 
 console.log("coord-input: OK");

@@ -301,16 +301,23 @@ function orthoProject(base, wx, wy) {
 
 function cursorPoint(wx, wy) {
   const base = lastDrawingPt();
-  if (shiftDown && base) {
-    const [ox, oy] = orthoProject(base, wx, wy);
+  // Направление держит либо зажатый Shift (как было), либо режим: F8 — орто,
+  // F10 — полярное отслеживание с шагом. Режим тем и отличается, что его не
+  // надо держать пальцем всю линию: улица под 45° рисуется одной рукой.
+  const режим = (shiftDown || state.ortho) ? { ortho: true }
+    : (state.polarStep ? { polarStep: state.polarStep } : null);
+  if (режим && base) {
+    const [ox, oy] = typeof constrainDirection === "function"
+      ? constrainDirection(base, wx, wy, режим) : orthoProject(base, wx, wy);
+    const имя = режим.ortho ? "орто" : "полярно " + state.polarStep + "°";
     if (state.gridSnap) {
       // выравниваем длину по шагу сетки вдоль зафиксированного направления
       const g = gridStep();
       const d = Math.round(Math.hypot(ox - base[0], oy - base[1]) / g) * g;
       const a = Math.atan2(oy - base[1], ox - base[0]);
-      return { p: [base[0] + d * Math.cos(a), base[1] + d * Math.sin(a)], kind: "орто" };
+      return { p: [base[0] + d * Math.cos(a), base[1] + d * Math.sin(a)], kind: имя };
     }
-    return { p: [ox, oy], kind: "орто" };
+    return { p: [ox, oy], kind: имя };
   }
   // from=base: во время построения доступна привязка «перпендикуляр»
   let exclude = state.edit && state.edit.f ? state.edit.f.id : undefined;

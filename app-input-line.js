@@ -154,6 +154,29 @@
              площадь: Math.abs(удвоенная) / 2, периметр };
   }
 
+  // ---------- режимы направления ----------
+  //
+  // Орто уже работал по зажатому Shift (orthoProject в cursorPoint). Не хватало
+  // двух вещей: режима, который не надо держать пальцем всю линию, и полярного
+  // отслеживания — направлений, кратных шагу. Улица под 45°, поворот под 30° —
+  // это половина градостроительной геометрии, и целиться в них мышью нельзя.
+  //
+  // Возвращает точку на луче нужного направления, СОХРАНЯЯ расстояние до неё:
+  // человек тянет курсор на нужную длину, а угол держит приложение.
+  function constrainDirection(base, wx, wy, opts) {
+    if (!base) return [wx, wy];
+    const шаг = (opts && opts.ortho) ? 90 : (opts && opts.polarStep) || 0;
+    if (!(шаг > 0)) return [wx, wy];
+    const dx = wx - base[0], dy = wy - base[1];
+    const d = Math.hypot(dx, dy);
+    if (!(d > 1e-9)) return [wx, wy];
+    const шагРад = шаг * Math.PI / 180;
+    const угол = Math.round(Math.atan2(dy, dx) / шагРад) * шагРад;
+    return [base[0] + d * Math.cos(угол), base[1] + d * Math.sin(угол)];
+  }
+
+  root.constrainDirection = constrainDirection;
+
   // Окно «Точки по координатам»: вставил каталог из документа — получил контур.
   //
   // Порядок столбцов спрашиваем ЯВНО и показываем итог до вставки: перепутанные
@@ -242,5 +265,6 @@
   root.parseCoordTable = parseCoordTable;
   root.coordTableSummary = coordTableSummary;
   if (typeof module !== "undefined" && module.exports)
-    module.exports = { parseInputLine, describeInputLine, parseCoordTable, coordTableSummary };
+    module.exports = { parseInputLine, describeInputLine, parseCoordTable,
+                       coordTableSummary, constrainDirection };
 })(typeof window !== "undefined" ? window : globalThis);

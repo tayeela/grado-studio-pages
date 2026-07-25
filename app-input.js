@@ -733,6 +733,24 @@ document.addEventListener("keydown", e => {
       || t.isContentEditable) return;
   if (t.tagName === "BUTTON" &&
       (e.code === "Space" || e.key === "Enter" || e.key === "Delete" || e.key === "Backspace")) return;
+  // Режимы направления. Shift держит орто, пока зажат; F8 и F10 включают
+  // режим, который держать не надо: улицу под 45° одной рукой не нарисуешь.
+  if (e.key === "F8") {
+    e.preventDefault();
+    state.ortho = !state.ortho;
+    if (state.ortho) state.polarStep = 0;          // два режима сразу — путаница
+    toast(state.ortho ? "Орто включено (F8)" : "Орто выключено (F8)");
+    draw(); return;
+  }
+  if (e.key === "F10") {
+    e.preventDefault();
+    const дальше = { 0: 15, 15: 30, 30: 45, 45: 0 };
+    state.polarStep = дальше[state.polarStep || 0] || 0;
+    if (state.polarStep) state.ortho = false;
+    toast(state.polarStep ? `Полярное отслеживание: шаг ${state.polarStep}° (F10)`
+                          : "Полярное отслеживание выключено (F10)");
+    draw(); return;
+  }
   if (e.key === "Shift") { shiftDown = true; if (state.drawing) draw(); return; }
   if (e.code === "Space") { spaceDown = true; e.preventDefault(); return; }
   if ((e.metaKey || e.ctrlKey) && e.code === "KeyZ") {
