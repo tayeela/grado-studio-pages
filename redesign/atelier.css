@@ -10,10 +10,6 @@
 :root{
   --font-ui:"Onest",-apple-system,"Segoe UI",Arial,sans-serif;
   --layer-panel-width:320px;
-  --r-sm:4px;
-  --r-md:6px;
-  --r-lg:10px;
-  --r-xl:12px;
   --accent:#315bea;
   --accent-hover:#244cd4;
   --accent-active:#1e40b9;
@@ -112,7 +108,7 @@ header{
   box-shadow:none;
 }
 .logo{font-size:var(--fs-15);letter-spacing:-.025em}
-.logo span{font-weight:450}
+.logo span{font-weight:var(--fw-regular)}
 .projname{max-width:148px;padding-inline:8px}
 .kbar{width:32px;height:32px;padding:0;justify-content:center;border-radius:var(--r-sm);background:transparent}
 .kbar>span,.kbar>kbd{display:none}
@@ -125,10 +121,10 @@ header .hsep{margin-inline:0}
    (другой шрифт, локаль, масштаб), переключатель обрежется сам, а не вытолкнет
    кнопки справа за пределы экрана. */
 .workspace-modes{display:flex;align-self:stretch;flex:0 0 auto;overflow:visible;border-left:1px solid var(--hairline);border-right:1px solid var(--hairline)}
-.workspace-modes button{position:relative;display:flex;align-items:center;gap:7px;padding:0 14px;color:var(--text-2);font-size:var(--fs-12);font-weight:560;white-space:nowrap}
+.workspace-modes button{position:relative;display:flex;align-items:center;gap:7px;padding:0 14px;color:var(--text-2);font-size:var(--fs-12);font-weight:var(--fw-medium);white-space:nowrap}
 .workspace-modes button+button{border-left:1px solid var(--hairline)}
 .workspace-modes button:hover{background:var(--field-bg);color:var(--text)}
-.workspace-modes button[aria-pressed="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent-weak) 72%,var(--panel));font-weight:650}
+.workspace-modes button[aria-pressed="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent-weak) 72%,var(--panel));font-weight:var(--fw-semibold)}
 .workspace-modes button[aria-pressed="true"]::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent-solid)}
 .workspace-modes .ic{width:16px;height:16px}
 
@@ -147,8 +143,8 @@ header .hsep{margin-inline:0}
 }
 body.layers-panel-hidden #layers-panel{margin-left:calc(var(--layer-panel-width) * -1);visibility:hidden;pointer-events:none}
 .layers-panel-head{height:48px;display:flex;align-items:center;gap:2px;padding:0 12px;border-bottom:1px solid var(--hairline)}
-.layers-panel-head .title{flex:1;font-size:var(--fs-13);font-weight:700;letter-spacing:.01em}
-.layers-panel-head .lcount{margin-left:5px;color:var(--muted);font-family:var(--font-mono);font-size:var(--fs-10);font-weight:500}
+.layers-panel-head .title{flex:1;font-size:var(--fs-13);font-weight:var(--fw-bold);letter-spacing:.01em}
+.layers-panel-head .lcount{margin-left:5px;color:var(--muted);font-family:var(--font-mono);font-size:var(--fs-10);font-weight:var(--fw-medium)}
 .layers-panel-head .h3-btn{flex:0 0 auto;width:32px;height:32px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted)}
 .layers-panel-head .h3-btn:hover{background:var(--field-bg);color:var(--text)}
 .layers-panel-head .h3-btn .ic{width:17px;height:17px}
@@ -157,7 +153,7 @@ body.layers-panel-hidden #layers-panel{margin-left:calc(var(--layer-panel-width)
 .layer-search .ic{width:15px;height:15px;flex:0 0 auto}
 .layer-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--text);font:inherit;font-size:var(--fs-12)}
 .layer-search input::placeholder{color:var(--muted)}
-.layer-search kbd{font:var(--fs-10) var(--font-mono);color:var(--faint);border:1px solid var(--hairline-2);border-radius:3px;padding:1px 5px;background:var(--panel)}
+.layer-search kbd{font:var(--fs-10) var(--font-mono);color:var(--faint);border:1px solid var(--hairline-2);border-radius:var(--r-sm);padding:1px 5px;background:var(--panel)}
 .layers-panel-scroll{flex:1;min-height:0;overflow:auto;padding:0 8px 10px;scrollbar-gutter:stable}
 #layers-panel #card-layers{border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
 #layers-panel #layers-card-body{padding:0;gap:4px}
@@ -196,10 +192,10 @@ body.panel-resizing #toolbar{transition:none}
 /* Подложка в панели слоёв: это такой же слой, только чужой. Прижата к низу
    панели, как в QGIS, и не растёт вместе со списком слоёв. */
 .basemap-block{flex:0 0 auto;padding:10px 12px;border-top:1px solid var(--hairline);background:var(--panel)}
-.basemap-block>.chk{font-size:var(--fs-12);font-weight:600;margin-bottom:8px}
+.basemap-block>.chk{font-size:var(--fs-12);font-weight:var(--fw-semibold);margin-bottom:8px}
 .basemap-fields{display:flex;flex-direction:column;gap:8px}
 .basemap-fields .select{width:100%;height:32px;font-size:var(--fs-11)}
-.basemap-fields>label{font-size:var(--fs-10);color:var(--text-2);font-weight:550}
+.basemap-fields>label{font-size:var(--fs-10);color:var(--text-2);font-weight:var(--fw-medium)}
 .basemap-op{display:flex;align-items:center;gap:8px;font-size:var(--fs-10);color:var(--text-2)}
 .basemap-op label{flex:0 0 auto}
 .basemap-op span{flex:0 0 auto}
@@ -224,21 +220,21 @@ body[data-workspace-mode="measure"] #toolbar [data-workspace-tool]:not([data-wor
 .cv-compass{top:12px;right:12px}
 .cv-zoom{right:12px;bottom:46px}
 .statusbar{height:36px;padding-inline:12px;background:var(--glass-strong);box-shadow:0 -1px 0 var(--hairline-2);font-size:var(--fs-11)}
-#st-snap{border-radius:3px}
+#st-snap{border-radius:var(--r-sm)}
 
 #panel{width:320px;background:var(--glass-strong);box-shadow:-1px 0 0 var(--hairline-2)}
 .panel-head{height:48px;border-bottom:1px solid var(--hairline);box-shadow:none}
-.panel-head .title{font-weight:700;letter-spacing:.01em}
+.panel-head .title{font-weight:var(--fw-bold);letter-spacing:.01em}
 .panel-tabs{margin:0;padding:0 12px;gap:18px;border:0;border-radius:0;background:transparent;border-bottom:1px solid var(--hairline)}
 .panel-tabs button{height:40px;border-radius:0;background:transparent!important;box-shadow:none!important;font-size:var(--fs-11)}
-.panel-tabs button[aria-selected="true"]{color:var(--accent);font-weight:700;border-bottom:2px solid var(--accent)}
+.panel-tabs button[aria-selected="true"]{color:var(--accent);font-weight:var(--fw-bold);border-bottom:2px solid var(--accent)}
 .panel-scroll{padding:12px;gap:14px}
 #panel .card{border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
 #panel .card-h{min-height:36px;padding:0 2px;border-bottom:1px solid var(--hairline);font-size:var(--fs-11);text-transform:uppercase;letter-spacing:.055em}
 #panel .card-h:hover{background:transparent}
 #panel .card-b{padding:10px 2px 14px}
 .prop-title{margin-inline:-2px;padding:10px 2px;background:transparent}
-.prop-title .swatch{border-radius:3px}
+.prop-title .swatch{border-radius:var(--r-sm)}
 
 .btn,.iconbtn,.chip,.phbtn,.h3-btn,.addlayer,input,select,textarea{border-radius:var(--r-sm)}
 .menu,.ctx-menu{border-radius:var(--r-md);background:var(--glass-strong);backdrop-filter:none;box-shadow:var(--shadow-md)}
