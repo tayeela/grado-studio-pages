@@ -445,6 +445,12 @@ cv.addEventListener("pointerdown", e => {
         const dim = LAYER_BY_KIND["dim"];
         if (!dim) { toast("Слой размеров недоступен", "warn"); return; }
         addFeature(dim.id, { line: pts });
+        // Конец размера запоминаем: цепочку по фасаду или по красной линии
+        // ставят подряд от общей выносной, и заново целиться в ту же точку —
+        // лишняя работа и лишняя погрешность. Enter продолжает отсюда.
+        state.dimLast = pts[1];
+        const hintEl = document.getElementById("st-hint");
+        if (hintEl) hintEl.textContent = "«Размер»: два клика · Enter — цепочка от последней точки";
       } else draw();
       return;
     }
@@ -816,6 +822,15 @@ document.addEventListener("keydown", e => {
     }
     if (state.measureArea && !state.measureArea.done && state.measureArea.pts.length > 2) {
       state.measureArea.done = true;           // контур замкнут, счёт остаётся на экране
+      draw();
+      return;
+    }
+    // Цепочка размеров: новый размер начинается от конца предыдущего.
+    // Только когда ничего не чертится — иначе Enter обязан завершать начатое.
+    if (state.tool === "dim" && !state.drawing && state.dimLast) {
+      state.drawing = { pts: [state.dimLast.slice()] };
+      const hintEl = document.getElementById("st-hint");
+      if (hintEl) hintEl.textContent = "«Размер»: цепочка от предыдущего — укажите вторую точку";
       draw();
       return;
     }

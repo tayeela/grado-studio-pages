@@ -45,6 +45,9 @@ function setTool(tool, opts = {}) {
   if (tool !== "layeralign") state.layerAlign = null;
   if (tool !== "measure") state.measure = null;
   if (tool !== "marea") state.measureArea = null;
+  // Конец последнего размера живёт, только пока человек в размерах: иначе
+  // цепочка ожила бы через полчаса от точки, которую он уже не помнит.
+  if (tool !== "dim") state.dimLast = null;
   // Подсказка режима видна в статус-строке, пока режим активен: тост исчезает
   // через 5 секунд, а режим остаётся. Пустая строка — обычные инструменты.
   const hintEl = document.getElementById("st-hint");
@@ -60,6 +63,7 @@ function setTool(tool, opts = {}) {
     state.trimCtx = null;
     setHint("");
   }
+  if (tool === "dim") setHint("«Размер»: два клика по точкам · Enter — цепочка от предыдущего");
   if (tool === "marea") {
     toast("Измерение площади: кликайте контур, Enter — замкнуть, Esc — убрать");
     setHint("«Площадь»: клики по контуру → Enter");
