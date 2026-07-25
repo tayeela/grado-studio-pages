@@ -265,6 +265,52 @@
       }
     }
 
+    // Экспликация — та же сводка по полю, что и в окне анализа, только на
+    // листе. Считается тем же selectionSummary: две разные реализации одной
+    // таблицы рано или поздно разойдутся в цифрах, а расхождение чертежа с
+    // запиской замечают на защите.
+    if (column.explication && typeof selectionSummary === "function") {
+      // Берём только объекты, у которых поле ЗАПОЛНЕНО, и это отличается от
+      // сводки по выборке. Там «— не задано —» обязательно: вы сами выделили
+      // эти объекты, и терять их из отчёта нельзя. Здесь наоборот: экспликация
+      // по полю — это разбивка того, у чего поле есть. Первый же замер на
+      // настоящем проекте дал «не задано — 7990 га, 100 %»: подложка ОСМ и
+      // выгрузки портала забили таблицу и вытеснили сам предмет.
+      const предмет = state.features.filter(f => {
+        const v = f.props ? f.props[column.explication] : undefined;
+        return v != null && v !== "";
+      });
+      const свод = selectionSummary(предмет, { field: column.explication });
+      if (свод.группы.length) {
+        context.font = `700 ${10 * PT}px sans-serif`;
+        context.fillStyle = "#1c1c1a";
+        context.fillText("Экспликация", left, y);
+        y += 14 * PT;
+        const rowH = 11 * PT, гаW = mmToPx(20), долиW = mmToPx(14);
+        context.font = `${7 * PT}px sans-serif`;
+        [...свод.группы, { значение: "Итого", площадь: свод.итог.площадь, доля: 1, итог: true }]
+          .forEach((г, index) => {
+            if (y > view.height - pad - mmToPx(14)) return;
+            if (!г.итог && index % 2 === 0) {
+              context.fillStyle = "#f2f0ec";
+              context.fillRect(left, y - rowH + 3 * PT, inner, rowH);
+            }
+            context.font = `${г.итог ? "700 " : ""}${7 * PT}px sans-serif`;
+            context.fillStyle = "#44423c";
+            context.textAlign = "left";
+            const lines = wrapText(context, г.значение, inner - гаW - долиW - 4 * PT);
+            context.fillText(lines[0] + (lines.length > 1 ? "…" : ""), left + 1.5 * PT, y);
+            context.textAlign = "right";
+            context.fillStyle = "#1c1c1a";
+            context.fillText((г.площадь / 10000).toFixed(2), left + inner - долиW - 2 * PT, y);
+            context.fillText((г.доля * 100).toFixed(1) + "%", left + inner - 1.5 * PT, y);
+            context.textAlign = "left";
+            y += rowH;
+          });
+        y += 6 * PT;
+      }
+    }
+
     if (column.notes) {
       context.font = `${6.5 * PT}px sans-serif`;
       context.fillStyle = "#6b675f";
@@ -733,6 +779,19 @@
             <label class="chk"><input type="checkbox" id="sheet-tep"${sheet.column.tep === false ? "" : " checked"}>Таблица ТЭП</label>
             <button type="button" id="sheet-legend-groups">Группы легенды…</button>
           </div>
+          <label>Экспликация по полю<select id="sheet-explication">
+            <option value="">— без экспликации —</option>
+            ${(() => {
+              // поля берём у самих объектов проекта: экспликацию строят по тому,
+              // что в проекте есть, а не по схеме одного слоя
+              const поля = new Set();
+              for (const f of state.features)
+                for (const k of Object.keys(f.props || {}))
+                  if (!String(k).startsWith("_")) поля.add(k);
+              return [...поля].sort((a, b) => a.localeCompare(b, "ru")).map(п =>
+                `<option value="${escHtml(п)}"${sheet.column.explication === п ? " selected" : ""}>${escHtml(п)}</option>`).join("");
+            })()}
+          </select></label>
           <label class="chk"><input type="checkbox" id="sheet-smallcaps"${sheet.column.smallCapsTitle ? " checked" : ""}>Заголовок капителью (SC700)</label>
           <label class="sheet-field">Примечания<textarea id="sheet-notes" rows="2" placeholder="* коэффициент перехода…">${escHtml(sheet.column.notes || "")}</textarea></label>
         </div>
@@ -774,6 +833,7 @@
         widthMm: Math.max(40, Math.min(200, Number($("sheet-column-width").value) || 110)),
         legend: $("sheet-legend").checked,
         tep: $("sheet-tep").checked,
+        explication: $("sheet-explication").value || "",
         smallCapsTitle: $("sheet-smallcaps").checked,
         title: $("sheet-title-text").value,
         notes: $("sheet-notes").value,
@@ -810,6 +870,7 @@
       draw();
     };
     ["sheet-format", "sheet-orient", "sheet-scale", "sheet-column", "sheet-legend", "sheet-tep",
+      "sheet-explication",
       "sheet-raster", "sheet-raster-source", "sheet-smallcaps"]
       .forEach(id => $(id).addEventListener("change", update));
     $("sheet-raster-dpi").addEventListener("input", update);
