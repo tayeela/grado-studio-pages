@@ -214,7 +214,38 @@
   // эту обёртку: таймаут, имя источника в ошибке и человеческое «недоступен
   // из вашей сети» вместо технического «Failed to fetch».
   const EXTERNAL_TIMEOUT_MS = 45000;
-  async function externalFetch(sourceName, url, options = {}, timeoutMs = EXTERNAL_TIMEOUT_MS) {
+
+  // `fetch` кидает голый TypeError на целый веер причин: нет сети, DNS,
+  // блокировка, отказ CORS, обрыв соединения на середине, протокольная ошибка
+  // HTTP/2. Раньше мы называли одну из них — «недоступен из вашей сети
+  // (блокировка или нет соединения)» — и подавали догадку как факт. Человек с
+  // исправной сетью, у которого НСПД открывается в соседней вкладке, шёл
+  // проверять сеть, а дело было в другом.
+  //
+  // Догадку заменяем замером: лёгкий no-cors запрос к корню хоста проходит
+  // тогда и только тогда, когда до хоста есть сеть. Дальше говорим ровно то,
+  // что знаем, и не больше.
+  const REACH_PROBE_MS = 6000;
+  async function hostReachable(url) {
+    try {
+      const probe = new AbortController();
+      const timer = setTimeout(() => probe.abort(), REACH_PROBE_MS);
+      try {
+        await nativeFetch(new URL(url).origin, { mode: "no-cors", cache: "no-store", signal: probe.signal });
+        return true;              // ответ непрозрачный, но он ЕСТЬ — сеть до хоста жива
+      } finally { clearTimeout(timer); }
+    } catch (_) { return false; }
+  }
+  async function diagnoseFetchFailure(sourceName, url) {
+    let host = sourceName;
+    try { host = new URL(url).host; } catch (_) {}
+    return (await hostReachable(url))
+      ? `${sourceName}: соединение оборвалось на полпути — сеть до ${host} есть, ` +
+        `отвечать он перестал. Обычно это перегрузка портала: повторите или уменьшите область.`
+      : `${sourceName} не отвечает: ${host} не откликается из вашей сети. ` +
+        `Проверьте подключение, VPN или блокировку — и повторите.`;
+  }
+  async function externalFetch(sourceName, url, options = {}, timeoutMs = EXTERNAL_TIMEOUT_MS, retried = false) {
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), timeoutMs);
     const signal = options.signal && typeof AbortSignal.any === "function"
@@ -229,8 +260,17 @@
       if (timeout.signal.aborted && !(options.signal && options.signal.aborted))
         throw new Error(`${sourceName} не ответил за ${Math.round(timeoutMs / 1000)} с — попробуйте позже`);
       if (options.signal && options.signal.aborted) throw error;   // отмена пользователя
-      if (error instanceof TypeError)
-        throw new Error(`${sourceName} недоступен из вашей сети (блокировка или нет соединения)`);
+      if (error instanceof TypeError) {
+        // Обрыв на полпути у порталов вроде НСПД — не приговор, а рядовая
+        // икота: ответ идёт мегабайтами, соединение рвётся, повтор проходит.
+        // Пробуем ровно один раз и только когда хост на пробу отвечает —
+        // при мёртвой сети второй заход просто отнимет ещё полминуты.
+        if (!retried && await hostReachable(url)) {
+          clearTimeout(timer);
+          return externalFetch(sourceName, url, options, timeoutMs, true);
+        }
+        throw new Error(await diagnoseFetchFailure(sourceName, url));
+      }
       throw error;
     } finally {
       clearTimeout(timer);
@@ -556,8 +596,19 @@
     if (!osmSources.length && !nspdSources.length && !gisogdPicked
         && !sources.includes("terrain.contours"))
       failures.push("Не выбраны поддерживаемые источники");
-    // Ответ либо содержит весь выбранный набор, либо не содержит ничего:
+    // Ответ либо содержит весь запрошенный набор, либо не содержит ничего:
     // фронт не должен применить «успешную половину» и потерять сведения о сбое.
+    //
+    // Но диалог «Данные» запрашивает источники ПО ОДНОМУ (app-data.js ведёт
+    // свой счётчик и показывает ход). При одном источнике фраза «не все
+    // выбранные источники загружены» просто неверна — отменять было нечего —
+    // и она заслоняет настоящую причину двумя слоями обёртки:
+    // «Земельные участки: Импорт отменён: не все… · nspd.parcels: <причина>».
+    // Причина должна стоять первой.
+    if (failures.length === 1 && sources.length === 1) {
+      const причина = failures[0].replace(/^[\w.:\-\[\]]+:\s*/, "");
+      throw new Error(причина || failures[0]);
+    }
     if (failures.length)
       throw new Error(`Импорт отменён: не все выбранные источники загружены. ${failures.join(" · ")}`);
     return result;

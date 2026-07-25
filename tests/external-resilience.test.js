@@ -4,8 +4,12 @@
 // аудита. Внешний хост из RU-сети может не отказать, а ПОВИСНУТЬ: без
 // таймаута диалог «Данные» ждал бы вечно. Что здесь важно:
 // 1. Таймаут обрывает висящий запрос и называет ИСТОЧНИК, а не URL.
-// 2. Сетевая ошибка превращается в «недоступен из вашей сети», а не в
-//    техническое «Failed to fetch».
+// 2. Сетевая ошибка не доходит до человека как «Failed to fetch», и — важнее —
+//    причина НАЗЫВАЕТСЯ ПО ЗАМЕРУ, а не по догадке. Голый TypeError от fetch
+//    покрывает и обрыв, и CORS, и блокировку, и падение DNS; раньше мы всегда
+//    отвечали «недоступен из вашей сети (блокировка или нет соединения)», и
+//    человек с исправной сетью, у которого НСПД открыт в соседней вкладке, шёл
+//    чинить сеть. Теперь достижимость хоста проверяется пробой.
 // 3. Отмена пользователя остаётся отменой — её нельзя перекрашивать в сбой.
 // 4. Тайлы: десять провалов без единого успеха — одно предупреждение;
 //    если хоть один тайл пришёл, сеть жива и предупреждать не о чем.
@@ -25,7 +29,7 @@ assert.ok(start > 0 && end > start, "обёртка обязана остава�
 
 function makeContext(fetchImpl) {
   const context = vm.createContext({
-    nativeFetch: fetchImpl, AbortController, AbortSignal, TypeError,
+    nativeFetch: fetchImpl, AbortController, AbortSignal, TypeError, URL,
     setTimeout, clearTimeout, Math,
   });
   vm.runInContext(adapter.slice(start, end), context);
@@ -47,13 +51,52 @@ const hang = signal => new Promise((_, reject) => {
       "таймаут обязан называть источник");
   }
 
-  // 2. сетевой отказ — человеческая фраза
+  // 2а. хост НЕ откликается и на пробу — тогда сеть винить можно
   {
     const externalFetch = makeContext(() => Promise.reject(new TypeError("Failed to fetch")));
     await assert.rejects(
-      () => externalFetch("ГИС ОГД (каталог)", "https://x", {}),
-      /ГИС ОГД \(каталог\) недоступен из вашей сети/,
+      () => externalFetch("ГИС ОГД (каталог)", "https://gisogd.example/api/x", {}),
+      /ГИС ОГД \(каталог\) не отвечает: gisogd\.example не откликается из вашей сети/,
       "«Failed to fetch» не должен доходить до человека");
+  }
+
+  // 2б. хост на пробу ОТВЕЧАЕТ — значит сеть до него есть, и обвинять её нельзя.
+  // Рвётся оба раза: повтор проходит, но тоже падает — тогда честная причина.
+  {
+    let рабочих = 0, проб = 0;
+    const externalFetch = makeContext(url => url.includes("/api/")
+      ? (рабочих++, Promise.reject(new TypeError("Failed to fetch")))
+      : (проб++, Promise.resolve({ ok: false, status: 0, type: "opaque" })));
+    await assert.rejects(
+      () => externalFetch("НСПД", "https://nspd.gov.ru/api/geoportal/v1/intersects", {}),
+      /НСПД: соединение оборвалось на полпути — сеть до nspd\.gov\.ru есть/,
+      "нельзя объявлять сеть виновной, когда хост на пробу отвечает: " +
+      "именно на это пожаловался человек, у которого НСПД открыт в соседней вкладке");
+    assert.equal(проб > 0, true, "проба достижимости обязана выполняться, а не подразумеваться");
+    assert.equal(рабочих, 2, "обрыв при живом хосте обязан пережить один повтор");
+  }
+
+  // 2в. обрыв разовый — повтор проходит, и человек ничего не замечает
+  {
+    let рабочих = 0;
+    const externalFetch = makeContext(url => url.includes("/api/")
+      ? (++рабочих === 1
+        ? Promise.reject(new TypeError("Failed to fetch"))
+        : Promise.resolve({ ok: true, status: 200 }))
+      : Promise.resolve({ ok: false, status: 0, type: "opaque" }));
+    const r = await externalFetch("НСПД", "https://nspd.gov.ru/api/x", {});
+    assert.equal(r.status, 200, "разовый обрыв портала не должен доходить до человека");
+    assert.equal(рабочих, 2);
+  }
+
+  // 2г. повтор ровно один — иначе мёртвый источник растянет ожидание втрое
+  {
+    let рабочих = 0;
+    const externalFetch = makeContext(url => url.includes("/api/")
+      ? (рабочих++, Promise.reject(new TypeError("Failed to fetch")))
+      : Promise.resolve({ ok: false, status: 0, type: "opaque" }));
+    await assert.rejects(() => externalFetch("НСПД", "https://nspd.gov.ru/api/x", {}));
+    assert.equal(рабочих, 2, "повторов должно быть ровно один, а не бесконечная цепочка");
   }
 
   // 3. HTTP-ошибка называет источник и код

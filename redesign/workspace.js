@@ -18,7 +18,32 @@
     try { localStorage.setItem('grado_workspace_mode', next); } catch (_) {}
   };
 
-  modeButtons.forEach(button => button.addEventListener('click', () => setMode(button.dataset.workspaceMode)));
+  // Раскладка «инструмент → режим» берётся из разметки, а не переписывается
+  // здесь списком: два списка расходятся, один — нет.
+  const modeOfTool = new Map(
+    [...document.querySelectorAll('#toolbar [data-tool][data-workspace-tool]')]
+      .map(button => [button.dataset.tool, button.dataset.workspaceTool]));
+  // `state` объявлен через const в app-sources.js: он живёт в общей области
+  // обычных скриптов, но на window НЕ попадает — только typeof-проверка.
+  const currentTool = () => (typeof state !== 'undefined' && state.tool) || null;
+
+  // Переключили режим, а включённый инструмент принадлежит покинутому —
+  // его кнопка исчезла, но клик по чертежу всё ещё чертит. Возвращаем «Выбор».
+  modeButtons.forEach(button => button.addEventListener('click', () => {
+    const next = button.dataset.workspaceMode;
+    setMode(next);
+    const tool = currentTool();
+    const owner = modeOfTool.get(tool);
+    if (owner && owner !== next && typeof window.setTool === 'function') window.setTool('select');
+  }));
+
+  // Обратная сторона: инструмент включили горячей клавишей или кнопкой из
+  // панели свойств — режим переходит туда, где эта кнопка видна.
+  document.addEventListener('grado:tool', event => {
+    const owner = modeOfTool.get(event.detail && event.detail.tool);
+    if (owner && owner !== root.dataset.workspaceMode) setMode(owner);
+  });
+
   let savedMode = 'draw';
   try { savedMode = localStorage.getItem('grado_workspace_mode') || savedMode; } catch (_) {}
   setMode(savedMode);

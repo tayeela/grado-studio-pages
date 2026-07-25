@@ -139,7 +139,11 @@ async function fetchExtentSourceBatches(bbox, sources, options = {}) {
       const response = await request("/api/fetch-extent", { method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bbox, sources: [source],
-          alignOgd: typeof window === "undefined" || !(window.state && window.state.alignOgd === false) }), signal });
+          // Читаем ЛЕКСИЧЕСКИЙ state, а не window.state: state объявлен через
+          // const в app-sources.js и на window не попадает никогда. Прежняя
+          // проверка window.state молча давала true всегда — галка «сажать
+          // выгрузки ГИС ОГД на границы ЕГРН» не отключала поправку датума.
+          alignOgd: typeof state === "undefined" || state.alignOgd !== false }), signal });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || (`HTTP ${response.status}`));
       const count = (data.groups || []).reduce((sum, group) => sum + (group.count || 0), 0);

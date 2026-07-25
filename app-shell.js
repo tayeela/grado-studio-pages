@@ -120,6 +120,13 @@ function setTool(tool, opts = {}) {
       b.setAttribute("aria-pressed", String(active));
     });
   cv.style.cursor = tool === "select" ? "default" : "crosshair";
+  // Режим работы обязан догонять инструмент. Инструмент включается не только
+  // кнопкой: горячая клавиша, кнопка «Повернуть» в панели свойств, восстановление
+  // сеанса. Если при этом режим остаётся прежним, кнопка инструмента спрятана
+  // правилом режима — включённый инструмент есть, а нажатой кнопки нет, и человек
+  // чертит вслепую. Слушателя ставит redesign/workspace.js: он знает раскладку
+  // режимов, а этот файл — нет.
+  document.dispatchEvent(new CustomEvent("grado:tool", { detail: { tool } }));
   draw();
 }
 function setActiveLayer(id) {
