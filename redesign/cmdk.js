@@ -77,6 +77,7 @@
       { t: "Масштаб выделения", run: tool("scale"), available: () => toolEnabled("scale") },
       { t: "Зеркало", run: tool("mirror"), available: () => toolEnabled("mirror") },
       { t: "Размерная линия", k: "D", run: tool("dim"), available: () => toolEnabled("dim") },
+      { t: "Выноска с полкой", run: tool("leader"), available: () => toolEnabled("leader") },
       { t: "Измерение расстояния", k: "M", run: tool("measure"), available: () => toolEnabled("measure") },
       { t: "Измерение площади", run: tool("marea"), available: () => toolEnabled("marea") },
     ]},

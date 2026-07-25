@@ -87,7 +87,10 @@ const square = [[0, 0], [100, 0], [100, 100], [0, 100]];
   const cmdk = fs.readFileSync(path.join(root, "redesign", "cmdk.js"), "utf8");
   assert.match(html, /data-tool="reshape"/, "инструмент обязан быть на панели");
   assert.match(cmdk, /Изменить форму \(reshape\)/, "и в палитре");
-  assert.match(app, /dim: "polyline", split: "polyline", reshape: "polyline"/,
+  // Проверяем то, что и хотели: reshape собирает ломаную. Перечисление всего
+  // списка было хрупким — добавление выноски роняло проверку, хотя изменение
+  // формы никто не трогал.
+  assert.match(app, /const TOOL_GEOM = \{[^}]*reshape: "polyline"[^}]*\}/,
     "ломаная собирается тем же черчением, что разрез");
   assert.match(app, /function reshapeByLine\(cut\)/);
   assert.match(app, /Ломаная задевает \$\{results\.length\} объектов — выделите один/,

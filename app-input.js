@@ -419,6 +419,24 @@ cv.addEventListener("pointerdown", e => {
       return;
     }
     if (!state.drawing) { state.drawing = { pts: [] }; state.typed = ""; }
+    // Выноска: две точки — остриё у объекта и конец полки. Текст спрашиваем
+    // сразу: выноска без надписи бессмысленна, а дорисовывать её потом человек
+    // забудет и увезёт на лист пустую стрелку.
+    if (state.tool === "leader") {
+      if (Array.isArray(state.drawing.pts)) state.drawing.pts.push(s.p);
+      if (Array.isArray(state.drawing.pts) && state.drawing.pts.length === 2) {
+        const pts = state.drawing.pts;
+        state.drawing = null;
+        const слой = LAYER_BY_KIND["leader"];
+        if (!слой) { toast("Слой выносок недоступен", "warn"); return; }
+        uiPrompt("Надпись выноски", "", { ok: "Поставить", placeholder: "например: проектируемый проезд" })
+          .then(текст => {
+            if (текст == null) { draw(); return; }          // отменил — выноски нет
+            addFeature(слой.id, { line: pts, props: { text: String(текст).trim() } });
+          });
+      } else draw();
+      return;
+    }
     if (state.tool === "dim") {
       if (Array.isArray(state.drawing.pts)) state.drawing.pts.push(s.p);
       if (Array.isArray(state.drawing.pts) && state.drawing.pts.length === 2) {

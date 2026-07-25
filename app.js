@@ -96,6 +96,7 @@ const STYLES_V2 = {
   "boundary.line":      { stroke: "#1c1c1a", width: 2.5, dash: [14, 5, 4, 5] },
   "social.point":       { fill: "#2f6fde", stroke: "#1d4a9e", width: 1.2 },
   "dimension.line":     { stroke: "#44423c", width: 1 },
+  "leader.line":        { stroke: "#44423c", width: 0.8 },
 };
 
 // Слой — главный объект управления (MODEL-01): id (идентичность) отделён
@@ -211,6 +212,14 @@ const LAYERS_V2 = [
     import_only: true, generic: true,
     fields: [{ name: "elev", label: "высота, м", type: "real" }],
     fmt: { stroke: "#a9784e", width: 0.7, dash: null, label_field: null },
+    defaults: () => ({}) },
+  // Выноска живёт по образцу размера: это ЛИНИЯ на служебном слое, а не новый
+  // примитив. Текст хранится в props.text — так он попадает и в отмену, и в
+  // сохранение, и в обмен, ничего не зная про отрисовку.
+  { id: "annotation.leaders", title: "Выноска", kind: "leader",
+    semantic_class: null, geometry_type: "polyline", style_id: "leader.line",
+    annotation: true, tool: "leader",
+    fields: [{ name: "text", label: "надпись", type: "text" }],
     defaults: () => ({}) },
   { id: "annotation.dimensions", title: "Размер", kind: "dim",
     semantic_class: null, geometry_type: "polyline", style_id: "dimension.line",
@@ -1199,7 +1208,7 @@ const GEOM_OF_TOOL = { point: "point", polyline: "polyline",
 // «Разрезать» собирает ломаную тем же черчением, но объекта не создаёт —
 // поэтому он в TOOL_GEOM (сбор точек), но НЕ в GEOM_OF_TOOL (создание слоя
 // под геометрию и переключение активного слоя ему не нужны).
-const TOOL_GEOM = { ...GEOM_OF_TOOL, dim: "polyline", split: "polyline", reshape: "polyline" };
+const TOOL_GEOM = { ...GEOM_OF_TOOL, dim: "polyline", leader: "polyline", split: "polyline", reshape: "polyline" };
 
 function activeLayer() { return LAYER_BY_ID[state.activeLayerId] || null; }
 

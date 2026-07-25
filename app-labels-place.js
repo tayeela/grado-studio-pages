@@ -732,6 +732,45 @@ const LOD_PX = 2.5;
 //   - выделенное никогда: человек рассматривает именно его;
 //   - только замкнутый контур с заливкой: у линии вся суть в обводке;
 //   - порог по ОБЕИМ сторонам: узкая, но длинная зона рисуется полностью.
+// Выноска: остриё у объекта, наклонный отрезок, горизонтальная полка и
+// надпись над ней. Отдельного примитива под текст в модели нет — выноска это
+// ЛИНИЯ из двух точек на служебном слое, а надпись лежит в props.text. Так она
+// сама попадает в отмену, сохранение и обмен, ничего не зная про отрисовку.
+function drawLeader(f, st) {
+  const [a, b] = [f.line[0], f.line[f.line.length - 1]];
+  const [ax, ay] = w2s(a[0], a[1]);
+  const [bx, by] = w2s(b[0], b[1]);
+  const текст = (f.props && f.props.text) || "";
+  ctx.save();
+  ctx.strokeStyle = st.stroke || cvColor("boundary", "#44423c");
+  ctx.lineWidth = st.width || 0.8;
+  ctx.setLineDash([]);
+  // полка идёт в ту же сторону, куда уходит выноска: влево от острия — влево
+  const вправо = bx >= ax;
+  ctx.font = "600 11px sans-serif";
+  const ширина = Math.max(12, ctx.measureText(текст).width);
+  const конецПолки = bx + (вправо ? ширина : -ширина);
+  ctx.beginPath();
+  ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(конецПолки, by);
+  ctx.stroke();
+  // остриё: залитая стрелка вдоль отрезка
+  const угол = Math.atan2(by - ay, bx - ax);
+  const д = 7;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(ax + д * Math.cos(угол - 0.28), ay + д * Math.sin(угол - 0.28));
+  ctx.lineTo(ax + д * Math.cos(угол + 0.28), ay + д * Math.sin(угол + 0.28));
+  ctx.closePath();
+  ctx.fillStyle = st.stroke || cvColor("boundary", "#44423c");
+  ctx.fill();
+  if (текст) {
+    ctx.textAlign = вправо ? "left" : "right";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(текст, bx + (вправо ? 3 : -3), by - 4);
+  }
+  ctx.restore();
+}
+
 function drawTinyRing(f, st) {
   if (_renderTarget || !f.ring || !st.fill || st.fill === "transparent") return false;
   if (state.selectedIds.has(f.id)) return false;
@@ -802,7 +841,7 @@ function drawNow() {
       const stWidth = lgrWidth(st);
       ctx.lineWidth = stWidth; ctx.strokeStyle = canvasStrokeOf(f, st);
       if (drawTinyRing(f, st)) continue;
-      if (layer.kind === "dim" && f.line) {
+      if (layer.kind === "leader" && f.line) { drawLeader(f, st); } else if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
         const [ax, ay] = w2s(...f.line[0]);
         const [bx, by] = w2s(...f.line[f.line.length - 1]);

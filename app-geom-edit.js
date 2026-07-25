@@ -11,8 +11,11 @@
 // реально активный слой (тот же класс бага, что был в MODEL-01 на бэкенде).
 function addFeature(layerId, geom) {
   const L = LAYER_BY_ID[layerId];
-  const dimensionLayer = L && L.kind === "dim" && L.annotation;
-  if (!L || L.locked || L.import_only || (L.annotation && !dimensionLayer)) {
+  // Аннотационные слои закрыты для рисования — кроме тех, у которых ЕСТЬ свой
+  // инструмент: размер и выноска именно так и создаются. Признак берём у слоя,
+  // а не списком видов: заведут третью аннотацию — она заработает сама.
+  const рисуемаяАннотация = L && L.annotation && !!L.tool;
+  if (!L || L.locked || L.import_only || (L.annotation && !рисуемаяАннотация)) {
     toast(L?.locked ? `Слой «${L.title}» заблокирован — объект не создан`
       : "Выберите доступный проектный слой", "warn");
     return null;
