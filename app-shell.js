@@ -1240,3 +1240,43 @@ function initPanelResizer() {
   initSidePanelResizer({ resizerId: 'layers-resizer', panelId: 'layers-panel', otherPanelId: 'panel',
     side: 'left', min: 240, max: 520, def: 320, storageKey: 'grado_layers_width' });
 }
+
+// ---------- целостность загрузки ----------
+//
+// Приложение собрано из четырёх десятков отдельных файлов. Любой может не
+// прийти: сеть, обновление сайта (на проде поймали 503 ровно в момент подмены
+// файлов). Тогда половина функций просто отсутствует, а человек видит
+// невнятную «Ошибку интерфейса» и не понимает, что делать.
+//
+// Проверяем по одному опорному имени на файл — не всё подряд, а то, без чего
+// файл бесполезен. Список нарочно короткий: он должен пережить переименования
+// внутри файлов, но поймать «файл не загрузился вовсе».
+const ОПОРНЫЕ_ИМЕНА = [
+  ["drawChain", "отрисовка"], ["drawNow", "подписи и сцена"], ["refreshTep", "ТЭП"],
+  ["renderLayers", "панель слоёв"], ["hitTest", "правка геометрии"],
+  ["cursorPoint", "привязки"], ["openLayerStyle", "оформление слоёв"],
+  ["openDataFetch", "данные по области"], ["openAttributeTable", "таблица атрибутов"],
+  ["exportDxf", "выгрузка DXF"], ["parseInputLine", "точный ввод"],
+];
+function checkBundleIntegrity() {
+  const нет = ОПОРНЫЕ_ИМЕНА.filter(([имя]) => typeof window[имя] !== "function");
+  if (!нет.length) return true;
+  const бар = document.getElementById("errbar");
+  if (!бар) return false;
+  const текст = document.createElement("span");
+  текст.textContent = "Часть приложения не загрузилась (" +
+    нет.map(([, что]) => что).join(", ") + "). Обычно это обрыв сети или " +
+    "обновление сайта прямо сейчас. Обновите страницу — проект сохранён.";
+  const кнопка = document.createElement("button");
+  кнопка.type = "button";
+  кнопка.className = "errbar-close";
+  кнопка.textContent = "Обновить";
+  кнопка.onclick = () => location.reload();
+  бар.replaceChildren(текст, кнопка);
+  бар.hidden = false;
+  бар.style.display = "flex";
+  console.error("не загрузились части:", нет.map(([имя]) => имя));
+  return false;
+}
+// После полной загрузки: раньше проверять нельзя — отложенные файлы ещё идут.
+window.addEventListener("load", () => setTimeout(checkBundleIntegrity, 0));
