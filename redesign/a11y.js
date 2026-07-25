@@ -152,8 +152,15 @@
     queueMicrotask(() => {
       if (!overlay.isConnected) return;
       if (overlay.contains(document.activeElement) && document.activeElement !== dialog) return;
+      // Первый попавшийся контрол — не всегда безопасная цель. Чекбокс,
+      // переключатель, радиокнопка и ползунок меняют значение от пробела или
+      // стрелки, то есть случайное нажатие сразу правит проект. Такие пропускаем:
+      // фокус уходит на ближайшее поле ввода или список, а если их нет — на сам
+      // диалог, откуда Tab и Escape работают как обычно.
+      const ОПАСНЫЕ = '[type="checkbox"],[type="radio"],[type="range"],[type="color"]';
       const target = dialog.querySelector('[autofocus]')
-        || dialog.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])')
+        || dialog.querySelector(`input:not([type="hidden"]):not([disabled]):not(${ОПАСНЫЕ}), `
+          + 'select:not([disabled]), textarea:not([disabled])')
         || dialog.querySelector('button.primary:not([disabled])')
         || dialog.querySelector('button:not(.modal-x):not([disabled])');
       (target || dialog).focus({ preventScroll: true });

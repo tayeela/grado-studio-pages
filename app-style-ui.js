@@ -274,6 +274,11 @@ function layerCategoriesSection(cats, catsOffSet, categoryStyleOf) {
 
 // Секция «Показывать до масштаба»: городская выгрузка не нужна на обзорном
 // масштабе. Пресеты — рабочие знаменатели ЛГР, «всегда» снимает ограничение.
+// Масштабная видимость — свойство слоя, а не заголовок окна. Стояла первой
+// полосой во всю ширину (108px из 622 ради одного выпадающего списка), первой
+// же получала фокус при открытии и притягивала взгляд к второстепенному, пока
+// колонка настроек не влезала в высоту вдвое. Место секции — в общем ряду
+// свойств, ниже заливки, обводки и подписей.
 function layerScaleSection(scaleMaxNow) {
   return `
       <section class="style-section">
@@ -294,9 +299,7 @@ function styleSingleModePanel(ctx) {
   const { mode, layer, catsSection, scaleSection, hasFill, opacity, cur, dp, opt, hAngle,
     hDens, baseMarker, baseLabel, canLabel, labelCols, curLF, lfFont, targets } = ctx;
   return `    <div id="ls-single" role="tabpanel" aria-labelledby="style-mode-single"${mode === "single" ? "" : " hidden"}>
-      <label class="style-preset-label"><span>Базовый знак</span><select id="fmt-preset">${stylePickerOptions(layer.fmt && layer.fmt.style_ref)}</select></label>
       ${catsSection}
-      ${scaleSection}
       <div class="style-editor-grid">
         <div class="style-controls">
           <section class="style-section">
@@ -348,12 +351,18 @@ function styleSingleModePanel(ctx) {
             <div class="fmt-row fmt-copy-row"><label>Слой<select id="fmt-copy-to"><option value="__all__">— все слои —</option>${targets.map(l => `<option value="${escHtml(l.id)}">${escHtml(l.title)}</option>`).join("")}</select></label>
               <button id="fmt-copy" class="fmt-copy-btn">Скопировать</button></div>
           </section>` : ""}
+          ${scaleSection}
         </div>
         <aside class="style-preview-panel" aria-label="Предпросмотр оформления">
           <span class="style-preview-kicker">Предпросмотр</span>
           <div class="style-preview-canvas"><div id="fmt-preview-shape" class="style-preview-shape"></div></div>
           <div class="line-preview" id="fmt-dash-preview"></div>
           <p>Изменения сразу отображаются на холсте. «Отмена» вернёт исходный стиль.</p>
+          <!-- Базовый знак стоит здесь, а не первой строкой прокручиваемой
+               колонки: выбор знака и его вид — одно дело, и смотреть на них
+               врозь незачем. Заодно колонка предпросмотра перестаёт быть
+               наполовину пустой (336px из 618), пока справа не влезает вдвое. -->
+          <label class="style-preset-label"><span>Базовый знак</span><select id="fmt-preset" autofocus>${stylePickerOptions(layer.fmt && layer.fmt.style_ref)}</select></label>
         </aside>
       </div>
     </div>`;

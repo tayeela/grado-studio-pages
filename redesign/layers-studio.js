@@ -64,27 +64,10 @@
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeCreateMenu(); });
 
-  const styleBucket = (group, scope) => {
-    if (scope === 'project') return 'project';
-    const value = String(group || '').toLocaleLowerCase('ru');
-    if (/зоуит|охран|санитар|затоп|огранич/.test(value)) return 'zouit';
-    if (/генплан|функцион|москва|химки/.test(value)) return 'general';
-    if (/красн|лгр|линейн/.test(value)) return 'lgr';
-    return 'base';
-  };
-  const bucketLabel = { all: 'Все', favorites: 'Избранное', base: 'Базовые', lgr: 'ЛГР', zouit: 'ЗОУИТ', general: 'Генплан', project: 'Пользовательские' };
-  const geometryLabel = style => {
-    if (style?.line_marker || (!style?.fill && !style?.hatch)) return 'Линия';
-    return 'Полигон';
-  };
-  const styleCountLabel = count => {
-    const mod100 = count % 100;
-    const mod10 = count % 10;
-    const noun = mod100 >= 11 && mod100 <= 14 ? 'знаков' : mod10 === 1 ? 'знак' : mod10 >= 2 && mod10 <= 4 ? 'знака' : 'знаков';
-    return `${count} ${noun}`;
-  };
+  // (помощники каталога знаков — styleBucket, bucketLabel, geometryLabel,
+  //  styleCountLabel — удалены вместе с недостижимым каталогом.)
 
-  window.enhanceLayerStyleStudio = (overlay, layer) => {
+  window.enhanceLayerStyleStudio = overlay => {
     if (!overlay || overlay.dataset.studioEnhanced === 'true') return;
     overlay.dataset.studioEnhanced = 'true';
     overlay.classList.add('layer-style-overlay');
@@ -97,109 +80,17 @@
     const head = modal.querySelector('.modal-head');
     const mode = modal.querySelector('#ls-mode');
     const controls = grid.querySelector('.style-controls');
-    const presetLabel = preset.closest('.style-preset-label');
     const categories = modal.querySelector('#fmt-cats')?.closest('.style-categories-section');
     if (head && mode) head.insertBefore(mode, head.querySelector('.modal-x'));
-    if (controls && presetLabel) controls.prepend(presetLabel);
+    // Базовый знак остаётся там, где стоит в разметке — под предпросмотром.
+    // Раньше его переносили сюда, первой строкой прокручиваемой колонки: знак
+    // и его вид оказывались в разных концах окна, справа не влезало вдвое, а
+    // слева пустовало 336px из 618.
     if (controls && categories) controls.prepend(categories);
 
-    // The full standards catalogue remains available from the project toolbar.
-    // Inside layer styling, a compact preset selector keeps the task focused.
-    return;
-
-    const panel = document.createElement('aside');
-    panel.className = 'style-library-panel';
-    panel.setAttribute('aria-label', 'Каталог знаков');
-    panel.innerHTML = `<div class="style-library-head"><span><b>Стандарт и библиотека</b><small class="style-library-status">Выберите знак для слоя</small></span>
-        <button type="button" class="style-library-expand" title="Открыть редактор эталонных знаков" aria-label="Открыть библиотеку знаков"><svg class="ic"><use href="#ic-format"/></svg></button></div>
-      <label class="style-library-search"><svg class="ic"><use href="#i-search"/></svg><input type="search" placeholder="Поиск по названию или ID" aria-label="Поиск знака по названию или ID" autocomplete="off"></label>
-      <div class="style-library-tabs" role="tablist" aria-label="Стандарты знаков"></div>
-      <div class="style-library-list" role="listbox" aria-label="Знаки"></div>
-      <button type="button" class="style-create-custom"><svg class="ic"><use href="#ic-plus"/></svg>Создать пользовательский знак</button>`;
-    grid.appendChild(panel);
-
-    const bucketOrder = { base: 0, lgr: 1, zouit: 2, general: 3, project: 4 };
-    const allStyles = () => [
-      ...Object.entries(STYLES_V2).filter(([, style]) => style.title).map(([id, style]) => ({ id, style, scope: 'system' })),
-      ...Object.entries(state.projectStyles || {}).map(([id, style]) => ({ id, style, scope: 'project' })),
-    ].sort((a, b) => {
-      const bucketDiff = bucketOrder[styleBucket(a.style.group, a.scope)] - bucketOrder[styleBucket(b.style.group, b.scope)];
-      return bucketDiff || String(a.style.title || a.id).localeCompare(String(b.style.title || b.id), 'ru');
-    });
-    let bucket = 'all';
-    let query = '';
-    let favorites = [];
-    try { favorites = JSON.parse(localStorage.getItem('grado_style_favorites') || '[]'); } catch (_) {}
-    const favoriteSet = new Set(favorites);
-    const tabs = panel.querySelector('.style-library-tabs');
-    Object.entries(bucketLabel).forEach(([key, label]) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.setAttribute('role', 'tab');
-      button.dataset.bucket = key;
-      button.textContent = label;
-      button.addEventListener('click', () => { bucket = key; render(); });
-      tabs.appendChild(button);
-    });
-    const list = panel.querySelector('.style-library-list');
-    const status = panel.querySelector('.style-library-status');
-    const render = () => {
-      tabs.querySelectorAll('button').forEach(button => button.setAttribute('aria-selected', String(button.dataset.bucket === bucket)));
-      const low = query.trim().toLocaleLowerCase('ru');
-      const selected = preset.value;
-      const filtered = allStyles().filter(item => {
-        const itemBucket = styleBucket(item.style.group, item.scope);
-        const hitBucket = bucket === 'all' || (bucket === 'favorites' && favoriteSet.has(item.id)) || itemBucket === bucket;
-        const haystack = `${item.style.title || ''} ${item.id} ${item.style.group || ''}`.toLocaleLowerCase('ru');
-        return hitBucket && (!low || haystack.includes(low));
-      }).sort((a, b) => {
-        if (a.id === selected) return -1;
-        if (b.id === selected) return 1;
-        if (favoriteSet.has(a.id) !== favoriteSet.has(b.id)) return favoriteSet.has(a.id) ? -1 : 1;
-        return 0;
-      });
-      if (status) status.textContent = `${styleCountLabel(filtered.length)}${selected ? ' · текущий знак сверху' : ''}`;
-      list.innerHTML = '';
-      if (!filtered.length) {
-        list.innerHTML = `<div class="style-library-empty">${bucket === 'favorites' && favoriteSet.size === 0
-          ? 'Избранных знаков пока нет. Добавьте знак кнопкой-меткой в каталоге.'
-          : 'Знаки не найдены. Измените запрос или выберите другой стандарт.'}</div>`;
-        return;
-      }
-      filtered.forEach(item => {
-        const row = document.createElement('div');
-        row.className = 'style-library-row' + (item.id === selected ? ' active' : '');
-        row.setAttribute('role', 'option');
-        row.setAttribute('aria-selected', String(item.id === selected));
-        row.innerHTML = `<button type="button" class="style-library-choice">
-            <span class="style-library-sample" aria-hidden="true">${styleSampleSVG(item.style, { w: 66, h: 24 })}</span>
-            <span class="style-library-copy"><span class="style-library-title-line"><b>${escHtml(item.style.title || item.id)}</b>${item.id === selected ? '<em>текущий</em>' : ''}</span><small>${escHtml(item.style.group || (item.scope === 'project' ? 'Этот проект' : 'Базовые'))} · ${geometryLabel(item.style)}</small></span>
-          </button><button type="button" class="style-favorite${favoriteSet.has(item.id) ? ' on' : ''}" aria-label="${favoriteSet.has(item.id) ? 'Убрать из избранного' : 'Добавить в избранное'}" title="Избранное"><svg class="ic"><use href="#ic-label"/></svg></button>`;
-        row.querySelector('.style-library-choice').addEventListener('click', () => {
-          preset.value = item.id;
-          preset.dispatchEvent(new Event('change', { bubbles: true }));
-          requestAnimationFrame(render);
-        });
-        row.querySelector('.style-favorite').addEventListener('click', () => {
-          if (favoriteSet.has(item.id)) favoriteSet.delete(item.id); else favoriteSet.add(item.id);
-          try { localStorage.setItem('grado_style_favorites', JSON.stringify([...favoriteSet])); } catch (_) {}
-          render();
-        });
-        list.appendChild(row);
-      });
-    };
-    panel.querySelector('input').addEventListener('input', event => { query = event.target.value; render(); });
-    panel.querySelector('.style-library-expand').addEventListener('click', () => document.getElementById('btn-style-lib')?.click());
-    panel.querySelector('.style-create-custom').addEventListener('click', async () => {
-      const newId = await createProjectStyle();
-      if (!newId) return;
-      preset.innerHTML = stylePickerOptions(newId);
-      preset.value = newId;
-      preset.dispatchEvent(new Event('change', { bubbles: true }));
-      bucket = 'project';
-      render();
-    });
-    preset.addEventListener('change', () => requestAnimationFrame(render));
-    render();
+    // Каталог знаков живёт в панели проекта, а здесь достаточно компактного
+    // выбора базового знака. Полторы сотни строк каталога стояли ниже
+    // безусловного `return` — недостижимые с самого появления: они не
+    // выполнялись ни разу, но исправно попадали в загрузку и в поиск по коду.
   };
 })();

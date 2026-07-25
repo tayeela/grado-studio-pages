@@ -76,14 +76,29 @@ body[data-layer-view="legend"] .layer-create-main,body[data-layer-view="legend"]
 .layer-style-overlay{left:var(--layer-panel-width);top:58px;padding:16px;background:color-mix(in srgb,var(--canvas-bg) 24%,transparent);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;pointer-events:auto;overflow:hidden}
 body.layers-panel-hidden .layer-style-overlay{left:0}
 .layer-style-overlay .layer-style-studio{position:relative;pointer-events:auto;width:min(980px,100%);min-width:0;max-width:980px;flex:0 1 980px;height:min(720px,calc(100vh - 90px));max-height:calc(100vh - 90px);border:1px solid var(--hairline-2);border-radius:var(--r-lg);box-shadow:var(--shadow-lg);padding:0;background:var(--glass-strong)}
-.layer-style-studio .modal-head{height:48px;min-height:48px;padding:0 400px 0 16px;border-bottom:1px solid var(--hairline)}
+/* Шапка держит заголовок и переключатель режимов в одном ряду СРЕДСТВАМИ
+   ПОТОКА. Раньше переключатель висел absolute шириной 320px, а шапке
+   выдавали padding-right:400px под него — два числа, которые обязаны были
+   совпадать с содержимым и не совпали: режимов стало три, сетка осталась
+   двухколоночной, третья кнопка ушла на второй ряд и вылезла за шапку на
+   23px, а заголовок при этом резался на 463px при свободных 978. */
+.layer-style-studio .modal-head{height:auto;min-height:48px;padding:6px 56px 6px 16px;
+  display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--hairline)}
+.layer-style-studio .modal-head-copy{flex:1 1 auto;min-width:0}
 .layer-style-studio .modal-x{top:9px;right:12px;transform:none}
 .layer-style-studio .style-editor-body{flex:1;min-height:0;overflow:hidden;padding:0!important;display:block;gap:0!important}
-.layer-style-studio #ls-mode{position:absolute;top:6px;right:56px;width:320px;height:36px;margin:0;z-index:2;box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-.layer-style-studio #ls-mode .seg-btn{width:100%;min-width:0;height:28px;margin:0;padding:0 10px;white-space:nowrap}
+/* Колонок ровно столько, сколько кнопок: auto-fit по содержимому.
+   Числа «две колонки» тут больше нет — добавить режим можно, не трогая CSS. */
+.layer-style-studio #ls-mode{position:static;flex:0 0 auto;width:auto;height:36px;margin:0;
+  box-sizing:border-box;display:flex}
+/* Кнопка шириной по своей подписи, а не по равной доле: при делении поровну
+   «По значению поля» не влезало в свои 112px и резалось на 5px. */
+.layer-style-studio #ls-mode .seg-btn{flex:0 0 auto;width:auto;min-width:0;height:28px;margin:0;padding:0 12px;white-space:nowrap}
 .layer-style-studio #ls-single,.layer-style-studio #ls-rules{min-height:0}
 .layer-style-studio #ls-single{height:100%;overflow:hidden}
-.layer-style-studio .style-preset-label{display:flex;flex-direction:column;gap:6px;padding:2px 0 14px;border-bottom:1px solid var(--hairline);font-size:var(--fs-10)}
+/* Базовый знак переехал под предпросмотр: подчёркивание снизу там ни к
+   чему — оно отделяло его от списка настроек, которого рядом больше нет. */
+.layer-style-studio .style-preset-label{display:flex;flex-direction:column;gap:6px;padding:14px 0 2px;margin-top:14px;border-top:1px solid var(--hairline);font-size:var(--fs-10)}
 .layer-style-studio .style-preset-label select{height:36px}
 .layer-style-studio .style-editor-grid{height:100%;min-height:0;display:grid;grid-template-columns:280px minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:0;border-top:1px solid var(--hairline);overflow:hidden}
 .layer-style-studio .style-controls{grid-column:2;min-width:0;min-height:0;height:100%;max-height:100%;align-self:stretch;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;padding:14px max(18px,calc((100% - 640px)/2)) 22px;border-left:1px solid var(--hairline);scrollbar-gutter:stable}
@@ -188,8 +203,9 @@ body.layers-panel-hidden .layer-style-overlay{left:0}
 @media (max-width:640px){
   .layer-style-overlay{padding:0}
   .layer-style-overlay .layer-style-studio{width:100%;height:calc(100vh - 58px);max-height:calc(100vh - 58px);border-width:0;border-radius:0}
-  .layer-style-studio .modal-head{height:86px;min-height:86px;padding:0 54px 38px 12px;align-items:center}
-  .layer-style-studio #ls-mode{top:auto;right:12px;bottom:6px;left:12px;width:auto;height:36px}
+  /* Узко — переключатель переносится под заголовок сам, переносом строки. */
+  .layer-style-studio .modal-head{flex-wrap:wrap;padding:8px 54px 8px 12px}
+  .layer-style-studio #ls-mode{flex:1 0 100%}
   .category-style-grid{grid-template-columns:1fr}
 }
 @media (max-width:760px){
