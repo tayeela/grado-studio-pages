@@ -73,6 +73,7 @@
       { t: "Найти объект…", run: () => window.openFindFeature && window.openFindFeature() },
       { t: "Выбрать по выражению…", run: () => window.openSelectBy && window.openSelectBy("expression"), available: () => buttonEnabled("btn-select-by") },
       { t: "Выбрать по расположению…", run: () => window.openSelectBy && window.openSelectBy("location"), available: () => buttonEnabled("btn-select-by") },
+      { t: "Сводка по выборке: площади и доли по полю…", run: () => call("openSelectionSummary") },
       { t: "Поворот выделения", k: "R", run: tool("rotate"), available: () => toolEnabled("rotate") },
       { t: "Масштаб выделения", run: tool("scale"), available: () => toolEnabled("scale") },
       { t: "Зеркало", run: tool("mirror"), available: () => toolEnabled("mirror") },
