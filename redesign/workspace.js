@@ -143,4 +143,43 @@
   layerPanel?.addEventListener('keydown', event => {
     if (event.key === 'Escape' && compactLayers.matches) setLayersHidden(true);
   });
+
+  // Подписи режимов схлопываются ПО МЕСТУ, а не по ширине окна.
+  //
+  // Порог был задан медиазапросом на 1400px, и он не знал ни про длину имени
+  // проекта, ни про другой язык интерфейса: при длинном имени последняя вкладка
+  // молча обрезалась (у полосы стоял overflow:hidden) — человек видел
+  // «Измере…», наезжающее на поиск. Теперь меряем: если шапка не помещается,
+  // подписи гаснут, кроме активной; освободилось место — возвращаются.
+  const header = document.querySelector('header');
+  const modes = document.querySelector('.workspace-modes');
+  if (header && modes) {
+    let ждём = false;
+    const подогнать = () => {
+      ждём = false;
+      // сначала пробуем в полном виде — иначе однажды схлопнувшись, шапка
+      // осталась бы такой навсегда: в узком виде она всегда помещается
+      header.classList.remove('modes-compact');
+      if (header.scrollWidth > header.clientWidth + 1) header.classList.add('modes-compact');
+    };
+    const запросить = () => { if (ждём) return; ждём = true; requestAnimationFrame(подогнать); };
+    // Наблюдать ОДНУ шапку недостаточно: её ширина равна окну и не меняется,
+    // когда переполняется содержимое. Поэтому смотрим за тем, что растёт, —
+    // полосой режимов и именем проекта.
+    if (typeof ResizeObserver === 'function') {
+      const наблюдатель = new ResizeObserver(запросить);
+      [header, modes, document.getElementById('project-name')].forEach(el => el && наблюдатель.observe(el));
+    }
+    window.addEventListener('resize', запросить);
+    // На ввод имени пересчитываем сразу: событий немного, копить нечего, а
+    // через кадр это не проверить в фоновой вкладке — там кадров нет.
+    document.getElementById('project-name')?.addEventListener('input', подогнать);
+    // Шрифты приходят позже разметки и делают надписи шире: без этого шапка
+    // мерилась по запасному шрифту и переполнялась уже после проверки.
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(подогнать).catch(() => {});
+    // Первую подгонку делаем СРАЗУ, а не по кадру: в фоновой вкладке кадры не
+    // идут вовсе, и шапка осталась бы неподогнанной до первого показа.
+    подогнать();
+    setTimeout(подогнать, 0);          // после того, как разметка встала целиком
+  }
 })();

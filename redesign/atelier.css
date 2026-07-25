@@ -124,7 +124,7 @@ header .hsep{margin-inline:0}
 /* min-width:0 + overflow:hidden — страховка: если подписи всё же не помещаются
    (другой шрифт, локаль, масштаб), переключатель обрежется сам, а не вытолкнет
    кнопки справа за пределы экрана. */
-.workspace-modes{display:flex;align-self:stretch;min-width:0;overflow:hidden;border-left:1px solid var(--hairline);border-right:1px solid var(--hairline)}
+.workspace-modes{display:flex;align-self:stretch;flex:0 0 auto;overflow:visible;border-left:1px solid var(--hairline);border-right:1px solid var(--hairline)}
 .workspace-modes button{position:relative;display:flex;align-items:center;gap:7px;padding:0 14px;color:var(--text-2);font-size:var(--fs-12);font-weight:560;white-space:nowrap}
 .workspace-modes button+button{border-left:1px solid var(--hairline)}
 .workspace-modes button:hover{background:var(--field-bg);color:var(--text)}
@@ -187,6 +187,11 @@ body.layers-panel-hidden #layers-panel{margin-left:calc(var(--layer-panel-width)
   transition:left var(--dur-2) var(--ease-out);
 }
 body.layers-panel-hidden #toolbar{left:12px}
+/* Во время перетаскивания границы панели ширина меняется НЕПРЕРЫВНО, а переход
+   по left длится 0.18 с — рельс инструментов тянулся за курсором с задержкой и
+   дёргался. Переход нужен только для показа и скрытия панели, там смена
+   одномоментная. Класс panel-resizing уже ставится на время жеста. */
+body.panel-resizing #toolbar{transition:none}
 #toolbar .rail-group,#toolbar .more-tools{display:none!important}
 #toolbar .tool{width:36px;height:36px;min-height:36px;padding:0;border-radius:var(--r-sm);display:flex;justify-content:center;font-size:0;gap:0}
 #toolbar .tool .ic{width:18px;height:18px}
@@ -234,11 +239,12 @@ body[data-workspace-mode="measure"] #toolbar [data-workspace-tool]:not([data-wor
    1261–1358px, где правые кнопки (в т.ч. «Скрыть инспектор») выдавливались за
    вьюпорт и становились недоступны — ровно на самой ходовой ширине 1280px.
    Схлопываем подписи заранее. */
-@media (max-width:1400px){
-  .workspace-modes button{padding-inline:10px}
-  .workspace-modes button span{display:none}
-  .workspace-modes button[aria-pressed="true"] span{display:inline}
-}
+/* Подписи режимов схлопываются по МЕСТУ, а не по ширине окна: порог 1400px
+   не знал ни про длину имени проекта, ни про другой язык, и последняя вкладка
+   молча обрезалась. Класс ставит наблюдатель за шапкой (redesign/workspace.js). */
+header.modes-compact .workspace-modes button{padding-inline:10px}
+header.modes-compact .workspace-modes button span{display:none}
+header.modes-compact .workspace-modes button[aria-pressed="true"] span{display:inline}
 @media (max-width:1260px){
   header .btn[data-menu="menu-out"]{display:none}
 }
