@@ -20,7 +20,7 @@ body[data-layer-view="legend"] .layer-create-main,body[data-layer-view="legend"]
 
 .layer-search{margin-block:9px 6px}
 .layer-filter-bar{display:flex;gap:4px;margin:0 12px 8px;overflow:auto;scrollbar-width:none}.layer-filter-bar::-webkit-scrollbar{display:none}
-.layer-filter-bar button{height:28px;display:flex;align-items:center;gap:4px;padding:0 8px;border:1px solid var(--field-border);border-radius:var(--r-pill);color:var(--text-2);font-size:9.5px;white-space:nowrap}
+.layer-filter-bar button{height:28px;display:flex;align-items:center;gap:4px;padding:0 8px;border:1px solid var(--field-border);border-radius:var(--r-pill);color:var(--text-2);font-size:var(--fs-10);white-space:nowrap}
 .layer-filter-bar button:hover{background:var(--field-bg)}.layer-filter-bar button[aria-pressed="true"]{background:var(--accent-weak);border-color:var(--accent-line);color:var(--accent);font-weight:var(--fw-bold)}
 .layer-filter-bar button span{font:var(--fs-9) var(--font-mono);color:var(--muted)}.layer-filter-bar button[aria-pressed="true"] span{color:inherit}
 .layer-search-empty{min-height:210px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:24px 18px;color:var(--muted);text-align:center}.layer-search-empty[hidden]{display:none}
@@ -52,7 +52,7 @@ body[data-layer-view="legend"] .layer-create-main,body[data-layer-view="legend"]
 #layers-panel .layer-row .sw-svg{width:54px;height:20px;border-radius:var(--r-sm);background:color-mix(in srgb,var(--field-bg) 75%,transparent)}
 .layer-copy{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
 .layer-title-line{display:flex;align-items:center;gap:6px;min-width:0}
-#layers-panel .layer-row .nm{font-size:11.5px;line-height:1.2}
+#layers-panel .layer-row .nm{font-size:var(--fs-12);line-height:1.2}
 #layers-panel .layer-row .cnt{margin-left:auto;font-size:var(--fs-10)}
 .layer-meta{display:flex;align-items:center;gap:7px;min-width:0;color:var(--faint);font-size:var(--fs-9);text-transform:uppercase;letter-spacing:.035em}
 .layer-geometry{display:flex;align-items:center;gap:3px}.layer-geometry .ic{width:11px;height:11px}

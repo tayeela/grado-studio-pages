@@ -124,7 +124,7 @@ header{
   box-shadow:var(--glass-hi),var(--shadow-md);border-radius:var(--r-md)}
 .cv-compass{top:16px;right:16px;width:40px;height:40px;display:grid;place-items:center;color:var(--text-2)}
 .cv-zoom{right:16px;bottom:52px;display:flex;flex-direction:column;overflow:hidden}
-.cv-zoom button{width:40px;height:36px;display:grid;place-items:center;color:var(--text-2);font-size:17px;transition:background var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.cv-zoom button{width:40px;height:36px;display:grid;place-items:center;color:var(--text-2);font-size:var(--fs-18);transition:background var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
 .cv-zoom button:hover{background:var(--field-bg);color:var(--text)}
 .cv-zoom button+button{border-top:1px solid var(--hairline)}
 /* Обзор объектов с клавиатуры: вне фокуса не занимает места и не мешает

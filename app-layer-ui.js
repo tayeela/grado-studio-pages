@@ -381,6 +381,49 @@ async function tepForVariant(features, prms) {
     return r.ok ? await r.json() : null;
   } catch (e) { return null; }
 }
+// ---- Разметка окна вариантов ----------------------------------------------
+// Строители вынесены из openVariants: они не трогают состояние окна и читаются
+// сами по себе. Единственная связь с окном — набор отмеченных для сравнения id,
+// он передаётся параметром.
+function variantMetricHtml(value, unit) {
+  const shown = value == null || value === "" ? "—" : escHtml(String(value));
+  return `<span class="var-metric"><b>${shown}</b><small>${escHtml(unit)}</small></span>`;
+}
+
+function variantSummaryHtml(summary) {
+  if (!summary) return `<div class="var-summary loading">Рассчитываю паспорт ТЭП…</div>`;
+  if (!summary.hasTerritory) return `<div class="var-summary missing">Для расчёта нужна граница территории</div>`;
+  const status = summary.warnings
+    ? `<span class="var-health warning">Проверок: ${summary.warnings}</span>`
+    : `<span class="var-health ok">Без предупреждений</span>`;
+  return `<div class="var-summary">${variantMetricHtml(summary.spp, "тыс. м² СПП")}${
+    variantMetricHtml(summary.density, "тыс. м²/га")}${
+    variantMetricHtml(summary.population, "чел.")}${status}</div>`;
+}
+
+function variantCurrentHtml(currentSummary) {
+  const p = params();
+  return `<div class="var-current-copy"><span class="var-eyebrow">Рабочее состояние</span><b>Текущий сценарий</b>
+      <small>Целевая плотность ${escHtml(String(p.density))} тыс. м²/га · жильё ${escHtml(String(p.ratio_zh))}%</small></div>
+      ${variantSummaryHtml(currentSummary)}`;
+}
+
+function variantRowsHtml(sel) {
+  const vs = state.variants || [];
+  if (!vs.length) return `<div class="var-empty"><b>Сохранённых вариантов пока нет</b><span>Зафиксируйте текущую посадку или создайте три сценария плотности для первого сравнения.</span></div>`;
+  return vs.map(v => `<article class="var-item${v.baseline ? " baseline" : ""}" data-id="${escHtml(v.id)}">
+      <label class="var-select" title="Добавить в сравнение"><input type="checkbox" class="var-cmp" data-id="${escHtml(v.id)}" aria-label="Добавить вариант ${escHtml(v.name)} в сравнение" ${sel.has(v.id) ? "checked" : ""}><span></span></label>
+      <div class="var-card-main"><div class="var-title-row"><span class="var-nm">${escHtml(v.name)}</span>${v.baseline ? '<span class="var-baseline-badge">Базовый</span>' : ""}</div>
+        <span class="var-meta">${v.source === "generator" ? `Сценарий плотности · цель ${escHtml(String(v.params?.density ?? "—"))} тыс. м²/га` : "Снимок проекта"} · ${v.features.length} объектов · ${escHtml(v.createdAt || "")}</span>
+        ${variantSummaryHtml(v.tepSummary)}</div>
+      <div class="var-card-actions">
+        <button class="var-base" data-id="${escHtml(v.id)}" aria-label="${v.baseline ? "Базовый вариант" : "Сделать базовым"}: ${escHtml(v.name)}">${v.baseline ? "Базовый вариант" : "Сделать базовым"}</button>
+        <button class="var-load" data-id="${escHtml(v.id)}" aria-label="Загрузить вариант ${escHtml(v.name)}">Загрузить</button>
+        <button class="var-del" data-id="${escHtml(v.id)}" aria-label="Удалить вариант ${escHtml(v.name)}" title="Удалить вариант"><svg class="ic"><use href="#ic-trash"/></svg></button>
+      </div>
+    </article>`).join("");
+}
+
 function openVariants() {
   closePopups();
   const overlay = document.createElement("div");
@@ -397,43 +440,9 @@ function openVariants() {
     while (names.has(`${base} ${index}`)) index += 1;
     return `${base} ${index}`;
   }
-  function metric(value, unit) {
-    const shown = value == null || value === "" ? "—" : escHtml(String(value));
-    return `<span class="var-metric"><b>${shown}</b><small>${escHtml(unit)}</small></span>`;
-  }
-  function summaryHtml(summary) {
-    if (!summary) return `<div class="var-summary loading">Рассчитываю паспорт ТЭП…</div>`;
-    if (!summary.hasTerritory) return `<div class="var-summary missing">Для расчёта нужна граница территории</div>`;
-    const status = summary.warnings
-      ? `<span class="var-health warning">Проверок: ${summary.warnings}</span>`
-      : `<span class="var-health ok">Без предупреждений</span>`;
-    return `<div class="var-summary">${metric(summary.spp, "тыс. м² СПП")}${metric(summary.density, "тыс. м²/га")}${
-      metric(summary.population, "чел.")}${status}</div>`;
-  }
-  function currentHtml() {
-    const p = params();
-    return `<div class="var-current-copy"><span class="var-eyebrow">Рабочее состояние</span><b>Текущий сценарий</b>
-      <small>Целевая плотность ${escHtml(String(p.density))} тыс. м²/га · жильё ${escHtml(String(p.ratio_zh))}%</small></div>
-      ${summaryHtml(currentSummary)}`;
-  }
-  function rowsHtml() {
-    const vs = state.variants || [];
-    if (!vs.length) return `<div class="var-empty"><b>Сохранённых вариантов пока нет</b><span>Зафиксируйте текущую посадку или создайте три сценария плотности для первого сравнения.</span></div>`;
-    return vs.map(v => `<article class="var-item${v.baseline ? " baseline" : ""}" data-id="${escHtml(v.id)}">
-      <label class="var-select" title="Добавить в сравнение"><input type="checkbox" class="var-cmp" data-id="${escHtml(v.id)}" aria-label="Добавить вариант ${escHtml(v.name)} в сравнение" ${sel.has(v.id) ? "checked" : ""}><span></span></label>
-      <div class="var-card-main"><div class="var-title-row"><span class="var-nm">${escHtml(v.name)}</span>${v.baseline ? '<span class="var-baseline-badge">Базовый</span>' : ""}</div>
-        <span class="var-meta">${v.source === "generator" ? `Сценарий плотности · цель ${escHtml(String(v.params?.density ?? "—"))} тыс. м²/га` : "Снимок проекта"} · ${v.features.length} объектов · ${escHtml(v.createdAt || "")}</span>
-        ${summaryHtml(v.tepSummary)}</div>
-      <div class="var-card-actions">
-        <button class="var-base" data-id="${escHtml(v.id)}" aria-label="${v.baseline ? "Базовый вариант" : "Сделать базовым"}: ${escHtml(v.name)}">${v.baseline ? "Базовый вариант" : "Сделать базовым"}</button>
-        <button class="var-load" data-id="${escHtml(v.id)}" aria-label="Загрузить вариант ${escHtml(v.name)}">Загрузить</button>
-        <button class="var-del" data-id="${escHtml(v.id)}" aria-label="Удалить вариант ${escHtml(v.name)}" title="Удалить вариант"><svg class="ic"><use href="#ic-trash"/></svg></button>
-      </div>
-    </article>`).join("");
-  }
   function render() {
-    $("var-current").innerHTML = currentHtml();
-    $("var-list").innerHTML = rowsHtml();
+    $("var-current").innerHTML = variantCurrentHtml(currentSummary);
+    $("var-list").innerHTML = variantRowsHtml(sel);
     const generateButton = $("var-generate");
     if (generateButton) {
       generateButton.disabled = generating;

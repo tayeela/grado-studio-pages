@@ -281,7 +281,7 @@ header.modes-compact .workspace-modes button[aria-pressed="true"] span{display:i
 @media (max-width:760px){
   header{padding-inline:8px}
   header>.spacer{display:none}
-  .logo{font-size:14px}
+  .logo{font-size:var(--fs-13)}
   .workspace-modes{flex:1;justify-content:center;border-right:0}
   .workspace-modes button{padding-inline:9px}
   .workspace-modes button[aria-pressed="true"] span{display:none}

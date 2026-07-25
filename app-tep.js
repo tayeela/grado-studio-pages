@@ -630,6 +630,52 @@ function cvReaderLayerStep(delta) {
     });
   }
 }
+// Унифицированный блок «Стиль и оформление объекта»: одна понятная секция
+// вместо двух дублирующих («Стиль (библиотека)» + «Оформление объекта»).
+// Знак из библиотеки влияет на .grado и стандартный экспорт; дополнительные
+// правки — только на экран и режим «знаки: как на холсте».
+// «Как у слоя» = не переопределять f.style_id.
+function objectStyleSectionHtml(f, L, cur) {
+  if (!L || L.annotation) return "";
+  return `
+    <div class="prop-sub">Стиль и оформление</div>
+    <label>Знак из библиотеки
+      <select id="f-style">
+        <option value="">как у слоя</option>
+        ${stylePickerOptions(f.style_id || "")}
+      </select>
+    </label>
+    <label class="chk"><input type="checkbox" id="f-fmt-on" ${f.fmt ? "checked" : ""}> дополнительные правки отображения (холст)</label>
+    ${f.fmt ? `<label>Заливка<div id="f-fmt-fill"></div></label>
+      <label>Обводка<div id="f-fmt-stroke"></div></label>
+      <label>Прозрачность, %<input type="range" id="f-fmt-op" min="10" max="100" step="5" value="${Math.round((f.fmt.fillOpacity ?? cur.fillOpacity ?? 1) * 100)}"></label>` : ""}
+    <div class="metric prop-style-note">Правки влияют только на экран и «знаки: как на холсте». Для стандартного PDF — используйте «Знак из библиотеки» или правила слоя.</div>`;
+}
+
+// Выбор знака для объекта. Отдельный пункт списка заводит новый знак проекта
+// и требует перерисовки формы; отказ от создания возвращает список к прежнему
+// значению, иначе в поле остался бы висеть несуществующий выбор.
+function bindObjectStyleSelect(f) {
+  const styleSel = document.getElementById("f-style");
+  if (!styleSel) return;
+  styleSel.addEventListener("change", async () => {
+    if (styleSel.value === "__create_project_style__") {
+      const newId = await createProjectStyle();
+      if (newId) {
+        f.style_id = newId;
+        renderProps();                 // перерисовать, чтобы новый знак попал в список
+      } else {
+        styleSel.value = f.style_id || "";
+      }
+      return;
+    }
+    snapshot();
+    if (styleSel.value) f.style_id = styleSel.value;
+    else delete f.style_id;
+    afterChange(); draw();
+  });
+}
+
 function renderProps() {
   announceSelection();
   const el = document.getElementById("props-body");
@@ -677,29 +723,7 @@ function renderProps() {
   const prov = f.prov
     ? `<div class="metric prov">источник: ${escHtml(f.prov.source)}${f.prov.source_date ? " · " + escHtml(f.prov.source_date) : ""}</div>`
     : "";
-  // === Унифицированный блок "Стиль и оформление объекта" ===
-  // Цель: одна понятная секция вместо двух дублирующих ("Стиль (библиотека)" + "Оформление объекта").
-  // - Выбор знака из библиотеки (влияет на .grado и стандартный экспорт).
-  // - Дополнительные правки только для отображения (холст + режим "как на холсте").
-  // "Как у слоя" = не переопределять f.style_id.
-  let styleHtml = "";
-  if (L && !L.annotation) {
-    const curStyle = f.style_id || "";
-    const opts = stylePickerOptions(curStyle);
-    styleHtml = `
-    <div class="prop-sub">Стиль и оформление</div>
-    <label>Знак из библиотеки
-      <select id="f-style">
-        <option value="">как у слоя</option>
-        ${opts}
-      </select>
-    </label>
-    <label class="chk"><input type="checkbox" id="f-fmt-on" ${f.fmt ? "checked" : ""}> дополнительные правки отображения (холст)</label>
-    ${f.fmt ? `<label>Заливка<div id="f-fmt-fill"></div></label>
-      <label>Обводка<div id="f-fmt-stroke"></div></label>
-      <label>Прозрачность, %<input type="range" id="f-fmt-op" min="10" max="100" step="5" value="${Math.round((f.fmt.fillOpacity ?? cur.fillOpacity ?? 1) * 100)}"></label>` : ""}
-    <div class="metric" style="font-size:11px;color:var(--muted);margin-top:2px">Правки влияют только на экран и «знаки: как на холсте». Для стандартного PDF — используйте «Знак из библиотеки» или правила слоя.</div>`;
-  }
+  const styleHtml = objectStyleSectionHtml(f, L, cur);
   const onlyBoundary = f.kind === "boundary" && state.features.every(item =>
     item && (item.kind === "boundary" || item.kind === "dim"));
   const nextStepHtml = onlyBoundary ? `<div class="props-next-step" role="region" aria-label="Следующий шаг проекта">
@@ -727,24 +751,7 @@ function renderProps() {
     b.onclick = () => applyFillet(f);
     el.appendChild(b);
   }
-  // Обработчики унифицированного блока стиля/оформления объекта
-  const styleSel = document.getElementById("f-style");
-  if (styleSel) styleSel.addEventListener("change", async () => {
-    if (styleSel.value === "__create_project_style__") {
-      const newId = await createProjectStyle();
-      if (newId) {
-        f.style_id = newId;
-        renderProps(); // refresh to show new
-      } else {
-        styleSel.value = f.style_id || "";
-      }
-      return;
-    }
-    snapshot();
-    if (styleSel.value) f.style_id = styleSel.value;
-    else delete f.style_id;
-    afterChange(); draw();
-  });
+  bindObjectStyleSelect(f);
   const bind = (id, key, cast) => {
     const inp = document.getElementById(id);
     if (!inp) return;

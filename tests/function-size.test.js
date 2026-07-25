@@ -34,9 +34,14 @@ const БЮДЖЕТ = {
   "app-layer-panel.js renderLayers": 110,   // 270 -> 110: строка слоя вынесена
   "app-layer-panel.js layerPanelRow": 166,  // вынесено из renderLayers дословно
   "app-style-ui.js openStyleLibrary": 208,  // 258 -> 206: список, свотч и разметка вынесены
-  "app-layer-ui.js openVariants": 206,
-  "app-shell.js applyRestoredState": 182,
-  "app-tep.js renderProps": 178,
+  // 206 → 172: строители разметки (метрика, паспорт ТЭП, текущий сценарий,
+  // карточки вариантов) вынесены наружу — они не трогают состояние окна.
+  "app-layer-ui.js openVariants": 172,
+  // applyRestoredState: 182 → 135, ниже порога — запись убрана. Вынесены
+  // rehomeOrphanFeatures (L2b-миграция) и restoreLayerProperties (карты
+  // «id → значение» для названий, видимости, порядка, оформления, полей).
+  // renderProps: 178 → 139, ниже порога. Вынесены objectStyleSectionHtml
+  // (разметка блока «Стиль и оформление») и bindObjectStyleSelect.
   "app-data.js openFgistpDialog": 158,
   "app-attr.js openAttributeTable": 157,
 };

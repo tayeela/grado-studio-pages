@@ -872,6 +872,65 @@ function normalizeRestoredState(payload) {
   return normalized;
 }
 
+// L2b-миграция: старые проекты ссылались на удалённые пресет-слои
+// (project.territory.boundary и т.п.). Осиротевшие объекты переселяем в
+// воссозданные слои их вида, иначе они молча исчезли бы с холста.
+function rehomeOrphanFeatures() {
+  const migrated = {};
+  for (const f of state.features) {
+    if (layerOf(f)) continue;                       // слой резолвится (приёмник/пользовательский) — ок
+    const base = BASE_KIND_BY_KIND[f.kind];
+    if (!base) continue;                            // неизвестный вид — оставляем как есть, не роняем
+    let L = migrated[f.kind] ||
+            LAYERS_V2.find(l => l.kind === f.kind && l.user_created);
+    if (!L) L = createUserLayer({ kind: f.kind, title: base.label });
+    migrated[f.kind] = L;
+    f.layer_id = L.id;
+  }
+}
+
+// Свойства слоёв из снимка: названия, видимость, порядок, оформление, замок,
+// правила и поля. Каждая карта — «id → значение» с проверкой существования
+// слоя: снимок мог пережить удаление слоя, и ссылка на исчезнувший id не
+// должна ронять восстановление.
+function restoreLayerProperties(d) {
+  if (d.layerTitles) {
+    for (const [id, title] of Object.entries(d.layerTitles))
+      if (LAYER_BY_ID[id] && typeof title === "string") LAYER_BY_ID[id].title = title;
+  }
+  if (d.layersVisible) {
+    for (const [id, vis] of Object.entries(d.layersVisible))
+      if (LAYER_BY_ID[id]) LAYER_BY_ID[id].visible = !!vis;
+  } else if (d.hidden) {
+    // сохранение старого формата: hidden было по kind
+    for (const [kind, hid] of Object.entries(d.hidden))
+      if (LAYER_BY_KIND[kind]) LAYER_BY_KIND[kind].visible = !hid;
+  }
+  if (Array.isArray(d.layerOrder)) {
+    // восстановить порядок отрисовки; неизвестные (добавленные позже) — в конец
+    const pos = new Map(d.layerOrder.map((id, i) => [id, i]));
+    LAYERS_V2.sort((a, b) =>
+      (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(b.id) ? pos.get(b.id) : 1e9));
+  }
+  if (d.layerFmt) {
+    for (const [id, fmt] of Object.entries(d.layerFmt))
+      if (LAYER_BY_ID[id] && isRecord(fmt)) LAYER_BY_ID[id].fmt = fmt;
+  }
+  if (d.layerLocked) {
+    for (const [id, locked] of Object.entries(d.layerLocked))
+      if (LAYER_BY_ID[id] && locked) LAYER_BY_ID[id].locked = true;
+  }
+  if (d.layerRules) {
+    for (const [id, rules] of Object.entries(d.layerRules))
+      if (LAYER_BY_ID[id] && Array.isArray(rules) && rules.length)
+        LAYER_BY_ID[id].rules = rules.filter(isRecord);
+  }
+  if (d.layerFields) {
+    for (const [id, flds] of Object.entries(d.layerFields))
+      if (LAYER_BY_ID[id] && Array.isArray(flds)) LAYER_BY_ID[id].fields = flds.filter(isRecord);
+  }
+}
+
 function applyRestoredState(d) {
   // Автосейв v1 хранится в проверяемой оболочке; старые снимки остаются
   // сырым состоянием и по-прежнему открываются без миграции на диске.
@@ -948,57 +1007,10 @@ function applyRestoredState(d) {
   // держали до 100 снимков всего проекта ≈ гигабайты в памяти)
   if (Array.isArray(d.undo)) state.undo = historyStackFromStrings(d.undo.slice(-undoDepth()));
   if (Array.isArray(d.redo)) state.redo = historyStackFromStrings(d.redo.slice(-undoDepth()));
-  // L2b-миграция: старые проекты ссылались на удалённые пресет-слои
-  // (project.territory.boundary и т.п.). Осиротевшие объекты переселяем в
-  // воссозданные слои их вида, иначе они молча исчезли бы с холста.
-  const migrated = {};
-  for (const f of state.features) {
-    if (layerOf(f)) continue;                       // слой резолвится (приёмник/пользовательский) — ок
-    const base = BASE_KIND_BY_KIND[f.kind];
-    if (!base) continue;                            // неизвестный вид — оставляем как есть, не роняем
-    let L = migrated[f.kind] ||
-            LAYERS_V2.find(l => l.kind === f.kind && l.user_created);
-    if (!L) L = createUserLayer({ kind: f.kind, title: base.label });
-    migrated[f.kind] = L;
-    f.layer_id = L.id;
-  }
+  rehomeOrphanFeatures();
   state.nextId = d.nextId || 1;
   syncNextId();
-  if (d.layerTitles) {
-    for (const [id, title] of Object.entries(d.layerTitles))
-      if (LAYER_BY_ID[id] && typeof title === "string") LAYER_BY_ID[id].title = title;
-  }
-  if (d.layersVisible) {
-    for (const [id, vis] of Object.entries(d.layersVisible))
-      if (LAYER_BY_ID[id]) LAYER_BY_ID[id].visible = !!vis;
-  } else if (d.hidden) {
-    // сохранение старого формата: hidden было по kind
-    for (const [kind, hid] of Object.entries(d.hidden))
-      if (LAYER_BY_KIND[kind]) LAYER_BY_KIND[kind].visible = !hid;
-  }
-  if (Array.isArray(d.layerOrder)) {
-    // восстановить порядок отрисовки; неизвестные (добавленные позже) — в конец
-    const pos = new Map(d.layerOrder.map((id, i) => [id, i]));
-    LAYERS_V2.sort((a, b) =>
-      (pos.has(a.id) ? pos.get(a.id) : 1e9) - (pos.has(b.id) ? pos.get(b.id) : 1e9));
-  }
-  if (d.layerFmt) {
-    for (const [id, fmt] of Object.entries(d.layerFmt))
-      if (LAYER_BY_ID[id] && isRecord(fmt)) LAYER_BY_ID[id].fmt = fmt;
-  }
-  if (d.layerLocked) {
-    for (const [id, locked] of Object.entries(d.layerLocked))
-      if (LAYER_BY_ID[id] && locked) LAYER_BY_ID[id].locked = true;
-  }
-  if (d.layerRules) {
-    for (const [id, rules] of Object.entries(d.layerRules))
-      if (LAYER_BY_ID[id] && Array.isArray(rules) && rules.length)
-        LAYER_BY_ID[id].rules = rules.filter(isRecord);
-  }
-  if (d.layerFields) {
-    for (const [id, flds] of Object.entries(d.layerFields))
-      if (LAYER_BY_ID[id] && Array.isArray(flds)) LAYER_BY_ID[id].fields = flds.filter(isRecord);
-  }
+  restoreLayerProperties(d);
   if (d.activeLayerId && LAYER_BY_ID[d.activeLayerId])
     state.activeLayerId = d.activeLayerId;
   else {
