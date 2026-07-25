@@ -448,6 +448,7 @@
     // фокус отложен на кадр, а окно к тому моменту могли уже закрыть (Escape
     // сразу после открытия) — тогда элемента нет, и без проверки это вылезало
     // человеку красной полосой «Ошибка интерфейса»
+    window.dockOverlay?.(overlay, { title: "Отбор объектов", width: 460 });
     setTimeout(() => {
       const first = overlay.querySelector(current === "expression" ? "#select-expr" : "#select-predicate");
       if (first && first.isConnected) first.focus();
@@ -514,6 +515,7 @@
       if (event.key === "Escape") close();
       if (event.key === "Enter" && matches.length) { goTo(0); close(); }
     });
+    window.dockOverlay?.(overlay, { title: "Найти объект", width: 420 });
     setTimeout(() => { if (input.isConnected) input.focus(); }, 0);
   }
   root.openFindFeature = openFindFeature;

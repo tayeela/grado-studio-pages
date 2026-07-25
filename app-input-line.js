@@ -255,6 +255,7 @@
         toast(`Вставлено по каталогу: ${pts.length} точек` +
           (кольцо ? `, площадь ${с.площадь.toFixed(2)} м²` : `, длина ${с.периметр.toFixed(2)} м`));
     });
+    window.dockOverlay?.(overlay, { title: "Точки по координатам", width: 460 });
     setTimeout(() => $("ct-text").focus(), 0);
   }
 

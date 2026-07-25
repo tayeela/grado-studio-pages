@@ -164,6 +164,7 @@
           toast("Браузер не дал буфер обмена — таблица выделена, скопируйте вручную", "warn");
       }
     });
+    window.dockOverlay?.(overlay, { title: "Сводка по выборке", width: 480 });
   }
 
   root.openSelectionSummary = openSelectionSummary;
