@@ -405,30 +405,21 @@ function placeTypedPoint() {
       }
     }
   }
-  // ввод вершины числами: 3 формата
-  //   «50»        — длина вдоль направления на курсор (как в CAD относительный);
-  //   «100 200»   — абсолютные координаты X Y (разделитель — пробел или ;);
-  //   «50<30»     — полярно: длина 50 под углом 30° (ПЧС от +X) от предыдущей точки.
-  const base = lastDrawingPt();
-  const t = state.typed.trim();
-  const num = s => parseFloat(String(s).replace(",", "."));
-  let pt = null;
-  if (/[<>]/.test(t)) {                       // полярно
-    const [ls, as] = t.split(/[<>]/);
-    const len = num(ls), ang = num(as) * Math.PI / 180;
-    if (base && isFinite(len) && len > 0 && isFinite(ang))
-      pt = [base[0] + len * Math.cos(ang), base[1] + len * Math.sin(ang)];
-  } else if (/[;\s]/.test(t)) {               // абсолют X Y
-    const [xs, ys] = t.split(/[;\s]+/);
-    const x = num(xs), y = num(ys);
-    if (isFinite(x) && isFinite(y)) pt = [x, y];
-  } else {                                    // длина вдоль курсора
-    const dist = num(t);
-    if (base && state.mouse && isFinite(dist) && dist > 0) {
-      const a = Math.atan2(state.mouse[1] - base[1], state.mouse[0] - base[0]);
-      pt = [base[0] + dist * Math.cos(a), base[1] + dist * Math.sin(a)];
-    }
-  }
+  // Ввод вершины числами разбирает parseInputLine (app-input-line.js) — там же
+  // он и проверен числами в tests/coord-input. Прежние формы сохранены:
+  //   «50»       — длина вдоль направления на курсор;
+  //   «100 200»  — абсолютные координаты холста (x восток, y север);
+  //   «50<30»    — полярно от предыдущей точки, 0° на восток, против часовой.
+  // Добавлены две:
+  //   «@25,10»   — приращение от предыдущей точки;
+  //   «X=… Y=…»  — ГЕОДЕЗИЧЕСКИЙ порядок, где X это север. Раньше человек,
+  //                вставлявший пару из каталога координат МСК как «X Y»,
+  //                молча получал контур, повёрнутый на 90°: первое число
+  //                ложилось на восток. Теперь буквы решают, что куда.
+  const разобрано = typeof parseInputLine === "function"
+    ? parseInputLine(state.typed, { last: lastDrawingPt(), cursor: state.mouse })
+    : null;
+  const pt = разобрано ? [разобрано.x, разобрано.y] : null;
   if (pt && Array.isArray(state.drawing.pts)) state.drawing.pts.push(pt);
   state.typed = "";
   draw();

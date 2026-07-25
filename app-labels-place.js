@@ -558,10 +558,9 @@ function drawLiveHints() {
       const [mx, my] = w2s(...state.mouse);
       ctx.font = "600 12px sans-serif"; ctx.textAlign = "left";
       if (state.typed) {
-        // подпись по формату ввода: длина «N м», абсолют «X,Y», полярно «L<A°»
-        const label = /[<>]/.test(state.typed) ? state.typed.replace(/[<>]/, " < ") + "°"
-          : /[;\s]/.test(state.typed) ? "X,Y: " + state.typed.trim()
-          : state.typed + " м";
+        // Показываем и набранное, и КАК понято: форм ввода пять, а молчаливое
+        // «понял по-своему» — это контур, повёрнутый на 90°.
+        const label = state.typed + typedInputSuffix(state.typed, base, state.mouse);
         ctx.fillStyle = cvColor("selection", "#1c1c1a");
         ctx.fillRect(mx + 10, my - 24, ctx.measureText(label).width + 12, 18);
         ctx.fillStyle = "#fff";

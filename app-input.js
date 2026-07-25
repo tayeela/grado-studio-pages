@@ -764,7 +764,9 @@ document.addEventListener("keydown", e => {
     draw();
     return;
   }
-  if (state.drawing && /^[0-9.,;<> -]$/.test(e.key)) { state.typed += e.key; draw(); return; }
+  // @ — приращение, x/y/= — геодезическая пара. Буквы перехватываем только
+  // во время построения: там набор важнее горячих клавиш инструментов.
+  if (state.drawing && /^[0-9.,;<>@=xXyY -]$/.test(e.key)) { state.typed += e.key; draw(); return; }
   if (state.drawing && e.key === "Backspace") {
     state.typed = state.typed.slice(0, -1); draw(); return;
   }
