@@ -189,6 +189,14 @@ body.layers-panel-hidden #toolbar{left:12px}
    одномоментная. Класс panel-resizing уже ставится на время жеста. */
 body.panel-resizing #toolbar{transition:none}
 
+/* На низком окне рельс не влезает в одну колонку. Прокрутка в панели
+   инструментов — плохой ответ: часть набора уезжает за край и человек её не
+   видит (именно так шесть инструментов и пропадали раньше). Разворачиваем во
+   вторую колонку: замер на окне 700px — 16 кнопок, две колонки, прокрутки нет. */
+@media (max-height:820px){
+  #toolbar{width:auto;max-width:96px;flex-wrap:wrap;align-content:flex-start}
+}
+
 /* Подложка в панели слоёв: это такой же слой, только чужой. Прижата к низу
    панели, как в QGIS, и не растёт вместе со списком слоёв. */
 .basemap-block{flex:0 0 auto;padding:10px 12px;border-top:1px solid var(--hairline);background:var(--panel)}
@@ -200,7 +208,7 @@ body.panel-resizing #toolbar{transition:none}
 .basemap-op label{flex:0 0 auto}
 .basemap-op span{flex:0 0 auto}
 .basemap-op input{flex:1;min-width:0}
-#toolbar .rail-group,#toolbar .more-tools{display:none!important}
+#toolbar .rail-group{display:none!important}   /* пустые обёртки старой раскладки */
 #toolbar .tool{width:36px;height:36px;min-height:36px;padding:0;border-radius:var(--r-sm);display:flex;justify-content:center;font-size:0;gap:0}
 #toolbar .tool .ic{width:18px;height:18px}
 #toolbar .tool.active{background:var(--accent-solid);color:var(--on-accent);box-shadow:none}

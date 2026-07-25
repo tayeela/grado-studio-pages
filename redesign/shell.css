@@ -420,8 +420,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   #toolbar{width:64px}
   .tool{width:52px}
 }
-@media (max-height:900px){
-  #toolbar:not(.expanded) .advanced-tool{display:none}
-  #toolbar .more-tools{display:flex}
-  #toolbar.expanded .more-tools{color:var(--accent);background:var(--accent-weak)}
-}
+/* Здесь пряталось шесть инструментов (дуга, окружность, сопряжение, поворот,
+   масштаб, зеркало) при высоте окна 900px и меньше — то есть на любом
+   ноутбуке. Открывать их должна была кнопка «ещё», но её убивало
+   `display:none!important` из atelier.css, а класс .expanded не ставил никто:
+   цепочка была порвана в двух местах, и инструменты просто исчезали.
+   Рельс и так прокручивается (overflow:auto) — прятать нечего. */
