@@ -29,6 +29,11 @@
   function closeDock() {
     if (observer) { observer.disconnect(); observer = null; }
     current = null;
+    // Тело чистим ВСЕГДА. Закрытие окна идёт разными путями (своя кнопка,
+    // closePopups, крестик дока, Escape), и один из них уже оставлял док
+    // скрытым, но с живым окном внутри: снаружи закрыто, в разметке висит.
+    // Закрытый док обязан быть пуст — это одно состояние, а не два.
+    body.replaceChildren();
     dock.hidden = true;
     document.body.classList.remove("dock-open");
   }
@@ -53,17 +58,46 @@
     document.body.classList.add("dock-open");
     current = overlay;
     watchRemoval(overlay);
+    watchCloseButtons(overlay);
     return true;
   };
 
   window.dockIsOpen = () => !dock.hidden;
 
+  // Кнопки закрытия САМОГО окна («Отмена», крестик окна) у многих окон сделаны
+  // через closePopups, а тот докированное окно не трогает — иначе подокно вроде
+  // «Статистики поля» уносило бы родителя. Значит нажатие такой кнопки окно бы
+  // не убрало. Дослушиваем клик и убираем сами: обработчик окна уже отработал,
+  // то есть откат стиля и уборка состоялись.
+  const ЗАКРЫВАШКИ = "#ls-cancel,.modal-x,[data-dock-cancel]," +
+    "button[id$='-close'],button[id$='-cancel']";
+  // Слушаем на САМОМ оверлее и в фазе ПЕРЕХВАТА. Делегирование на тело дока
+  // не работает: почти каждое окно гасит всплытие своим
+  // `overlay.addEventListener("click", ev => ev.stopPropagation())`, и до тела
+  // клик по крестику не доходил вовсе — замер показал ровно это.
+  function watchCloseButtons(overlay) {
+    overlay.addEventListener("click", event => {
+      if (!event.target.closest(ЗАКРЫВАШКИ)) return;
+      // Микрозадача, чтобы сперва отработал обработчик самого окна: он
+      // откатывает стиль и убирает предпросмотр.
+      queueMicrotask(() => {
+        if (overlay.isConnected && overlay.parentElement === body) overlay.remove();
+      });
+    }, true);
+  }
+
   dock.querySelector(".dock-close")?.addEventListener("click", () => {
     // Закрываем как закрыл бы человек: ищем родную кнопку отмены окна, чтобы
     // сработал её откат. Своего «крестика» у дока быть не должно — иначе
     // правки оформления остались бы применёнными вопреки «Отмене».
-    const своя = current && (current.querySelector("#ls-cancel, .modal-x, [data-dock-cancel]"));
-    if (своя) своя.click(); else current?.remove();
+    const окно = current;
+    const своя = окно && окно.querySelector("#ls-cancel, .modal-x, [data-dock-cancel]");
+    if (!своя) { окно?.remove(); return; }
+    своя.click();
+    // Часть окон закрывается через closePopups, а тот докированные не трогает
+    // (иначе подокно вроде «Статистики поля» уносило бы родителя). Значит после
+    // родной кнопки окно может остаться — тогда убираем сами.
+    if (окно.isConnected && окно.parentElement === body) окно.remove();
   });
 
   document.addEventListener("keydown", event => {

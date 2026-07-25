@@ -494,8 +494,13 @@ function openShortcuts() {
 }
 
 // ---------- контекстное меню слоя (логика QGIS) ----------
+// Докированное окно НЕ всплывашка: оно часть раскладки, как панель слоёв, и
+// закрывается только своей кнопкой или крестиком дока. Раньше closePopups
+// сметал и его: открыл таблицу атрибутов в доке, нажал в ней «Статистика
+// поля» — статистика зовёт closePopups, и таблица исчезала вместе с доком,
+// хотя человек всего лишь заглянул в её же подокно.
 function closePopups() {
-  document.querySelectorAll(".ctx-menu, .modal-overlay").forEach(n => n.remove());
+  document.querySelectorAll(".ctx-menu, .modal-overlay:not(.docked)").forEach(n => n.remove());
 }
 
 // ---------- единый контракт окон: Escape и клик мимо ----------
