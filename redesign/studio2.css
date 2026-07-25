@@ -1276,3 +1276,17 @@ input[type=range].range-op:focus-visible{outline:2px solid var(--accent);outline
    (font-size:11px;color:var(--muted)) — мимо шкалы и мимо сторожа словаря,
    который смотрит только CSS. */
 #props-body .metric.prop-style-note{font-size:var(--fs-11);color:var(--muted);margin-top:2px}
+
+/* Мастер «Данные» в доке. Его ряды свёрстаны под окно 1080px и в панели 560
+   не переносятся: сводка по области выступала на 129px, поиск по источникам
+   на 81. Разрешаем перенос и даём полям сжиматься — ширины тут не смысловые,
+   а следствие широкого окна. */
+/* Сводка по области — не flex, а grid с жёсткими колонками
+   (180px 130px 110px 260px = 680 при доступных 503), поэтому flex-wrap на неё
+   не действовал. В доке колонки складываются в одну. */
+#dock .data-area-summary{grid-template-columns:minmax(0,1fr)}
+#dock .data-source-head{flex-wrap:wrap}
+#dock .data-search{flex:1 1 100%;min-width:0}
+#dock .data-search input{width:100%;min-width:0}
+#dock .data-area-alert{flex:1 1 100%;min-width:0}
+#dock .data-topic-chips{flex-wrap:wrap}

@@ -28,7 +28,8 @@ const БЮДЖЕТ = {
   // Рост ровно на строку ради ИМЕНОВАННОГО куска снаружи — то, ради чего
   // храповик и заведён (тот же случай, что drawNow 306 → 307).
   "app-style-ui.js openLayerStyle": 634,
-  "app-data.js openDataFetch": 520,     // 556 → 520: строители шагов вынесены
+  // 556 → 520 → 521: строители шагов вынесены; +1 — вызов dockOverlay.
+  "app-data.js openDataFetch": 521,
   // 307, а не 306: одна строка — вызов drawTinyRing, куда вынесен уровень
   // детализации. Рост на строку ради ИМЕНОВАННОГО куска — то, ради чего
   // храповик и заведён; растёт он только так и только осознанно.
@@ -40,14 +41,14 @@ const БЮДЖЕТ = {
   "app-style-ui.js openStyleLibrary": 208,  // 258 -> 206: список, свотч и разметка вынесены
   // 206 → 172: строители разметки (метрика, паспорт ТЭП, текущий сценарий,
   // карточки вариантов) вынесены наружу — они не трогают состояние окна.
-  "app-layer-ui.js openVariants": 172,
+  "app-layer-ui.js openVariants": 173,   // +1: вызов dockOverlay
   // applyRestoredState: 182 → 135, ниже порога — запись убрана. Вынесены
   // rehomeOrphanFeatures (L2b-миграция) и restoreLayerProperties (карты
   // «id → значение» для названий, видимости, порядка, оформления, полей).
   // renderProps: 178 → 139, ниже порога. Вынесены objectStyleSectionHtml
   // (разметка блока «Стиль и оформление») и bindObjectStyleSelect.
   "app-data.js openFgistpDialog": 158,
-  "app-attr.js openAttributeTable": 157,
+  "app-attr.js openAttributeTable": 158,  // +1: вызов dockOverlay
 };
 
 const files = fs.readdirSync(root)

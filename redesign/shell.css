@@ -450,8 +450,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
    ни собственной рамки — рамку даёт сам док. Разметка окна не меняется. */
 .modal-overlay.docked{position:static;inset:auto;display:flex;flex-direction:column;
   flex:1;min-height:0;padding:0;background:none;backdrop-filter:none}
-.modal-overlay.docked>.modal{width:100%;max-width:none;height:100%;max-height:none;
+/* Селектор с #dock намеренно: у окон есть собственные правила ширины ТОЙ ЖЕ
+   специфичности (.modal.data-modal.data-wizard задаёт width:1080px) в файле,
+   который грузится позже. Без id окно оставалось шириной 1058px внутри дока
+   в 560 — содержимое уезжало за край, и так у всех трёх переведённых окон. */
+#dock .modal-overlay.docked>.modal{width:100%;max-width:none;height:100%;max-height:none;
   flex:1;min-height:0;margin:0;border:0;border-radius:0;box-shadow:none;background:none}
+#dock .modal-overlay.docked .modal-body{overflow:auto;min-height:0}
 
 /* Док и панель свойств — оба инспекторы, и вместе они съедают холст: замер на
    окне 1400 показал 241px чертежа из 761. Пока док открыт, панель свойств

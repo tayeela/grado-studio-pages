@@ -595,6 +595,7 @@ function openVariants() {
   overlay.querySelector(".modal-x").onclick = () => overlay.remove();
   overlay.addEventListener("click", ev => { if (ev.target === overlay) overlay.remove(); });
   hydrateSummaries();
+  window.dockOverlay?.(overlay, { title: "Варианты проекта", width: 480 });
 }
 
 function openAlbumConfig() {

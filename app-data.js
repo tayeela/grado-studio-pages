@@ -745,6 +745,7 @@ async function openDataFetch() {
   render();
   loadCatalog();
   loadCacheInfo();
+  window.dockOverlay?.(overlay, { title: "Данные по области", width: 560 });
 }
 
 // ---------- ФГИС ТП: прямой импорт векторных слоёв документа ----------
