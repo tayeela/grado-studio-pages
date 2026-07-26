@@ -237,6 +237,18 @@ function projectCrsEntry(id) {
 function projectCrsConverters(entry) {
   if (entry.legacy) return null;                      // встроенная UTM37 в crs.js
   const R = window.GRADO_CRS_RU;
+  // Молчаливый null здесь означал бы подмену системы координат: проект
+  // объявлен в МСК Москвы, а считается во встроенной локальной — весь чертёж
+  // уезжает на километры, и по адресам с кадастровыми номерами это НЕ ВИДНО.
+  // Ровно так и случилось, когда модуль российских СК грузился ПОЗЖЕ того,
+  // кто восстанавливает проект.
+  if (!R || !Array.isArray(R.KNOWN)) {
+    console.error(`Модуль российских СК не загружен — «${entry.title}» применить нечем`);
+    if (typeof toast === "function")
+      toast(`Система координат «${entry.title}» не применена: модуль СК не загружен. ` +
+        `Обновите страницу — иначе координаты будут неверными.`, "error");
+    return null;
+  }
   const def = (R.KNOWN.find(k => k.id === entry.id) || {}).def;
   if (!def) return null;
   const [ox, oy] = entry.origin;
