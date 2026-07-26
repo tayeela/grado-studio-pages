@@ -85,9 +85,12 @@ const rotated = [...horseshoe.slice(3), ...horseshoe.slice(0, 3)];
 assert.equal(inwardSign(horseshoe), inwardSign(rotated),
   "сторона обязана зависеть от обхода, а не от того, с какой вершины он начат");
 
-// у знака ООЗТ засечки объявлены внутрь — проверяем, что данные не разошлись
+// Знак с засечками внутрь — проверяем, что данные под расчётом стороны не
+// разошлись. Прежде здесь стоял ООЗТ, но в эталонном QML (код 47) у него один
+// слой SimpleLine и никаких MarkerLine: засечки были нашей выдумкой и убраны.
+// Взят водоохранный: в эталоне ровно один MarkerLine — засечка в одну сторону.
 const styles = JSON.parse(fs.readFileSync(path.join(root, "styles.json"), "utf8"));
-assert.equal(styles["lgr.oozt"].line_marker.dir, "in",
-  "знак ООЗТ рисуется засечками внутрь — это его опознавательный признак");
+assert.equal(styles["lgr.vodookhr"].line_marker.dir, "in",
+  "знак водоохранной зоны рисуется засечками внутрь — это его опознавательный признак");
 
 console.log("marker-side: OK");
