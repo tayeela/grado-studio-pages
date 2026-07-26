@@ -55,8 +55,10 @@ const БЮДЖЕТ = {
   // 523 → 306 → 307 → 61: тело внутреннего цикла (отрисовка одного объекта)
   // вынесено в drawFeatureOnLayer.
   "app-labels-place.js drawNow": 61,
-  // вынесено из drawNow дословно; единственный continue стал return
-  "app-labels-place.js drawFeatureOnLayer": 248,
+  // 248 → 21: ветки по геометрии и подсветки состояний вынесены отдельно.
+  "app-labels-place.js drawFeatureOnLayer": 21,
+  "app-labels-place.js drawFeatureGeometry": 121,   // размер, точка, дуга, окружность, линии
+  "app-labels-place.js drawFeatureHighlights": 112,  // выделение, обрезка, наведение
   "app-labels-place.js drawTinyRing": 19,   // 523 -> 306: пикетаж и живые подсказки вынесены
   // 204 → 54: подсказки черчения и подсказки измерений вынесены отдельно.
   "app-labels-place.js drawLiveHints": 54,

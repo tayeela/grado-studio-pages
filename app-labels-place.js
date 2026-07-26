@@ -809,17 +809,10 @@ function drawTinyRing(f, st) {
 // по виду (выноска, размер, пикетаж…) и заявка на подпись. Вынесено из drawNow
 // дословно — 246 строк тела внутреннего цикла. Снаружи нужны только объект,
 // его слой и две копилки кадра: заявки на подписи и сетка занятости.
-function drawFeatureOnLayer(f, layer, _labelJobs, _labelGrid) {
-      const st = styleOf(f);
-      // ЛГР: штрих в метрах местности → px по текущему зуму (см. groundFactor).
-      // Этот же массив уходит в drawLineMarkers — фаза засечки обязана
-      // считаться по ТОМУ ЖЕ штриху, которым рисуется линия.
-      const stDash = scaledDash(st);
-      ctx.setLineDash(stDash || []);
-      // читаемый режим поднимает волосок 1 px до разборчивого (см. lgrWidth)
-      const stWidth = lgrWidth(st);
-      ctx.lineWidth = stWidth; ctx.strokeStyle = canvasStrokeOf(f, st);
-      if (drawTinyRing(f, st)) return;   // пропуск объекта: в цикле это был continue
+// Ветки по геометрии: размерная линия с засечками, точка, дуга, окружность,
+// линии и полигоны с заливкой и штриховкой. Штрих и толщина приходят готовыми —
+// они считаются один раз на объект и обязаны совпасть с засечками маркеров.
+function drawFeatureGeometry(f, layer, st, stDash, stWidth, _labelGrid) {
       if (layer.kind === "leader" && f.line) { drawLeader(f, st); } else if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
         const [ax, ay] = w2s(...f.line[0]);
@@ -939,13 +932,12 @@ function drawFeatureOnLayer(f, layer, _labelJobs, _labelGrid) {
         }
       }
       ctx.setLineDash([]);
-      if (st.label_field) {
-        const v = labelOf(f);
-        if (v !== undefined && v !== "" && v !== null) {
-          const job = labelJob(f, st, String(v), layer);
-          if (job) { job.featureId = f.id; _labelJobs.push(applyLabelOffset(job, f)); }
-        }
-      }
+}
+
+// Подсветки состояний поверх самого объекта: выделение, границы обрезки, цель
+// обрезки, наведение «Определить», принадлежность активному слою и вершины
+// одиночного выделения. Все читают state и объект — больше ничего.
+function drawFeatureHighlights(f, layer) {
       if (state.selectedIds.has(f.id)) {
         ctx.strokeStyle = cvColor("selection", "#2f6fde");
         ctx.lineWidth = state.trimCtx ? 2.8 : 1.5;
@@ -1056,6 +1048,28 @@ function drawFeatureOnLayer(f, layer, _labelJobs, _labelGrid) {
           });
         }
       }
+}
+
+function drawFeatureOnLayer(f, layer, _labelJobs, _labelGrid) {
+      const st = styleOf(f);
+      // ЛГР: штрих в метрах местности → px по текущему зуму (см. groundFactor).
+      // Этот же массив уходит в drawLineMarkers — фаза засечки обязана
+      // считаться по ТОМУ ЖЕ штриху, которым рисуется линия.
+      const stDash = scaledDash(st);
+      ctx.setLineDash(stDash || []);
+      // читаемый режим поднимает волосок 1 px до разборчивого (см. lgrWidth)
+      const stWidth = lgrWidth(st);
+      ctx.lineWidth = stWidth; ctx.strokeStyle = canvasStrokeOf(f, st);
+      if (drawTinyRing(f, st)) return;   // пропуск объекта: в цикле это был continue
+      drawFeatureGeometry(f, layer, st, stDash, stWidth, _labelGrid);
+      if (st.label_field) {
+        const v = labelOf(f);
+        if (v !== undefined && v !== "" && v !== null) {
+          const job = labelJob(f, st, String(v), layer);
+          if (job) { job.featureId = f.id; _labelJobs.push(applyLabelOffset(job, f)); }
+        }
+      }
+      drawFeatureHighlights(f, layer);
 }
 
 function drawNow() {
