@@ -332,7 +332,7 @@ cv.addEventListener("pointerdown", e => {
           if (d < bd) { bd = d; refOrig = [p[0], p[1]]; }
         }
       }
-      const orig = feats.map(ff => featureMovablePts(ff).map(p => [p[0], p[1]]));
+      const orig = feats.map(ff => featureMoveOrigin(ff));
       // Общие вершины покрытийных слоёв ищем ОДИН раз на жест. Раньше
       // sharedCompanions() звался для каждой вершины на каждое движение мыши и
       // сканировал все объекты проекта — O(вершин × объектов × вершин) на кадр,
@@ -513,8 +513,9 @@ cv.addEventListener("pointermove", e => {
       state.snapHit = snapped.kind ? snapped : null;
       const ox = snapped.p[0] - ed.refOrig[0], oy = snapped.p[1] - ed.refOrig[1];
       ed.feats.forEach((feat, fi) => {
-        const pts = featureMovablePts(feat), o = ed.orig[fi];  // с дырами
-        for (let i = 0; i < pts.length; i++) { pts[i][0] = o[i][0] + ox; pts[i][1] = o[i][1] + oy; }
+        // Круг и дуга переносятся за центр — у них нет живых точек, чтобы
+        // двигать их поштучно. Общее место: moveFeatureFrom в app-geodesy.
+        moveFeatureFrom(feat, ed.orig[fi], ox, oy);
       });
       // общие границы покрытийных слоёв: пары найдены один раз при pointerdown
       for (const { feat, vi, comps } of (ed.bodyComps || [])) {

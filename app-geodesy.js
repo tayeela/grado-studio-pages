@@ -33,6 +33,29 @@ function featureMovablePts(f) {
   const rings = featureRings(f);
   return rings.length ? rings.flat() : featurePts(f);
 }
+// Опорные точки для ПЕРЕНОСА объекта и перенос по ним.
+//
+// Для кольца и ломаной featureMovablePts отдаёт ЖИВЫЕ точки — правь и объект
+// поедет. Для круга и дуги отдавать нечего: их точки вычисляются заново на
+// каждый вызов, и правка уходит в копию. Три места это знали и обходили
+// вручную (буфер обмена, сдвиг слоя, трансформации), а четвёртое — само
+// перетаскивание мышью — забыли: круг и дуга под курсором просто не двигались.
+// Теперь знание живёт в одном месте, а не переписывается на каждом вызове.
+function featureMoveOrigin(f) {
+  if (f.circle) return [[f.circle.cx, f.circle.cy]];
+  if (f.arc) return [[f.arc.cx, f.arc.cy]];
+  return featureMovablePts(f).map(p => [p[0], p[1]]);
+}
+function moveFeatureFrom(f, origin, dx, dy) {
+  if (f.circle) { f.circle.cx = origin[0][0] + dx; f.circle.cy = origin[0][1] + dy; return; }
+  if (f.arc) { f.arc.cx = origin[0][0] + dx; f.arc.cy = origin[0][1] + dy; return; }
+  const pts = featureMovablePts(f);
+  for (let i = 0; i < pts.length && i < origin.length; i++) {
+    pts[i][0] = origin[i][0] + dx;
+    pts[i][1] = origin[i][1] + dy;
+  }
+}
+
 function featurePts(f) {
   if (f.ring || f.line) return f.ring || f.line;
   if (f.arc) {
