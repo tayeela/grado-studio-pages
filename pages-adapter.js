@@ -297,22 +297,31 @@
       if (!(target.layers || (target.layers = [])).some(x => x.id === L.id))
         target.layers.push(L);
   };
+  // Overpass отвечает быстро или не отвечает вовсе: рабочее зеркало отдаёт
+  // ответ за 7–12 с (замер). Общий таймаут в 45 с здесь означал бы полторы
+  // минуты ожидания на переборе двух зеркал — и всё ради того, чтобы человек
+  // в конце узнал «не ответил».
+  const OVERPASS_TIMEOUT_MS = 25000;
   const fetchOverpass = async (query, signal) => {
-    let lastError = null;
+    const беды = [];
     for (const url of OVERPASS_URLS) {
       throwIfAborted(signal);
+      const mirror = `Overpass (${new URL(url).host})`;
       try {
-        const mirror = url.includes("mail.ru") ? "Overpass (maps.mail.ru)" : "Overpass (kumi.systems)";
         const response = await externalFetch(mirror, url, { method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ data: query }).toString(), signal });
+          body: new URLSearchParams({ data: query }).toString(), signal }, OVERPASS_TIMEOUT_MS);
         return response.json();
       } catch (error) {
         if (error?.name === "AbortError" || signal?.aborted) throw abortError();
-        lastError = error;
+        беды.push(error?.message || String(error));
       }
     }
-    throw new Error(`Overpass недоступен: ${lastError?.message || lastError || "нет ответа"}`);
+    // Называем ВСЕ зеркала. Прежнее сообщение показывало только последнее, и
+    // выходило, что виновата kumi.systems, — хотя не дались оба, каждое по
+    // своей причине.
+    throw new Error(`Overpass не отвечает ни с одного зеркала: ${
+      беды.join(" · ") || "нет ответа"}`);
   };
   // ---- ГИС ОГД: слой качается целиком (портал не фильтрует по bbox) и живёт
   // в IndexedDB; повторная выгрузка любой площадки берёт его из кэша.

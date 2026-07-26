@@ -127,8 +127,16 @@ const hang = signal => new Promise((_, reject) => {
   // ---------- проводка ----------
   {
     const app = require("./app-source");
-    for (const name of ["НСПД", "ГИС ОГД (каталог)", "Overpass (kumi.systems)"])
+    for (const name of ["НСПД", "ГИС ОГД (каталог)"])
       assert.ok(adapter.includes(name), `источник «${name}» обязан называться по имени`);
+    // Имя зеркала Overpass теперь берётся из URL, а не из зашитого списка:
+    // зеркал два, и прежняя проверка `url.includes("mail.ru") ? A : B` называла
+    // вторым ЛЮБОЕ незнакомое зеркало, включая третье, если бы его добавили.
+    assert.match(adapter, /`Overpass \(\$\{new URL\(url\)\.host\}\)`/,
+      "имя зеркала обязано браться из его же адреса");
+    assert.match(adapter, /не отвечает ни с одного зеркала/,
+      "сообщение обязано называть ВСЕ зеркала: прежнее показывало только " +
+      "последнее, и выходило, что виновата kumi.systems, хотя не дались оба");
     assert.match(adapter, /externalFetch\(`ГИС ОГД \(слой \$\{code\}\)`/,
       "у тяжёлого слоя ОГД свой длинный таймаут");
     assert.doesNotMatch(adapter, /await nativeFetch\(NSPD_EXTENT_URL/,
