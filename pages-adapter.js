@@ -281,6 +281,22 @@
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
   ];
+  // Слои ГИС ОГД, которые целиком в браузер не помещаются. Портал не умеет
+  // отдавать их по области: у export/ есть единственный параметр format,
+  // ни bbox, ни limit, ни тайлов (проверено на API 2.8). Замер «Земельных
+  // участков»: 269 МБ за 560 с и это ещё не конец файла, скорость 480 КБ/с.
+  //
+  // Прежде такой слой два раза по две минуты упирался в таймаут и выдавал
+  // «не ответил — попробуйте позже», хотя позже не поможет НИКОГДА. Честнее
+  // сказать сразу и назвать рабочую замену: те же участки ЕГРН приходят из
+  // НСПД за доли секунды.
+  const GISOGD_TOO_BIG = {
+    zu_29_06_2021: "«Земельные участки» ГИС ОГД — это все участки Москвы " +
+      "(больше 269 МБ), портал не умеет отдавать их по области. " +
+      "Возьмите «Земельные участки» из НСПД — те же границы ЕГРН по вашей " +
+      "площадке, и загрузятся сразу.",
+  };
+
   const NSPD_EXTENT_URL = "https://nspd.gov.ru/api/geoportal/v1/intersects?typeIntersect=fullObject";
   const bboxKm2 = bbox => {
     const [west, south, east, north] = bbox.map(Number);
@@ -419,7 +435,10 @@
         throw stop;
       }
     }
-    const response = await externalFetch(`ГИС ОГД (слой ${code})`, pagesCore.gisogdLayerUrl(code), { signal }, 120000);
+    if (GISOGD_TOO_BIG[code]) throw new Error(GISOGD_TOO_BIG[code]);
+    // 300 с вместо 120: ГПЗУ (97 МБ, 87 720 объектов) идёт 23 с, но слои
+    // потяжелее не укладывались и обрывались на полпути.
+    const response = await externalFetch(`ГИС ОГД (слой ${code})`, pagesCore.gisogdLayerUrl(code), { signal }, 300000);
     const { text, bytes } = await readWithProgress(response, code, name || code, signal);
     await rememberLayerBytes(code, bytes);
     throwIfAborted(signal);
