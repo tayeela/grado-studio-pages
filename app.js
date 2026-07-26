@@ -1147,7 +1147,11 @@ function _sampleLabelSVG(label, W, midY, H, stroke) {
 function _markerGlyphsSVG(mk, x0, x1, midY, stroke) {
   const s = 7, w2 = 4, ow = Math.max(1, mk.ow ? mk.ow * 0.7 : 1.1);
   const filled = mk.filled !== false;
-  const dirs = mk.dir === "both" ? [-1, 1] : [mk.dir === "out" ? -1 : -1];  // вверх (и вниз для both)
+  // В образце нет полигона, значит нет и «внутрь»: одиночный ряд всегда вверх,
+  // «в обе» — вверх и вниз. Прежде здесь стояла тройная развилка, у которой обе
+  // ветви давали −1: «наружу» и «внутрь» рисовались одинаково, а вид кода
+  // обещал разницу.
+  const dirs = mk.dir === "both" ? [-1, 1] : [-1];
   // Хотя бы ОДИН маркер даже в узком свотче (40px): раньше n=floor(28/26)=0 и
   // засечки не рисовались вовсе — знак ООЗТ/ПК выглядел как голая линия.
   const usable = x1 - x0, step = 26;
@@ -1155,8 +1159,12 @@ function _markerGlyphsSVG(mk, x0, x1, midY, stroke) {
   const gap = usable / (n + 1);
   let out = "";
   for (let i = 1; i <= n; i++) {
-    const x = x0 + gap * i;
     for (const d of dirs) {
+      // Ряды «в обе стороны» ЧЕРЕДУЮТСЯ вдоль линии — как два MarkerLine
+      // эталона со сдвигом offset_along_line на полшага. Обе засечки в одной
+      // точке давали «бабочку», и образец врал про знак на карте.
+      const x = x0 + gap * i + (dirs.length > 1 && d < 0 ? gap / 2 : 0);
+      if (x > x1) continue;
       const ny = d * -1;                 // экранная нормаль (up при d=1)
       const apexY = midY + ny * s;
       const glyph = (fillMode) => {

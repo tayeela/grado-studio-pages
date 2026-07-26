@@ -285,7 +285,13 @@ function scaledMarker(st) {
 // ребре засечки распределяются равномерно с отступом от вершин, а не
 // непрерывно по периметру — иначе на углах засечки соседних рёбер
 // сходятся вплотную (в Эталоне углы свободны). mk={shape,period,size} px.
-function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
+// фаза — сдвиг ряда засечек вдоль линии, в долях шага. Нужен для знаков «в обе
+// стороны»: в QML это ДВА слоя MarkerLine с одинаковым interval и разным
+// offset_along_line, отличающимся ровно на полшага (ООПТ 0 и 10 при шаге 20,
+// ПК 4 и 14). То есть треугольники ЧЕРЕДУЮТСЯ вдоль черты, а не стоят парой в
+// одной точке. Мы рисовали их в одной — выходила «бабочка» остриями наружу и
+// внутрь сразу (замечание юзера: «так быть не должно»).
+function drawLineMarkers(pts, mk, color, closed, inward, width, dash, фаза = 0) {
   const chain = closed ? [...pts, pts[0]] : pts;
   const scr = chain.map(p => w2s(...p));
   const period = mk.period || 40, s = mk.size || 4;
@@ -333,7 +339,7 @@ function drawLineMarkers(pts, mk, color, closed, inward, width, dash) {
     // ОТДЕЛЬНО: короткие рёбра (< period/2) пропускались, а шаг d/n у каждого
     // сегмента свой — отсюда неравномерность (жалоба юзера). Теперь шаг один
     // на весь контур, вершины его не сбивают.
-    let acc = 0, next = period * 0.5;
+    let acc = 0, next = period * (0.5 + фаза);
     for (let i = 1; i < scr.length; i++) {
       const [x1, y1] = scr[i - 1], [x2, y2] = scr[i];
       const d = Math.hypot(x2 - x1, y2 - y1);
@@ -812,6 +818,37 @@ function drawTinyRing(f, st) {
 // Ветки по геометрии: размерная линия с засечками, точка, дуга, окружность,
 // линии и полигоны с заливкой и штриховкой. Штрих и толщина приходят готовыми —
 // они считаются один раз на объект и обязаны совпасть с засечками маркеров.
+// Засечки знака по контуру объекта.
+//
+// Направление по эталону: остриём ВНУТРЬ зоны по умолчанию, dir "out" — наружу
+// (ландшафт ОКН), dir "both" — двумя рядами (8 ООПТ, 18 ПК, 55 памятник).
+// Сторона из ДАННЫХ важнее знака: у объектов ОГД она задана знаком LineCode
+// («1» и «−1» — одна линия, зона с разных сторон), и это точнее нашей догадки
+// по центроиду. inwardSign остаётся для объектов без LineCode.
+function drawFeatureMarkers(f, st, stWidth, stDash) {
+  const side0 = f.props && f.props.line_side;
+  const mkColor = st.stroke || cvColor("redline", "#df0024");
+  const mkScaled = scaledMarker(st), mkDir = st.line_marker.dir;
+  const ringMarkers = (ring, baseInw, closed) => {
+    // «в обе стороны» = ЧЕРЕДОВАНИЕ вдоль линии: второй ряд сдвинут на полшага,
+    // как два MarkerLine эталона. Иначе оба треугольника встают в одной точке и
+    // знак читается как «бабочка» — остриями наружу и внутрь сразу.
+    const ряды = mkDir === "both" ? [[baseInw, 0], [-baseInw, 0.5]]
+               : (!side0 && mkDir === "out") ? [[-baseInw, 0]] : [[baseInw, 0]];
+    for (const [side, фаза] of ряды)
+      drawLineMarkers(ring, mkScaled, mkColor, closed, side, stWidth, stDash, фаза);
+  };
+  if (f.ring) {
+    ringMarkers(f.ring, side0 || (f.ring.length > 2 ? inwardSign(f.ring) : 1), true);
+    // Дыры выколотого полигона: засечки смотрят В ПОЛИГОН = ИЗ дыры (инверсия
+    // относительно внешней границы) — метки окантовывают материал, а не пустоту.
+    for (const hole of f.holes || [])
+      if (hole.length > 2) ringMarkers(hole, -inwardSign(hole), true);
+  } else if (f.line) {
+    ringMarkers(f.line, side0 || 1, false);
+  }
+}
+
 function drawFeatureGeometry(f, layer, st, stDash, stWidth, _labelGrid) {
       if (layer.kind === "leader" && f.line) { drawLeader(f, st); } else if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
@@ -895,37 +932,8 @@ function drawFeatureGeometry(f, layer, st, stDash, stWidth, _labelGrid) {
         if (st.hatch && f.ring) drawHatch(f.ring, st.hatch, st.stroke, f.holes);
         if (st.dots && f.ring) drawDots(f.ring, st.dots, f.holes);
         if (st.double) drawDoubleLine(f.ring || f.line, st.double, !!f.ring);
-        if (st.line_marker && (f.ring || f.line) && lgrDetailVisible(st)) {
-          // направление засечки по знаку Эталона: по умолчанию остриём ВНУТРЬ
-          // зоны, dir "out" — наружу (ООПТ/ландшафт ОКН/водоохранная/прибрежная),
-          // dir "both" — по ОБЕ стороны линии (в QML это два под-маркера с
-          // углами 0 и 180: 8 ООПТ, 18 ПК, 55 памятник природы)
-          // Сторона из ДАННЫХ важнее знака: у объектов ОГД она задана знаком
-          // LineCode («1» и «-1» — одна линия, зона с разных сторон), и это
-          // точнее, чем наша догадка по центроиду. inwardSign остаётся для
-          // объектов без LineCode (начерченных вручную).
-          const side0 = f.props && f.props.line_side;
-          const mkColor = st.stroke || cvColor("redline", "#df0024");
-          const mkScaled = scaledMarker(st), mkDir = st.line_marker.dir;
-          const ringMarkers = (ring, baseInw, closed) => {
-            const sides = mkDir === "both" ? [baseInw, -baseInw]
-                        : (!side0 && mkDir === "out") ? [-baseInw] : [baseInw];
-            for (const side of sides)
-              drawLineMarkers(ring, mkScaled, mkColor, closed, side, stWidth, stDash);
-          };
-          if (f.ring) {
-            const inw = side0 ? side0
-                      : f.ring.length > 2 ? inwardSign(f.ring) : 1;
-            ringMarkers(f.ring, inw, true);
-            // Дыры выколотого полигона: засечки смотрят В ПОЛИГОН = ИЗ дыры
-            // (инверсия относительно внешней границы, -inwardSign) — метки
-            // окантовывают материал полигона, а не пустоту (просьба юзера).
-            for (const hole of f.holes || [])
-              if (hole.length > 2) ringMarkers(hole, -inwardSign(hole), true);
-          } else if (f.line) {
-            ringMarkers(f.line, side0 || 1, false);
-          }
-        }
+        if (st.line_marker && (f.ring || f.line) && lgrDetailVisible(st))
+          drawFeatureMarkers(f, st, stWidth, stDash);
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
           drawLineLabel(pts, st.line_label, st.stroke || cvColor("redline", "#d91a1a"), _labelGrid);

@@ -303,7 +303,14 @@ body.panel-hidden #panel,body.panel-hidden #panel-resizer{display:none}
 /* ==== модалки / поповеры / меню ==== */
 .scrim{position:absolute;inset:0;z-index:var(--z-modal);background:rgba(16,22,42,.34);backdrop-filter:blur(4px);
   display:grid;place-items:start center;padding-top:9vh;animation:fade .14s var(--ease-out)}
-.modal{width:min(548px,86vw);max-height:80vh;display:flex;flex-direction:column;background:var(--glass-strong);
+/* Окно — контейнер запросов: его внутренняя вёрстка обязана слушать ШИРИНУ
+   САМОГО ОКНА, а не ширину экрана. Пока адаптив жил на @media, окно в доке
+   (320 px при экране 1680) считало себя широким: двухпанельный мастер «Данные
+   по области» оставлял колонку 260 px, и всё содержимое уезжало за край —
+   ревизор насчитал 33 огреха в одном окне. Ширина у всех окон задана явно
+   (min(548px,86vw), у мастера — своя), поэтому inline-size ничего не ломает. */
+.modal{container-type:inline-size;container-name:dlg;
+  width:min(548px,86vw);max-height:80vh;display:flex;flex-direction:column;background:var(--glass-strong);
   backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-radius:var(--r-lg);
   box-shadow:var(--shadow-lg),var(--glass-hi);overflow:hidden;padding:14px;animation:pop .18s var(--ease-out)}
 .modal-h{display:flex;align-items:center;gap:10px;padding:4px 0 14px;box-shadow:none}
@@ -457,6 +464,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 #dock .modal-overlay.docked>.modal{width:100%;max-width:none;height:100%;max-height:none;
   flex:1;min-height:0;margin:0;border:0;border-radius:0;box-shadow:none;background:none}
 #dock .modal-overlay.docked .modal-body{overflow:auto;min-height:0}
+/* Шапку окна в доке даёт сам док: название и крестик там уже есть. Без этого
+   в панели стояли ДВА заголовка подряд и ДВА крестика — ревизор ловит это как
+   «двойник». Прочие кнопки шапки (если они есть) остаются; пустая шапка
+   схлопывается. */
+#dock .modal-overlay.docked .modal-head>.modal-head-copy,
+#dock .modal-overlay.docked .modal-head>.modal-x{display:none}
+#dock .modal-overlay.docked .modal-head:not(:has(>*:not(.modal-head-copy):not(.modal-x))){display:none}
 
 /* Док и панель свойств — оба инспекторы, и вместе они съедают холст: замер на
    окне 1400 показал 241px чертежа из 761. Пока док открыт, панель свойств

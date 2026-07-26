@@ -47,15 +47,25 @@
 
   // Окно закрывают его собственные кнопки — они делают overlay.remove().
   // Ловим это наблюдателем, а не переписыванием их обработчиков.
-  function watchRemoval(overlay) {
+  // Смотрим на ТЕКУЩЕЕ окно дока, а не на то, ради которого наблюдатель заведён.
+  // Разница решает: MutationObserver отрабатывает микрозадачей, уже ПОСЛЕ того,
+  // как на месте старого окна встало новое. Замыкание на старом видело «меня
+  // сняли» и звало closeDock, а тот чистит тело — вместе с новым окном.
+  function watchRemoval() {
     observer = new MutationObserver(() => {
-      if (!overlay.isConnected || overlay.parentElement !== body) closeDock();
+      if (current && current.isConnected && current.parentElement === body) return;
+      closeDock();
     });
     observer.observe(body, { childList: true });
   }
 
   window.dockOverlay = function dockOverlay(overlay, opts = {}) {
     if (!overlay) return false;
+    // Смена окна в доке: сначала снимаем наблюдение, потом убираем прежнее.
+    // Иначе смена читается как закрытие. Именно на этом окно «Данные по
+    // области» гасило само себя: кнопка «Приблизить автоматически» делает
+    // close() + openDataFetch(), и новое окно исчезало через микрозадачу.
+    if (observer) { observer.disconnect(); observer = null; }
     if (current && current !== overlay) current.remove();   // один док — одно окно
     overlay.classList.add("docked");
     body.replaceChildren(overlay);
@@ -64,7 +74,7 @@
     if (resizer) resizer.hidden = false;
     document.body.classList.add("dock-open");
     current = overlay;
-    watchRemoval(overlay);
+    watchRemoval();
     watchCloseButtons(overlay);
     return true;
   };

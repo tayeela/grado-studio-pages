@@ -127,6 +127,17 @@ header .hsep{margin-inline:0}
 .workspace-modes button[aria-pressed="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent-weak) 72%,var(--panel));font-weight:var(--fw-semibold)}
 .workspace-modes button[aria-pressed="true"]::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;background:var(--accent-solid)}
 .workspace-modes .ic{width:16px;height:16px}
+/* Шапка не переносится и не сжимается: на 1280×720 — обычном ноутбуке — ей
+   нужно 1465 px, и «Состав альбома» с переключателем панелей уезжали за правый
+   край на 145 и 185 px. До них было не добраться ВООБЩЕ. Прячем подписи
+   режимов: иконка, aria-label и подсказка остаются, ряд ужимается на ~310 px. */
+@media(max-width:1400px){
+  .workspace-modes button>span{display:none}
+  .workspace-modes button{padding:0 13px}
+}
+/* Кнопка поиска инструментов ужималась до 16 px по ширине — вдвое меньше
+   соседних квадратных кнопок и меньше порога попадания курсором. */
+header #open-cmdk{flex:0 0 32px;min-width:32px}
 
 #main{background:var(--canvas-bg)}
 #layers-panel{
@@ -200,7 +211,11 @@ body.panel-resizing #toolbar{transition:none}
 /* Подложка в панели слоёв: это такой же слой, только чужой. Прижата к низу
    панели, как в QGIS, и не растёт вместе со списком слоёв. */
 .basemap-block{flex:0 0 auto;padding:10px 12px;border-top:1px solid var(--hairline);background:var(--panel)}
-.basemap-block>.chk{font-size:var(--fs-12);font-weight:var(--fw-semibold);margin-bottom:8px}
+.basemap-block>.chk{font-size:var(--fs-12);font-weight:var(--fw-semibold);margin-bottom:8px;
+  display:flex;align-items:center;gap:8px;cursor:pointer;min-height:24px}
+/* Флажок «Подложка» жил без своего правила и брал системный размер 13×13 —
+   мельче всех прочих флажков студии и мельче порога попадания курсором. */
+.basemap-block>.chk input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:0 0 auto}
 .basemap-fields{display:flex;flex-direction:column;gap:8px}
 .basemap-fields .select{width:100%;height:32px;font-size:var(--fs-11)}
 .basemap-fields>label{font-size:var(--fs-10);color:var(--text-2);font-weight:var(--fw-medium)}

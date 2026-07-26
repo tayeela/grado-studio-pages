@@ -4,8 +4,15 @@
     {
       "name": "grado-pages",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "http-server", ".", "-p", "8231", "-c-1"],
-      "port": 8231
+      "runtimeArgs": [
+        "--yes",
+        "http-server",
+        ".",
+        "-p",
+        "8433",
+        "-c-1"
+      ],
+      "port": 8433
     }
   ]
 }
