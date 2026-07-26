@@ -44,12 +44,30 @@ def main():
                  "именно его и забыл прошлый ручной бамп")
     писать("index.html", html)
 
+    # Сторож самообновления сравнивает ВПЕЧАТАННЫЙ номер с version.json. Он тоже
+    # обязан ехать вместе со всеми: пока он отставал, каждое открытие страницы
+    # видело расхождение и делало лишнюю перезагрузку с ?b=НОМЕР.
+    html, замен = re.subn(r'(\bvar B\s*=\s*")\d+(")', rf"\g<1>{стало}\g<2>", html)
+    if замен != 1:
+        sys.exit("сторож самообновления (var B) в index.html не найден")
+    писать("index.html", html)
+
     version = json.loads(читать("version.json"))
     version["bundle_version"] = стало
+    # Версия, которую человек видит в шапке — это version, а не номер сборки.
+    # Пока бамп её не трогал, в углу годами стояло одно и то же число, и по нему
+    # нельзя было понять, доехала выкладка или нет. Поднимаем младшую цифру.
+    части = str(version.get("version", "0.0.0")).split(".")
+    while len(части) < 3:
+        части.append("0")
+    части[-1] = str(int(части[-1]) + 1)
+    version["version"] = ".".join(части)
+    version["bundle_short_version"] = version["version"]
     писать("version.json", json.dumps(version, ensure_ascii=False, indent=2) + "\n")
 
     меток = len(re.findall(r"\?v=" + стало, html))
-    print(f"bump: {было} -> {стало} (tags {меток} + var + version.json)")
+    print(f"bump: {было} -> {стало} (tags {меток} + var + сторож + version.json), "
+          f"версия в шапке {version['version']}")
 
 
 if __name__ == "__main__":

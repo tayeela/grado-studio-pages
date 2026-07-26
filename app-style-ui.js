@@ -688,6 +688,30 @@ function initRulesControls({ overlay, $, layer, work, fieldCols, clearStyleError
   return { liveRules, validateRules, syncRules };
 }
 
+// Подпись слоя в fmt. Отдельно от «единого стиля» намеренно: слой красных
+// линий раскрашен ЗНАКАМИ ОБЪЕКТОВ (lgr_code у каждой линии), общего цвета у
+// слоя нет. Пока подпись собиралась вместе с цветом, её включение писало в
+// layer.fmt весь блок цвета из формы — и он ложился поверх знаков: все линии
+// разом становились серыми.
+function собратьПодпись(fmt, $, lcolorCF, baseLabel) {
+  if ($("fmt-label").checked) { if (baseLabel) fmt.line_label = baseLabel; }
+  else fmt.line_label = null;
+  if (!$("fmt-labelf")) return fmt;
+  const поле = $("fmt-labelf").value;
+  fmt.label_field = поле || null;   // null явно глушит подпись знака (напр. этажность)
+  fmt.label_font = поле ? {
+    size: boundedNumber($("fmt-lsize").value, 6, 72, 11),
+    color: lcolorCF.get(),
+    family: $("fmt-lfamily").value || "ui",
+  } : null;
+  return fmt;
+}
+
+// Поля, которые НЕ означают «перекрасить весь слой одинаково»: вся секция
+// подписи. Правка подписи применяется, но «единым стилем» не считается.
+const НЕ_ВИЗУАЛЬНЫЕ = new Set(["fmt-label", "fmt-labelf", "fmt-lsize",
+                               "fmt-lcolor", "fmt-lfamily"]);
+
 function openLayerStyle(layer, opts = {}) {
   closePopups();
   const historyBefore = window.captureHistoryState ? window.captureHistoryState() : null;
@@ -855,8 +879,12 @@ ${styleGraduatedModePanel(ctx)}
   $("fmt-opacity").addEventListener("input", syncOpUI);
   syncOpUI();
   const strokeCF = makeColorField($("fmt-stroke"), toHexColor(cur.stroke, "#888888"), onColor);
+  // Цвет ПОДПИСИ красит текст, а не линию: он не должен включать «единый
+  // стиль», иначе смена цвета подписи перекрашивала бы все объекты слоя в цвет
+  // из формы — тот же дефект, что был у самого включения подписи.
+  const onLabelColor = () => { layer.fmt = collect(); draw(); };
   const lcolorCF = $("fmt-lcolor")
-    ? makeColorField($("fmt-lcolor"), toHexColor(lfFont.color, "#5c5a54"), onColor) : null;
+    ? makeColorField($("fmt-lcolor"), toHexColor(lfFont.color, "#5c5a54"), onLabelColor) : null;
   const closeColorFields = () => { fillCF.close(); strokeCF.close(); if (lcolorCF) lcolorCF.close(); };
 
   const syncCategoryStyles = catId => {
@@ -971,6 +999,7 @@ ${styleGraduatedModePanel(ctx)}
       delete fmt.uniform_style;
     }
 
+    собратьПодпись(fmt, $, lcolorCF, baseLabel);
     if (!includeUniform) return fmt;
     if ($("fmt-hatch").checked) {
       const av = $("fmt-hangle").value;
@@ -986,17 +1015,6 @@ ${styleGraduatedModePanel(ctx)}
         dir: $("fmt-marker-dir").value === "out" ? "out" : "in",
       };
     } else fmt.line_marker = null;
-    if ($("fmt-label").checked) { if (baseLabel) fmt.line_label = baseLabel; }
-    else fmt.line_label = null;
-    if ($("fmt-labelf")) {
-      const lff = $("fmt-labelf").value;
-      fmt.label_field = lff || null;   // null явно глушит подпись знака (напр. этажность)
-      fmt.label_font = lff ? {
-        size: boundedNumber($("fmt-lsize").value, 6, 72, 11),
-        color: lcolorCF.get(),
-        family: $("fmt-lfamily").value || "ui",
-      } : null;
-    }
     if (baseDouble) fmt.double = baseDouble;
     const ref = $("fmt-preset").value;
     if (ref) fmt.style_ref = ref;
@@ -1050,14 +1068,17 @@ ${styleGraduatedModePanel(ctx)}
     layer.fmt = collect(); draw(); updateDashPreview();
   });
   $("ls-single").querySelectorAll("input, select").forEach(el => {
-    // fmt-scale-max — не визуальный параметр: без исключения смена масштабной
-    // видимости включала бы uniformStyleDirty и затирала оформление категорий.
     if (el.id === "fmt-preset" || el.id === "fmt-copy-to" ||
-        el.id === "fmt-scale-max" || el.classList.contains("fmt-cat")) return;
+        el.classList.contains("fmt-cat")) return;
+    // Масштабная видимость и ВСЯ секция подписи применяются, но «единым стилем»
+    // НЕ считаются. Прежде любая правка подписи поднимала uniformStyleDirty, и
+    // collect писал в layer.fmt блок цвета из формы — он перекрывал знаки
+    // объектов, и слой красных линий разом становился серым.
+    const визуальный = el.id !== "fmt-scale-max" && !НЕ_ВИЗУАЛЬНЫЕ.has(el.id);
     for (const ev of ["input", "change"])
       el.addEventListener(ev, () => {
-        uniformStyleDirty = true;
-        $("fmt-preset").value = ""; layer.fmt = collect(); draw(); updateDashPreview();
+        if (визуальный) { uniformStyleDirty = true; $("fmt-preset").value = ""; }
+        layer.fmt = collect(); draw(); updateDashPreview();
       });
   });
   if ($("fmt-copy")) $("fmt-copy").addEventListener("click", () => {
