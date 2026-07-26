@@ -58,7 +58,8 @@ const БЮДЖЕТ = {
   // вынесено из drawNow дословно; единственный continue стал return
   "app-labels-place.js drawFeatureOnLayer": 248,
   "app-labels-place.js drawTinyRing": 19,   // 523 -> 306: пикетаж и живые подсказки вынесены
-  "app-labels-place.js drawLiveHints": 204,  // вынесено из drawNow целиком, дословно
+  // 204 → 54: подсказки черчения и подсказки измерений вынесены отдельно.
+  "app-labels-place.js drawLiveHints": 54,
   "app-layer-panel.js renderLayers": 110,   // 270 -> 110: строка слоя вынесена
   "app-layer-panel.js layerPanelRow": 166,  // вынесено из renderLayers дословно
   // 258 -> 206 -> 209: список, свотч и разметка вынесены; +1 — вызов dockOverlay.
