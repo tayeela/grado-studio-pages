@@ -125,12 +125,16 @@ function dataFetchAbortError() {
 // Источники запрашиваются отдельными пакетами: так интерфейс показывает
 // фактический прогресс, а AbortController останавливает текущий запрос. Ответы
 // остаются временными до единственного commitPreparedSourceImport ниже, поэтому
-// отмена или ошибка любого источника не меняет проект частично.
+// отмена не меняет проект частично. ОШИБКА одного источника остальных не
+// отменяет: живой прогон показал цену прежнего правила — OSM отдал 806 дорог,
+// здания дали сбой, и цикл обрывался броском; два невыполненных источника
+// навсегда застывали в «Ожидает», а готовые дороги выбрасывались.
 async function fetchExtentSourceBatches(bbox, sources, options = {}) {
   const request = options.request || fetch;
   const signal = options.signal;
   const onProgress = typeof options.onProgress === "function" ? options.onProgress : () => {};
   const batches = [];
+  const failures = [];        // источники, которые не дались; очередь идёт дальше
   for (let index = 0; index < sources.length; index++) {
     if (signal?.aborted) throw dataFetchAbortError();
     const source = sources[index];
@@ -151,13 +155,18 @@ async function fetchExtentSourceBatches(bbox, sources, options = {}) {
       onProgress({ source, index, total: sources.length, state: "done", count });
     } catch (error) {
       if (signal?.aborted && error?.name !== "AbortError") error = dataFetchAbortError();
-      if (error?.name !== "AbortError") {
-        error.source = source;
-        onProgress({ source, index, total: sources.length, state: "failed", error });
-      }
-      throw error;
+      if (error?.name === "AbortError") throw error;      // отмену человек запросил сам
+      // Один упавший источник больше НЕ отменяет остальные. Живой прогон это и
+      // вскрыл: из четырёх слоёв OSM отдал 806 дорог, здания дали ошибку — и
+      // цикл обрывался броском. Два оставшихся источника навсегда застывали в
+      // статусе «Ожидает» (их просто не начинали), а загруженные дороги
+      // выбрасывались. Теперь ошибка запоминается, а очередь идёт дальше.
+      error.source = source;
+      failures.push({ source, error });
+      onProgress({ source, index, total: sources.length, state: "failed", error });
     }
   }
+  batches.failures = failures;
   return batches;
 }
 
@@ -294,18 +303,22 @@ function dataReviewStepHtml(v) {
     importing, areaTxt } = v;
     const rows = selectedRows();
     const groups = sourceOrder.map(gi => ({ gi, rows: rows.filter(row => row.gi === gi) })).filter(group => group.rows.length);
+    // «Ошибка» без причины — это не сообщение, а обозначение беды. Причину
+    // externalFetch формулирует по-человечески; доносим её до строки источника
+    // целиком в подсказке и коротко в самой строке.
+    const failReason = progress => String(progress?.error?.message || progress?.error || "").trim();
     const stateLabel = progress => progress?.state === "loading" ? "Загружается"
       : progress?.state === "done" ? `${progress.count || 0} объектов`
-      : progress?.state === "failed" ? "Ошибка"
+      : progress?.state === "failed" ? (failReason(progress) || "Ошибка")
       : progress?.state === "cancelled" ? "Отменено" : "Ожидает";
     return `<section class="data-review-step"><div class="data-review-head"><div><h2>${importing ? "Загружаем выбранные данные" : "Проверьте состав загрузки"}</h2>
-      <p>${importing ? "Проект изменится один раз — только после успешной загрузки всех источников." : "Каждый источник создаст отдельные слои. Повторная загрузка не создаёт дубликатов."}</p></div>
+      <p>${importing ? "Проект изменится один раз — когда отработают все источники. Тот, что не дался, не отменяет остальные." : "Каждый источник создаст отдельные слои. Повторная загрузка не создаёт дубликатов."}</p></div>
       <button data-action="clear-selection"${rows.length && !importing ? "" : " disabled"}>Снять всё</button></div>
       <div class="data-review-grid"><div class="data-review-list">${groups.length ? groups.map(({ gi, rows: groupRows }) =>
         `<section><header>${icon(groupUi[gi].icon)}<b>${escHtml(DATA_SOURCE_GROUPS[gi].title)}</b><span>${groupRows.length}</span></header>
           ${groupRows.map(row => { const progress = loadProgress.get(row.key); return `<div class="data-review-row${progress ? ` is-${progress.state}` : ""}">
             <span class="data-review-label">${escHtml(row.label)}</span>
-            ${importing || progress ? `<span class="data-load-state ${progress?.state || "pending"}" aria-label="${stateLabel(progress)}">${stateLabel(progress)}</span>` : ""}
+            ${importing || progress ? `<span class="data-load-state ${progress?.state || "pending"}" title="${escHtml(stateLabel(progress))}" aria-label="${escHtml(stateLabel(progress))}">${escHtml(stateLabel(progress))}</span>` : ""}
             <button data-remove="${escHtml(row.key)}" aria-label="Убрать ${escHtml(row.label)}"${importing ? " disabled" : ""}>${icon("ic-close")}</button></div>`; }).join("")}</section>`).join("")
         : `<div class="data-empty"><b>Нет выбранных слоёв</b><span>Вернитесь к источникам и отметьте нужные данные.</span></div>`}</div>
         <aside class="data-review-summary"><h3>Итого</h3><dl><div><dt>Слоёв</dt><dd>${rows.length}</dd></div><div><dt>Источников</dt><dd>${selectedSourceCount()}</dd></div>
@@ -653,12 +666,21 @@ async function openDataFetch() {
         },
       });
       const data = mergeExtentSourceBatches(batches);
+      // Причины неудач называем поимённо. Раньше строка источника показывала
+      // одно слово «Ошибка», а текст причины (его как раз даёт externalFetch)
+      // никуда не доходил — человек видел статус и ничего больше.
+      const провалы = (batches.failures || []).map(({ source, error }) =>
+        `${labelForKey(source)}: ${error?.message || error}`);
       const groups = (data.groups || []).filter(group => group.count > 0);
       const total = groups.reduce((sum, group) => sum + group.count, 0);
       if (!total) {
         importing = false; loadController = null; step = 2;
-        loadMessage = "В выбранной области данных не найдено"; render();
-        if (data.notes?.length) toast(data.notes.join(" · "), "warn");
+        loadMessage = провалы.length
+          ? `Ни один источник не отдал данные: ${провалы.join(" · ")}`
+          : "В выбранной области данных не найдено";
+        render();
+        if (провалы.length) toast(loadMessage, "error");
+        else if (data.notes?.length) toast(data.notes.join(" · "), "warn");
         return;
       }
       loadMessage = "Проверяем данные перед добавлением в проект…";
@@ -682,8 +704,12 @@ async function openDataFetch() {
       const duplicateNote = dup ? ` · ${dup} уже были` : "";
       const invalidNote = invalid ? ` · ${invalid} поврежд. пропущено` : "";
       const notes = (data.notes || []).filter(Boolean);
-      toast(`Данные: +${plObjects(added)}${joinNote}${duplicateNote}${invalidNote}${notes.length ? ` · ${notes.join(" · ")}` : ""}`,
-        invalid || notes.length ? "warn" : undefined);
+      // Загруженное применяем, о неудавшемся говорим отдельно и с причиной:
+      // терять 806 готовых дорог из-за того, что не далось четвёртое здание, —
+      // худшее из возможных решений.
+      const failNote = провалы.length ? ` · не далось: ${провалы.join(" · ")}` : "";
+      toast(`Данные: +${plObjects(added)}${joinNote}${duplicateNote}${invalidNote}${failNote}${notes.length ? ` · ${notes.join(" · ")}` : ""}`,
+        провалы.length ? "warn" : (invalid || notes.length ? "warn" : undefined));
     } catch (error) {
       importing = false; loadController = null; step = 3;
       if (error?.name === "AbortError") {
