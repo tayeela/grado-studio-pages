@@ -599,6 +599,95 @@ function initGraduatedControls({ layer, $, numericCols, layerFeatures, SYMBOLOGY
     rebuild: rebuildGrad, checkExpressions };
 }
 
+// Режим «По значению поля»: таблица правил «поле — оператор — значение — знак»,
+// её проверка перед применением и живой предпросмотр на холсте. Всё замкнуто на
+// элементах cr-* внутри окна и общем массиве work (передаётся по ссылке —
+// правки внутри видны снаружи).
+function initRulesControls({ overlay, $, layer, work, fieldCols, clearStyleError, showStyleError }) {
+  const fieldOpts = sel => fieldCols.length
+    ? fieldCols.map(c => `<option value="${escHtml(c.name)}"${c.name === sel ? " selected" : ""}>${escHtml(c.label)}</option>`).join("")
+    : `<option value="">— нет полей —</option>`;
+  const ops = ["=", ">", "<", ">=", "<=", "contains", "starts"];
+  const opOpts = (cur) => ops.map(o => `<option value="${o}"${o === (cur || "=") ? " selected" : ""}>${o}</option>`).join("");
+  const rulesRowsHtml = () => work.length ? work.map((r, i) => `<tr>
+      <td><select class="cr-field" data-i="${i}" aria-label="Поле правила ${i + 1}">${fieldOpts(r.field)}</select></td>
+      <td><select class="cr-op" data-i="${i}" aria-label="Оператор правила ${i + 1}">${opOpts(r.op)}</select></td>
+      <td><input class="cr-value" data-i="${i}" aria-label="Значение правила ${i + 1}" value="${escHtml(r.value ?? "")}" placeholder="значение"></td>
+      <td><select class="cr-style" data-i="${i}" aria-label="Стиль правила ${i + 1}">${stylePickerOptions(r.style_id)}</select></td>
+      <td class="mf-ord"><button class="mf-del cr-del" data-i="${i}" aria-label="Удалить правило ${i + 1}">✕</button></td>
+    </tr>`).join("")
+    : `<tr><td colspan="5" class="muted" style="padding:10px">${fieldCols.length
+      ? "Правил пока нет — добавьте первое правило."
+      : "Нет доступных полей для правил."}</td></tr>`;
+  const syncRules = () => {
+    overlay.querySelectorAll(".cr-field").forEach(el => { work[+el.dataset.i].field = el.value; });
+    overlay.querySelectorAll(".cr-op").forEach(el => { work[+el.dataset.i].op = el.value; });
+    overlay.querySelectorAll(".cr-value").forEach(el => { work[+el.dataset.i].value = el.value; });
+    overlay.querySelectorAll(".cr-style").forEach(el => { work[+el.dataset.i].style_id = el.value; });
+  };
+  const validateRules = () => {
+    syncRules();
+    const index = work.findIndex(rule => !rule.field ||
+      !String(rule.value ?? "").trim() || !rule.style_id);
+    if (index < 0) { clearStyleError(); return true; }
+    const row = $("cr-body").querySelectorAll("tr")[index];
+    const rule = work[index];
+    const input = !rule.field ? row?.querySelector(".cr-field")
+      : !String(rule.value ?? "").trim() ? row?.querySelector(".cr-value")
+      : row?.querySelector(".cr-style");
+    const missing = !rule.field ? "поле" : !String(rule.value ?? "").trim()
+      ? "значение" : "знак";
+    if (!input) return false;
+    return showStyleError(input,
+      `Правило ${index + 1}: укажите ${missing}.`,
+      row.closest(".cr-table-wrap"));
+  };
+  const liveRules = () => {   // живой предпросмотр правил на холсте
+    const clean = work.filter(r => r.field && r.value !== "" && r.style_id);
+    if (clean.length) layer.rules = clean; else delete layer.rules;
+    draw();
+  };
+  const renderRules = () => {
+    clearStyleError();
+    $("cr-body").innerHTML = rulesRowsHtml();
+    overlay.querySelectorAll(".cr-field").forEach(el => el.onchange = () => {
+      clearStyleError(); work[+el.dataset.i].field = el.value; liveRules();
+    });
+    overlay.querySelectorAll(".cr-op").forEach(el => el.onchange = () => {
+      clearStyleError(); work[+el.dataset.i].op = el.value; liveRules();
+    });
+    overlay.querySelectorAll(".cr-value").forEach(el => el.oninput = () => {
+      clearStyleError(); work[+el.dataset.i].value = el.value; liveRules();
+    });
+    overlay.querySelectorAll(".cr-style").forEach(el => el.onchange = async () => {
+      clearStyleError();
+      let val = el.value;
+      if (val === "__create_project_style__") {
+        const newId = await createProjectStyle();
+        if (newId) {
+          val = newId;
+          el.innerHTML = stylePickerOptions(newId);
+          el.value = newId;
+        } else {
+          val = work[+el.dataset.i].style_id || "";
+          el.value = val;
+        }
+      }
+      work[+el.dataset.i].style_id = val;
+      liveRules();
+    });
+    overlay.querySelectorAll(".cr-del").forEach(el => el.onclick = () => { syncRules(); work.splice(+el.dataset.i, 1); renderRules(); liveRules(); });
+  };
+  renderRules();
+  $("cr-add").addEventListener("click", () => {
+    if (!fieldCols.length) return;
+    syncRules();
+    work.push({ field: fieldCols[0] ? fieldCols[0].name : "", op: "=", value: "", style_id: "" });
+    renderRules();
+  });
+  return { liveRules, validateRules, syncRules };
+}
+
 function openLayerStyle(layer, opts = {}) {
   closePopups();
   const historyBefore = window.captureHistoryState ? window.captureHistoryState() : null;
@@ -981,88 +1070,11 @@ ${styleGraduatedModePanel(ctx)}
     toast(`Оформление скопировано на ${dest.length} слой(ёв)`);
   });
 
-  // ----- режим «По значению поля» -----
-  const fieldOpts = sel => fieldCols.length
-    ? fieldCols.map(c => `<option value="${escHtml(c.name)}"${c.name === sel ? " selected" : ""}>${escHtml(c.label)}</option>`).join("")
-    : `<option value="">— нет полей —</option>`;
-  const ops = ["=", ">", "<", ">=", "<=", "contains", "starts"];
-  const opOpts = (cur) => ops.map(o => `<option value="${o}"${o === (cur || "=") ? " selected" : ""}>${o}</option>`).join("");
-  const rulesRowsHtml = () => work.length ? work.map((r, i) => `<tr>
-      <td><select class="cr-field" data-i="${i}" aria-label="Поле правила ${i + 1}">${fieldOpts(r.field)}</select></td>
-      <td><select class="cr-op" data-i="${i}" aria-label="Оператор правила ${i + 1}">${opOpts(r.op)}</select></td>
-      <td><input class="cr-value" data-i="${i}" aria-label="Значение правила ${i + 1}" value="${escHtml(r.value ?? "")}" placeholder="значение"></td>
-      <td><select class="cr-style" data-i="${i}" aria-label="Стиль правила ${i + 1}">${stylePickerOptions(r.style_id)}</select></td>
-      <td class="mf-ord"><button class="mf-del cr-del" data-i="${i}" aria-label="Удалить правило ${i + 1}">✕</button></td>
-    </tr>`).join("")
-    : `<tr><td colspan="5" class="muted" style="padding:10px">${fieldCols.length
-      ? "Правил пока нет — добавьте первое правило."
-      : "Нет доступных полей для правил."}</td></tr>`;
-  const syncRules = () => {
-    overlay.querySelectorAll(".cr-field").forEach(el => { work[+el.dataset.i].field = el.value; });
-    overlay.querySelectorAll(".cr-op").forEach(el => { work[+el.dataset.i].op = el.value; });
-    overlay.querySelectorAll(".cr-value").forEach(el => { work[+el.dataset.i].value = el.value; });
-    overlay.querySelectorAll(".cr-style").forEach(el => { work[+el.dataset.i].style_id = el.value; });
-  };
-  const validateRules = () => {
-    syncRules();
-    const index = work.findIndex(rule => !rule.field ||
-      !String(rule.value ?? "").trim() || !rule.style_id);
-    if (index < 0) { clearStyleError(); return true; }
-    const row = $("cr-body").querySelectorAll("tr")[index];
-    const rule = work[index];
-    const input = !rule.field ? row?.querySelector(".cr-field")
-      : !String(rule.value ?? "").trim() ? row?.querySelector(".cr-value")
-      : row?.querySelector(".cr-style");
-    const missing = !rule.field ? "поле" : !String(rule.value ?? "").trim()
-      ? "значение" : "знак";
-    if (!input) return false;
-    return showStyleError(input,
-      `Правило ${index + 1}: укажите ${missing}.`,
-      row.closest(".cr-table-wrap"));
-  };
-  const liveRules = () => {   // живой предпросмотр правил на холсте
-    const clean = work.filter(r => r.field && r.value !== "" && r.style_id);
-    if (clean.length) layer.rules = clean; else delete layer.rules;
-    draw();
-  };
-  const renderRules = () => {
-    clearStyleError();
-    $("cr-body").innerHTML = rulesRowsHtml();
-    overlay.querySelectorAll(".cr-field").forEach(el => el.onchange = () => {
-      clearStyleError(); work[+el.dataset.i].field = el.value; liveRules();
-    });
-    overlay.querySelectorAll(".cr-op").forEach(el => el.onchange = () => {
-      clearStyleError(); work[+el.dataset.i].op = el.value; liveRules();
-    });
-    overlay.querySelectorAll(".cr-value").forEach(el => el.oninput = () => {
-      clearStyleError(); work[+el.dataset.i].value = el.value; liveRules();
-    });
-    overlay.querySelectorAll(".cr-style").forEach(el => el.onchange = async () => {
-      clearStyleError();
-      let val = el.value;
-      if (val === "__create_project_style__") {
-        const newId = await createProjectStyle();
-        if (newId) {
-          val = newId;
-          el.innerHTML = stylePickerOptions(newId);
-          el.value = newId;
-        } else {
-          val = work[+el.dataset.i].style_id || "";
-          el.value = val;
-        }
-      }
-      work[+el.dataset.i].style_id = val;
-      liveRules();
-    });
-    overlay.querySelectorAll(".cr-del").forEach(el => el.onclick = () => { syncRules(); work.splice(+el.dataset.i, 1); renderRules(); liveRules(); });
-  };
-  renderRules();
-  $("cr-add").addEventListener("click", () => {
-    if (!fieldCols.length) return;
-    syncRules();
-    work.push({ field: fieldCols[0] ? fieldCols[0].name : "", op: "=", value: "", style_id: "" });
-    renderRules();
-  });
+  // Режим «По значению поля» вынесен: таблица правил, их проверка и живой
+  // предпросмотр замкнуты на элементах cr-* и общем массиве work.
+  const правила = initRulesControls({ overlay, $, layer, work, fieldCols,
+    clearStyleError, showStyleError });
+  const { liveRules, validateRules, syncRules } = правила;
 
   // Градуированная символика вынесена целиком: она замкнута на своих полях
   // gr-* и наружу отдаёт только правила, их пересчёт и проверку выражений.

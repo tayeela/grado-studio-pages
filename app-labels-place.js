@@ -791,46 +791,11 @@ function drawTinyRing(f, st) {
   return true;
 }
 
-function drawNow() {
-  const w = viewportW(), h = viewportH();
-  ctx.clearRect(0, 0, w, h);
-  // На листе ни сетки, ни тайлов подложки: сетка — вспомогательная разметка
-  // экрана, а растр вкладывается отдельно, когда до него дойдёт очередь.
-  if (!_renderTarget) { drawBasemap(w, h); drawGrid(w, h); }
-
-  // видимый мировой прямоугольник (+ поле) для отсечения объектов за экраном
-  const _vpad = 40 / state.view.k;
-  const _p0 = s2w(0, h), _p1 = s2w(w, 0);
-  const vMinX = Math.min(_p0[0], _p1[0]) - _vpad, vMaxX = Math.max(_p0[0], _p1[0]) + _vpad;
-  const vMinY = Math.min(_p0[1], _p1[1]) - _vpad, vMaxY = Math.max(_p0[1], _p1[1]) + _vpad;
-  const _cull = f => {
-    if (f.point) return f.point[0] < vMinX || f.point[0] > vMaxX || f.point[1] < vMinY || f.point[1] > vMaxY;
-    if (f.circle) { const c = f.circle; return c.cx + c.r < vMinX || c.cx - c.r > vMaxX || c.cy + c.r < vMinY || c.cy - c.r > vMaxY; }
-    if (f.arc) { const a = f.arc; return a.cx + a.r < vMinX || a.cx - a.r > vMaxX || a.cy + a.r < vMinY || a.cy - a.r > vMaxY; }
-    const pts = f.ring || f.line; if (!pts || !pts.length) return false;
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (const p of pts) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
-    return x1 < vMinX || x0 > vMaxX || y1 < vMinY || y0 > vMaxY;
-  };
-  // бакет объектов по слою ОДИН раз (было O(слои×объекты): каждый объект
-  // перебирался заново на каждый слой) + отсечение по видимой области.
-  const _byLayer = new Map();
-  for (const f of state.features) {
-    const L = layerOf(f);
-    if (!layerDrawable(L) || _cull(f) || catOff(L, f)) continue;
-    let arr = _byLayer.get(L); if (!arr) _byLayer.set(L, arr = []); arr.push(f);
-  }
-  // Подписи собираются за кадр и раскладываются ПОСЛЕ отрисовки объектов
-  // (см. app-labels.js). Сетка занятости одна на кадр, а не на слой: раньше
-  // подписи разных слоёв садились друг на друга, потому что сеток было столько
-  // же, сколько слоёв. Подписи знака (вдоль линии) рисуются сразу — они часть
-  // условного знака — и занимают места первыми.
-  const _labelGrid = LABELS ? LABELS.createGrid() : null;
-  const _labelJobs = [];
-  for (const layer of LAYERS_V2) {
-    if (!layer.visible) continue;
-    const _feats = _byLayer.get(layer); if (!_feats) continue;
-    for (const f of _feats) {
+// Отрисовка ОДНОГО объекта в его слое: знак, штрих в метрах местности, ветки
+// по виду (выноска, размер, пикетаж…) и заявка на подпись. Вынесено из drawNow
+// дословно — 246 строк тела внутреннего цикла. Снаружи нужны только объект,
+// его слой и две копилки кадра: заявки на подписи и сетка занятости.
+function drawFeatureOnLayer(f, layer, _labelJobs, _labelGrid) {
       const st = styleOf(f);
       // ЛГР: штрих в метрах местности → px по текущему зуму (см. groundFactor).
       // Этот же массив уходит в drawLineMarkers — фаза засечки обязана
@@ -840,7 +805,7 @@ function drawNow() {
       // читаемый режим поднимает волосок 1 px до разборчивого (см. lgrWidth)
       const stWidth = lgrWidth(st);
       ctx.lineWidth = stWidth; ctx.strokeStyle = canvasStrokeOf(f, st);
-      if (drawTinyRing(f, st)) continue;
+      if (drawTinyRing(f, st)) return;   // пропуск объекта: в цикле это был continue
       if (layer.kind === "leader" && f.line) { drawLeader(f, st); } else if (layer.kind === "dim" && f.line) {
         // размерная линия: засечки 45° на концах + длина вдоль линии
         const [ax, ay] = w2s(...f.line[0]);
@@ -1077,7 +1042,48 @@ function drawNow() {
           });
         }
       }
-    }
+}
+
+function drawNow() {
+  const w = viewportW(), h = viewportH();
+  ctx.clearRect(0, 0, w, h);
+  // На листе ни сетки, ни тайлов подложки: сетка — вспомогательная разметка
+  // экрана, а растр вкладывается отдельно, когда до него дойдёт очередь.
+  if (!_renderTarget) { drawBasemap(w, h); drawGrid(w, h); }
+
+  // видимый мировой прямоугольник (+ поле) для отсечения объектов за экраном
+  const _vpad = 40 / state.view.k;
+  const _p0 = s2w(0, h), _p1 = s2w(w, 0);
+  const vMinX = Math.min(_p0[0], _p1[0]) - _vpad, vMaxX = Math.max(_p0[0], _p1[0]) + _vpad;
+  const vMinY = Math.min(_p0[1], _p1[1]) - _vpad, vMaxY = Math.max(_p0[1], _p1[1]) + _vpad;
+  const _cull = f => {
+    if (f.point) return f.point[0] < vMinX || f.point[0] > vMaxX || f.point[1] < vMinY || f.point[1] > vMaxY;
+    if (f.circle) { const c = f.circle; return c.cx + c.r < vMinX || c.cx - c.r > vMaxX || c.cy + c.r < vMinY || c.cy - c.r > vMaxY; }
+    if (f.arc) { const a = f.arc; return a.cx + a.r < vMinX || a.cx - a.r > vMaxX || a.cy + a.r < vMinY || a.cy - a.r > vMaxY; }
+    const pts = f.ring || f.line; if (!pts || !pts.length) return false;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const p of pts) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    return x1 < vMinX || x0 > vMaxX || y1 < vMinY || y0 > vMaxY;
+  };
+  // бакет объектов по слою ОДИН раз (было O(слои×объекты): каждый объект
+  // перебирался заново на каждый слой) + отсечение по видимой области.
+  const _byLayer = new Map();
+  for (const f of state.features) {
+    const L = layerOf(f);
+    if (!layerDrawable(L) || _cull(f) || catOff(L, f)) continue;
+    let arr = _byLayer.get(L); if (!arr) _byLayer.set(L, arr = []); arr.push(f);
+  }
+  // Подписи собираются за кадр и раскладываются ПОСЛЕ отрисовки объектов
+  // (см. app-labels.js). Сетка занятости одна на кадр, а не на слой: раньше
+  // подписи разных слоёв садились друг на друга, потому что сеток было столько
+  // же, сколько слоёв. Подписи знака (вдоль линии) рисуются сразу — они часть
+  // условного знака — и занимают места первыми.
+  const _labelGrid = LABELS ? LABELS.createGrid() : null;
+  const _labelJobs = [];
+  for (const layer of LAYERS_V2) {
+    if (!layer.visible) continue;
+    const _feats = _byLayer.get(layer); if (!_feats) continue;
+    for (const f of _feats) drawFeatureOnLayer(f, layer, _labelJobs, _labelGrid);
   }
 
   // подписи объектов: раскладка по одной сетке на кадр, важность решает, кто
