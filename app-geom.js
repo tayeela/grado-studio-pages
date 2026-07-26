@@ -17,12 +17,29 @@ function ringArea(ring) {
 // ТЭП считал бы её как зону (выколотые полигоны ОГД). Знак обхода колец в
 // данных портала не гарантирован, поэтому вычитаем модуль площади каждой дыры.
 function featureArea(f) {
-  if (!f || !f.ring) return 0;
+  if (!f) return 0;
+  // Окружность — такая же замкнутая площадная фигура, как кольцо, и рисуется
+  // своим инструментом. Пока её тут не было, круглая зона молча весила НОЛЬ:
+  // ни площади в ТЭП, ни $area в таблице, ни строки состояния. Считаем точно,
+  // а не по ломаной отрисовки — иначе площадь зависела бы от плотности сэмпла.
+  if (f.circle) return Math.PI * f.circle.r * f.circle.r;
+  if (!f.ring) return 0;
   let a = ringArea(f.ring);
   for (const h of f.holes || []) {
     if (h && h.length >= 3) a -= ringArea(h);
   }
   return Math.max(0, a);
+}
+// Длина объекта одной мерой: ломаная, дуга по радиусу и развороту, окружность
+// как периметр. Прежде длину брали только у f.line, и дуга с окружностью не
+// попадали ни в таблицу, ни в ТЭП, ни в статусную строку.
+function featureLength(f) {
+  if (!f) return 0;
+  if (f.line) return lineLen(f.line);
+  if (f.circle) return 2 * Math.PI * f.circle.r;
+  if (f.arc) return Math.abs(f.arc.sweep || 0) * f.arc.r;
+  if (f.ring) return lineLen([...f.ring, f.ring[0]]);   // периметр кольца
+  return 0;
 }
 function lineLen(line) {
   let s = 0;

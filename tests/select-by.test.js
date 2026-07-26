@@ -114,6 +114,13 @@ const names = list => list.map(f => f.props.name);
       return Math.abs(sum / 2); },
     lineLen: pts => { let sum = 0; for (let i = 1; i < pts.length; i++)
       sum += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return sum; },
+    // Меры объекта вычислитель берёт у общих функций геометрии — их и даём.
+    featureArea: f => f.circle ? Math.PI * f.circle.r * f.circle.r
+      : (f.ring ? context.ringArea(f.ring) : 0),
+    featureLength: f => f.line ? context.lineLen(f.line)
+      : f.circle ? 2 * Math.PI * f.circle.r
+      : f.arc ? Math.abs(f.arc.sweep || 0) * f.arc.r
+      : f.ring ? context.lineLen([...f.ring, f.ring[0]]) : 0,
   });
   vm.runInContext(src.slice(start, end), context);
   const evaluate = vm.runInContext("evalFieldExpr", context);

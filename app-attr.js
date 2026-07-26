@@ -27,8 +27,10 @@ function attrColumns(layer) {
   return cols;
 }
 function attrValue(f, col) {
-  if (col.name === "$area") return f.ring ? +ringArea(f.ring).toFixed(1) : "";
-  if (col.name === "$length") return f.line ? +lineLen(f.line).toFixed(1) : "";
+  // Площадь и длина берутся у ЛЮБОЙ геометрии, а не только у кольца и ломаной:
+  // круглая зона и дуга давали в таблице пусто, хотя объект есть и он измерим.
+  if (col.name === "$area") { const s = featureArea(f); return s ? +s.toFixed(1) : ""; }
+  if (col.name === "$length") { const d = featureLength(f); return d ? +d.toFixed(1) : ""; }
   const v = f.props ? f.props[col.name] : undefined;
   return v == null ? "" : v;
 }
@@ -112,8 +114,10 @@ function evalFieldExpr(expr, f) {
   let pos = 0;
   const peek = () => toks[pos], next = () => toks[pos++];
   const V = {};
-  if (f.ring) { V.$area = ringArea(f.ring); V.$perimeter = lineLen([...f.ring, f.ring[0]]); }
-  if (f.line) V.$length = lineLen(f.line);
+  // $area/$perimeter/$length — по любой геометрии (кольцо, круг, дуга, ломаная)
+  V.$area = featureArea(f);
+  V.$perimeter = f.ring ? lineLen([...f.ring, f.ring[0]]) : featureLength(f);
+  V.$length = featureLength(f);
   const resolve = name => {
     if (name[0] === "$") return V[name] ?? 0;
     const p = f.props ? f.props[name] : undefined;

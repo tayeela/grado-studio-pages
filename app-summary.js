@@ -23,6 +23,9 @@
   // Площадь с учётом дыр — как в featureArea: выколотая часть объекту не
   // принадлежит, иначе гектары в сводке разойдутся с ТЭП.
   function площадьОбъекта(f) {
+    // Круг — площадная фигура наравне с кольцом (та же правка, что в
+    // featureArea: круглая зона молча весила ноль в сводке и в ТЭП).
+    if (f && f.circle) return Math.PI * f.circle.r * f.circle.r;
     if (!f || !f.ring) return 0;
     let a = площадьКольца(f.ring);
     for (const h of f.holes || []) if (h && h.length >= 3) a -= площадьКольца(h);
@@ -30,6 +33,8 @@
   }
 
   function длинаОбъекта(f) {
+    if (f && f.circle) return 2 * Math.PI * f.circle.r;          // периметр круга
+    if (f && f.arc) return Math.abs(f.arc.sweep || 0) * f.arc.r;  // дуга по развороту
     const pts = f && (f.line || f.ring);
     if (!pts || pts.length < 2) return 0;
     let s = 0;

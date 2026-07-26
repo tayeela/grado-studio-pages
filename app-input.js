@@ -82,7 +82,7 @@ function hitCandidates(wx, wy, tolW) {
 function identifySummary(f) {
   if (f.ring) return `площадь ${fmtAreaHa(featureArea(f))}`;
   if (f.line) return `длина ${fmtLen(lineLen(f.line))}`;
-  if (f.circle) return `окружность R ${fmtLen(f.circle.r)}`;
+  if (f.circle) return `окружность R ${fmtLen(f.circle.r)}, площадь ${fmtAreaHa(featureArea(f))}`;
   if (f.arc) return `дуга R ${fmtLen(f.arc.r)}`;
   return "точка";
 }

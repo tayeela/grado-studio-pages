@@ -435,7 +435,7 @@ function announceSelection() {
       const parts = [layer ? `объект слоя «${layer.title}»` : "объект"];
       if (f.ring) parts.push(`площадь ${fmtAreaHa(featureArea(f))}`);
       else if (f.line) parts.push(`длина ${fmtLen(lineLen(f.line))}`);
-      else if (f.circle) parts.push(`окружность радиусом ${fmtLen(f.circle.r)}`);
+      else if (f.circle) parts.push(`окружность радиусом ${fmtLen(f.circle.r)}, площадь ${fmtAreaHa(featureArea(f))}`);
       else if (f.arc) parts.push(`дуга радиусом ${fmtLen(f.arc.r)}`);
       text = `Выбран ${parts.join(", ")}`;
     }
@@ -500,7 +500,7 @@ function featureAttrText(f) {
 function featureReadText(f, withAttrs) {
   const parts = [];
   if (f.ring) parts.push(`площадь ${fmtAreaHa(featureArea(f))}`);
-  else if (f.circle) parts.push(`окружность радиусом ${fmtLen(f.circle.r)}`);
+  else if (f.circle) parts.push(`окружность радиусом ${fmtLen(f.circle.r)}, площадь ${fmtAreaHa(featureArea(f))}`);
   else if (f.arc) parts.push(`дуга радиусом ${fmtLen(f.arc.r)}`);
   else if (f.line) parts.push(`длина ${fmtLen(lineLen(f.line))}`);
   else if (f.point) parts.push("точка");
