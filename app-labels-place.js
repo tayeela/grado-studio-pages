@@ -406,11 +406,28 @@ function drawDoubleLine(pts, gap, closed) {
 // и в QGIS-символике «line pattern», надпись повторяется вдоль линии с
 // оптимальным шагом. Раньше ставилась ОДНА на самом длинном отрезке — на
 // длинной красной линии терялась, на длинном контуре ЗОУИТ была одинока.
-function drawLineLabel(pts, text, color, grid) {
+// Кегль подписи знака. В эталонном textlines.qml он задан fontSize=10 при
+// fontSizeUnit=MapUnit — это 10 МЕТРОВ МЕСТНОСТИ, то есть на опорном 1:2000
+// 18.9 px, и он едет вместе с зумом, как сам знак. У нас стояло глухих 10 px:
+// на 1:2000 подпись выходила вдвое мельче эталона, а на 1:500 — вчетверо.
+// Пользовательских стилей не касается: у них нет ground_units.
+const LGR_LABEL_M = 10;
+const LGR_LABEL_MIN_PX = 9;          // ниже этого не читается и печатать нечего
+function lgrLabelSizePx(st) {
+  if (!st || !st.ground_units) return 10;
+  // 3779.5 = пикселей в миллиметре × 1000 — та же величина, что в lgrDenom и
+  // groundFactor этого файла; берём её же, а не MM_PX из соседнего модуля.
+  const наОпорном = LGR_LABEL_M * 3779.5 / (st.ref_scale || 2000);
+  return наОпорном * groundFactor(st);
+}
+
+function drawLineLabel(pts, text, color, grid, sizePx = 10) {
   const scr = pts.map(p => w2s(...p));
   if (scr.length < 2) return;
+  if (sizePx < LGR_LABEL_MIN_PX) return;      // мельче — смаз, QGIS тут знак прячет
   ctx.save();
-  ctx.font = "600 10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = `600 ${sizePx.toFixed(1)}px sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
   const textW = ctx.measureText(text).width;
   const half = textW / 2 + 3;                  // полуширина строки + зазор
   // отрезки в экранных пикселях + суммарная длина (параметризация по дуге)
@@ -455,7 +472,8 @@ function drawLineLabel(pts, text, color, grid) {
     for (const p of places) {
       // повёрнутый текст закрываем прямоугольником по его габариту
       const cos = Math.abs(Math.cos(p.ang)), sin = Math.abs(Math.sin(p.ang));
-      const bw = textW * cos + 12 * sin, bh = textW * sin + 12 * cos;
+      const выс = sizePx * 1.2;   // габарит строки едет вместе с кеглем
+      const bw = textW * cos + выс * sin, bh = textW * sin + выс * cos;
       const box = [p.x - bw / 2 - 2, p.y - bh / 2 - 2, p.x + bw / 2 + 2, p.y + bh / 2 + 2];
       if (grid.hits(box)) continue;
       grid.add(box);
@@ -936,7 +954,7 @@ function drawFeatureGeometry(f, layer, st, stDash, stWidth, _labelGrid) {
           drawFeatureMarkers(f, st, stWidth, stDash);
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
-          drawLineLabel(pts, st.line_label, st.stroke || cvColor("redline", "#d91a1a"), _labelGrid);
+          drawLineLabel(pts, st.line_label, st.stroke || cvColor("redline", "#d91a1a"), _labelGrid, lgrLabelSizePx(st));
         }
       }
       ctx.setLineDash([]);

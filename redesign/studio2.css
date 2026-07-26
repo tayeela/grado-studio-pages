@@ -101,6 +101,11 @@
 .layer-row .layer-disc{width:14px;height:18px;flex:0 0 auto;display:grid;place-items:center;
   color:var(--muted);font-size:var(--fs-10);line-height:1;cursor:pointer;border-radius:var(--r-sm);
   transition:transform var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),background var(--dur-1) var(--ease-out)}
+/* Сам треугольник маленький — так он и должен выглядеть в плотном дереве, — но
+   ПОПАДАТЬ по нему приходилось в 12×18 px. Расширяем только область нажатия
+   невидимой накладкой: рисунок и раскладка строки не меняются. */
+.layer-row .layer-disc{position:relative}
+.layer-row .layer-disc::after{content:"";position:absolute;top:-4px;bottom:-4px;left:-6px;right:-6px}
 .layer-row .layer-disc:hover{color:var(--text);background:var(--glass)}
 .layer-row .layer-disc.open{transform:rotate(90deg)}
 .layer-row .layer-disc-sp{width:14px;flex:0 0 auto}

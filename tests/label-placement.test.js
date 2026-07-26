@@ -110,8 +110,10 @@ const job = (text, x, y, extra = {}) => ({ text, x, y, width: 40, height: 12, ..
     "полюс обязан кешироваться: на 20 000 подписанных зданий пересчёт каждый кадр невозможен");
   assert.match(app, /const stamp = `\$\{ring\.length\}\|/,
     "но правка вершины обязана сбрасывать кеш");
-  assert.match(app, /drawLineLabel\(pts, st\.line_label, .+, _labelGrid\)/,
-    "подпись знака вдоль линии обязана занимать место в общей сетке");
+  assert.match(app, /drawLineLabel\(pts, st\.line_label, [\s\S]{0,140}_labelGrid, lgrLabelSizePx\(st\)\)/,
+    "подпись знака вдоль линии обязана занимать место в общей сетке и брать кегль знака");
+  assert.match(app, /const LGR_LABEL_M = 10;/,
+    "кегль подписи знака — 10 метров местности, как fontSize=10 MapUnit в эталонном textlines.qml");
   assert.match(app, /ctx\.strokeText\(job\.text, tx, ty\)/,
     "у подписи обязан быть ореол — иначе она не читается поверх заливки и снимка");
   // подписи собираются, а не рисуются на месте: иначе приоритет не работает

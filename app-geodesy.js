@@ -191,11 +191,22 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 let roPending = false;
-new ResizeObserver(() => {
+// В ФОНОВОЙ вкладке requestAnimationFrame не идёт (замер: 0 кадров за 400 мс
+// при document.hidden), и отложенный пересчёт размера туда же и уходил. Кадр
+// выполнится, когда на вкладку вернутся, — но ДО ТОГО холст живёт с битмапом
+// по умолчанию 300×150 при CSS-размере в сотни пикселей. Всё, что читает
+// холст не глядя на экран, получает мусор: замер 300×150 при фактических
+// 634×742 — это и выгрузка растра, и печать листа, и любая проверка.
+// Поэтому в фоне откладываем таймером, а при возврате на вкладку считаем ещё
+// раз сами: наблюдатель об этом не сообщит — размер-то не менялся.
+function планРесайза() {
   if (roPending) return;
   roPending = true;
-  requestAnimationFrame(() => { roPending = false; resize(); });
-}).observe(cv);
+  const выполнить = () => { roPending = false; resize(); };
+  if (document.hidden) setTimeout(выполнить, 0); else requestAnimationFrame(выполнить);
+}
+new ResizeObserver(планРесайза).observe(cv);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) планРесайза(); });
 
 // ---------- сетка ----------
 // Авто-шаг: первый из ряда, дающий на экране >= 22 px. Ряд расширен в обе
