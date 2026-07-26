@@ -1290,3 +1290,9 @@ input[type=range].range-op:focus-visible{outline:2px solid var(--accent);outline
 #dock .data-search input{width:100%;min-width:0}
 #dock .data-area-alert{flex:1 1 100%;min-width:0}
 #dock .data-topic-chips{flex-wrap:wrap}
+
+/* Строка источника — flex-ряд, и длинные названия слоёв портала в нём не
+   сжимаются: при ширине дока 520 они выступали за край на 3–33px. Даём тексту
+   сжиматься и обрезаться многоточием — название целиком видно в подсказке. */
+#dock .data-wizard label.data-src{min-width:0}
+#dock .data-wizard label.data-src>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

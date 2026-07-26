@@ -462,3 +462,14 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
    окне 1400 показал 241px чертежа из 761. Пока док открыт, панель свойств
    уступает место; закрытие дока возвращает её. */
 body.dock-open #panel,body.dock-open #panel-resizer{display:none}
+
+/* Граница рабочей панели — тот же механизм, что у инспектора и панели слоёв.
+   Ширина дока рекомендуется окном (таблице нужно больше, поиску меньше), но
+   последнее слово за человеком: перетащил — запомнилось. */
+#dock-resizer{flex:0 0 auto;width:7px;cursor:col-resize;z-index:var(--z-panel);position:relative;
+  background:transparent;transition:background var(--dur-1) var(--ease-out);touch-action:none;user-select:none;-webkit-user-select:none}
+#dock-resizer[hidden]{display:none}
+#dock-resizer::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;background:var(--hairline)}
+#dock-resizer:hover{background:var(--accent-weak)}
+#dock-resizer:focus-visible{outline:2px solid var(--accent);outline-offset:-1px;background:var(--accent-weak)}
+#dock-resizer:hover::after{background:var(--accent-line);width:2px;left:2.5px}

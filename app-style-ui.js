@@ -1157,7 +1157,7 @@ ${styleGraduatedModePanel(ctx)}
   });
   overlay.addEventListener("click", ev => { if (ev.target === overlay) restore(); });
   window.enhanceLayerStyleStudio?.(overlay, layer);
-  window.dockOverlay?.(overlay, { title: `Оформление · ${layer.title}`, width: 520 });
+  window.dockOverlay?.(overlay, { title: `Оформление · ${layer.title}` });
 }
 
 // ---------- библиотека знаков: редактор эталонных знаков ЛГР/базовых -------
@@ -1279,6 +1279,7 @@ function openStyleLibrary() {
     { groups, translit, swatchOf, overridden, edited, resetSet, sel });
   overlay.innerHTML = libModalHtml({ listHtml: listHtmlOf("") });
   document.body.appendChild(overlay);
+  window.dockOverlay?.(overlay, { title: "Библиотека знаков" });
   overlay.addEventListener("click", ev => ev.stopPropagation());
   const $ = id => overlay.querySelector("#" + id);
   const listEl = $("lib-list");

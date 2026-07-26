@@ -38,7 +38,8 @@ const БЮДЖЕТ = {
   "app-labels-place.js drawLiveHints": 204,  // вынесено из drawNow целиком, дословно
   "app-layer-panel.js renderLayers": 110,   // 270 -> 110: строка слоя вынесена
   "app-layer-panel.js layerPanelRow": 166,  // вынесено из renderLayers дословно
-  "app-style-ui.js openStyleLibrary": 208,  // 258 -> 206: список, свотч и разметка вынесены
+  // 258 -> 206 -> 209: список, свотч и разметка вынесены; +1 — вызов dockOverlay.
+  "app-style-ui.js openStyleLibrary": 209,
   // 206 → 172: строители разметки (метрика, паспорт ТЭП, текущий сценарий,
   // карточки вариантов) вынесены наружу — они не трогают состояние окна.
   "app-layer-ui.js openVariants": 173,   // +1: вызов dockOverlay

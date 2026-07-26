@@ -933,6 +933,7 @@ function openProjectStyles() {
     </div>
   </div>`;
   document.body.appendChild(overlay);
+  window.dockOverlay?.(overlay, { title: "Знаки проекта" });
   const $ = id => overlay.querySelector("#" + id);
   function renderList() {
     const cont = $("ps-list");

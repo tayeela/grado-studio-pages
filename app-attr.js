@@ -394,7 +394,7 @@ function openAttributeTable(layer) {
   overlay.querySelector(".modal-x").addEventListener("click", closePopups);
   overlay.addEventListener("click", ev => { if (ev.target === overlay) closePopups(); });
   renderTable();
-  window.dockOverlay?.(overlay, { title: `Таблица · ${layer.title}`, width: 640 });
+  window.dockOverlay?.(overlay, { title: `Таблица · ${layer.title}` });
 }
 
 // Окно статистики поля — по строкам текущего фильтра таблицы («все» или

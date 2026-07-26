@@ -1262,6 +1262,11 @@ function initPanelResizer() {
     side: 'right', min: 300, max: 640, def: 312, storageKey: 'grado_panel_width' });
   initSidePanelResizer({ resizerId: 'layers-resizer', panelId: 'layers-panel', otherPanelId: 'panel',
     side: 'left', min: 240, max: 520, def: 320, storageKey: 'grado_layers_width' });
+  // Рабочая панель тянется тем же механизмом. Ширину рекомендует окно (таблице
+  // нужно больше, поиску меньше), но перетащенная человеком запоминается и
+  // рекомендацию перебивает — решать ему.
+  initSidePanelResizer({ resizerId: 'dock-resizer', panelId: 'dock', otherPanelId: 'layers-panel',
+    side: 'right', min: 320, max: 760, def: 520, storageKey: 'grado_dock_width' });
 }
 
 // ---------- целостность загрузки ----------

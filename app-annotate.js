@@ -136,7 +136,7 @@
           toast("Браузер не дал буфер обмена — таблица выделена, скопируйте вручную", "warn");
       }
     });
-    window.dockOverlay?.(overlay, { title: "Ведомость координат", width: 480 });
+    window.dockOverlay?.(overlay, { title: "Ведомость координат" });
   }
 
   root.openCoordListing = openCoordListing;

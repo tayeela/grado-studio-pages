@@ -10,6 +10,10 @@
 // и `overlay.remove()` внутри окна продолжают работать как работали — поэтому
 // перевод одного окна стоит одной строки, а не переписывания разметки.
 //
+// У дока ОДНА ширина: её настраивает человек, перетаскивая границу, как у
+// панели слоёв и инспектора. Ширину «под окно» я пробовал дважды, и оба раза
+// она проигрывала механизму границы — тот выставляет своё значение при
+// запуске и возвращает его. Лишняя сущность убрана вместо третьей попытки.
 // Док — flex-элемент рядом с холстом, а не поверх него: холст ужимается и
 // остаётся полностью видимым и кликабельным.
 (function () {
@@ -17,6 +21,8 @@
   if (!dock) return;
   const body = dock.querySelector(".dock-body");
   const titleEl = dock.querySelector(".dock-title");
+  const resizer = document.getElementById("dock-resizer");
+
   let current = null;                       // оверлей, который сейчас в доке
   let observer = null;
 
@@ -35,6 +41,7 @@
     // Закрытый док обязан быть пуст — это одно состояние, а не два.
     body.replaceChildren();
     dock.hidden = true;
+    if (resizer) resizer.hidden = true;
     document.body.classList.remove("dock-open");
   }
 
@@ -53,8 +60,8 @@
     overlay.classList.add("docked");
     body.replaceChildren(overlay);
     titleEl.textContent = opts.title || "";
-    dock.style.setProperty("--dock-width", (opts.width || 440) + "px");
     dock.hidden = false;
+    if (resizer) resizer.hidden = false;
     document.body.classList.add("dock-open");
     current = overlay;
     watchRemoval(overlay);
