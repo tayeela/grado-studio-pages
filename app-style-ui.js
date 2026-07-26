@@ -525,6 +525,80 @@ function openCategoryStyleDialog(catId, ctx) {
     categoryOverlay.addEventListener("click", event => { if (event.target === categoryOverlay) cancelEditor(); });
 }
 
+// Градуированная символика: числовое поле разбивается на диапазоны, каждому —
+// свой цвет. Блок замкнут на собственных полях gr-* и наружу отдаёт ровно три
+// вещи: правила, их пересчёт и проверку выражений — поэтому и вынесен первым.
+function initGraduatedControls({ layer, $, numericCols, layerFeatures, SYMBOLOGY }) {
+  let gradRules = (layer.rules || []).filter(r => r && r.patch && r.min !== undefined);
+  const gradSettings = () => ({
+    field: $("gr-field") ? $("gr-field").value : "",
+    classes: Math.max(2, Math.min(12, parseInt($("gr-classes")?.value, 10) || 5)),
+    method: $("gr-method") ? $("gr-method").value : "equal",
+    ramp: $("gr-ramp") ? $("gr-ramp").value : "yellow-red",
+    target: $("gr-target-stroke") && $("gr-target-stroke").checked ? "stroke" : "fill",
+  });
+  const renderGradPreview = () => {
+    const box = $("gr-preview");
+    if (!box) return;
+    if (!gradRules.length) {
+      box.innerHTML = numericCols.length
+        ? '<span class="muted">Нажмите «Пересчитать диапазоны»</span>'
+        : '<span class="muted">В слое нет полей с числовыми значениями</span>';
+      return;
+    }
+    box.innerHTML = gradRules.map(rule => {
+      const color = rule.patch.fill || rule.patch.stroke;
+      const hit = layerFeatures.filter(f => SYMBOLOGY.ruleMatchesValue(rule, (f.props || {})[rule.field])).length;
+      return `<div class="gr-class"><span class="gr-swatch" style="background:${escHtml(color)}"></span>` +
+        `<span class="gr-range">${escHtml(rule.title)}</span><span class="gr-count">${hit}</span></div>`;
+    }).join("");
+  };
+  const rebuildGrad = () => {
+    if (!SYMBOLOGY) return;
+    const settings = gradSettings();
+    if (!settings.field) { gradRules = []; renderGradPreview(); return; }
+    const built = SYMBOLOGY.buildGraduated(layerFeatures, settings);
+    gradRules = built.rules;
+    if (built.reason) {
+      const box = $("gr-preview");
+      if (box) box.innerHTML = `<span class="muted">Не построить: ${escHtml(built.reason)}</span>`;
+      return;
+    }
+    renderGradPreview();
+  };
+  if ($("gr-build")) {
+    $("gr-build").addEventListener("click", event => { event.preventDefault(); rebuildGrad(); });
+    ["gr-field", "gr-classes", "gr-method", "gr-ramp", "gr-target-stroke"].forEach(id =>
+      $(id) && $(id).addEventListener("change", rebuildGrad));
+    renderGradPreview();
+  }
+  // выражения проверяем на первом объекте слоя: ошибку человек должен увидеть
+  // здесь, а не получить молчаливо неработающее оформление
+  const checkExpressions = () => {
+    const box = $("gr-expr-error");
+    if (!box) return true;
+    const probe = layerFeatures[0];
+    for (const [id, title] of [["gr-width-expr", "толщины"], ["gr-size-expr", "размера знака"],
+      ["gr-label-expr", "кегля подписи"]]) {
+      const value = $(id) ? $(id).value.trim() : "";
+      if (!value || !probe) continue;
+      try {
+        const result = parseFloat(evalFieldExpr(value, probe));
+        if (!Number.isFinite(result)) throw new Error("получилось не число");
+      } catch (error) {
+        box.hidden = false;
+        box.textContent = `Выражение ${title}: ${error.message || error}`;
+        $(id).focus();
+        return false;
+      }
+    }
+    box.hidden = true;
+    return true;
+  };
+  return { rules: () => gradRules, settings: gradSettings,
+    rebuild: rebuildGrad, checkExpressions };
+}
+
 function openLayerStyle(layer, opts = {}) {
   closePopups();
   const historyBefore = window.captureHistoryState ? window.captureHistoryState() : null;
@@ -990,73 +1064,11 @@ ${styleGraduatedModePanel(ctx)}
     renderRules();
   });
 
-  // ---------- градуированная символика ----------
-  let gradRules = (layer.rules || []).filter(r => r && r.patch && r.min !== undefined);
-  const gradSettings = () => ({
-    field: $("gr-field") ? $("gr-field").value : "",
-    classes: Math.max(2, Math.min(12, parseInt($("gr-classes")?.value, 10) || 5)),
-    method: $("gr-method") ? $("gr-method").value : "equal",
-    ramp: $("gr-ramp") ? $("gr-ramp").value : "yellow-red",
-    target: $("gr-target-stroke") && $("gr-target-stroke").checked ? "stroke" : "fill",
-  });
-  const renderGradPreview = () => {
-    const box = $("gr-preview");
-    if (!box) return;
-    if (!gradRules.length) {
-      box.innerHTML = numericCols.length
-        ? '<span class="muted">Нажмите «Пересчитать диапазоны»</span>'
-        : '<span class="muted">В слое нет полей с числовыми значениями</span>';
-      return;
-    }
-    box.innerHTML = gradRules.map(rule => {
-      const color = rule.patch.fill || rule.patch.stroke;
-      const hit = layerFeatures.filter(f => SYMBOLOGY.ruleMatchesValue(rule, (f.props || {})[rule.field])).length;
-      return `<div class="gr-class"><span class="gr-swatch" style="background:${escHtml(color)}"></span>` +
-        `<span class="gr-range">${escHtml(rule.title)}</span><span class="gr-count">${hit}</span></div>`;
-    }).join("");
-  };
-  const rebuildGrad = () => {
-    if (!SYMBOLOGY) return;
-    const settings = gradSettings();
-    if (!settings.field) { gradRules = []; renderGradPreview(); return; }
-    const built = SYMBOLOGY.buildGraduated(layerFeatures, settings);
-    gradRules = built.rules;
-    if (built.reason) {
-      const box = $("gr-preview");
-      if (box) box.innerHTML = `<span class="muted">Не построить: ${escHtml(built.reason)}</span>`;
-      return;
-    }
-    renderGradPreview();
-  };
-  if ($("gr-build")) {
-    $("gr-build").addEventListener("click", event => { event.preventDefault(); rebuildGrad(); });
-    ["gr-field", "gr-classes", "gr-method", "gr-ramp", "gr-target-stroke"].forEach(id =>
-      $(id) && $(id).addEventListener("change", rebuildGrad));
-    renderGradPreview();
-  }
-  // выражения проверяем на первом объекте слоя: ошибку человек должен увидеть
-  // здесь, а не получить молчаливо неработающее оформление
-  const checkExpressions = () => {
-    const box = $("gr-expr-error");
-    if (!box) return true;
-    const probe = layerFeatures[0];
-    for (const [id, title] of [["gr-width-expr", "толщины"], ["gr-size-expr", "размера знака"],
-      ["gr-label-expr", "кегля подписи"]]) {
-      const value = $(id) ? $(id).value.trim() : "";
-      if (!value || !probe) continue;
-      try {
-        const result = parseFloat(evalFieldExpr(value, probe));
-        if (!Number.isFinite(result)) throw new Error("получилось не число");
-      } catch (error) {
-        box.hidden = false;
-        box.textContent = `Выражение ${title}: ${error.message || error}`;
-        $(id).focus();
-        return false;
-      }
-    }
-    box.hidden = true;
-    return true;
-  };
+  // Градуированная символика вынесена целиком: она замкнута на своих полях
+  // gr-* и наружу отдаёт только правила, их пересчёт и проверку выражений.
+  const град = initGraduatedControls({ layer, $, numericCols, layerFeatures, SYMBOLOGY });
+  const gradSettings = град.settings, rebuildGrad = град.rebuild;
+  const checkExpressions = град.checkExpressions;
 
   // ----- переключение режима -----
   const setMode = m => {
@@ -1073,8 +1085,8 @@ ${styleGraduatedModePanel(ctx)}
     // живой предпросмотр текущего режима
     if (m === "single") { delete layer.rules; layer.fmt = collect(); }
     else if (m === "graduated") {
-      if (!gradRules.length) rebuildGrad();
-      if (gradRules.length) layer.rules = gradRules; else delete layer.rules;
+      if (!град.rules().length) rebuildGrad();
+      if (град.rules().length) layer.rules = град.rules(); else delete layer.rules;
     }
     else liveRules();
     draw();
@@ -1125,8 +1137,8 @@ ${styleGraduatedModePanel(ctx)}
       if (clean.length) layer.rules = clean; else delete layer.rules;
       delete layer.fmt.graduated;
     } else if (mode === "graduated") {
-      if (gradRules.length) {
-        layer.rules = gradRules;
+      if (град.rules().length) {
+        layer.rules = град.rules();
         layer.fmt.graduated = gradSettings();
       } else {
         delete layer.rules;
