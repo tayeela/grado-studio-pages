@@ -174,6 +174,108 @@ function mergeExtentSourceBatches(batches) {
 }
 
 // Шаг «Область»: чем ограничен каждый источник на текущем виде карты.
+// Список источников: навигация по группам, строки обычных наборов и дерево ГИС ОГД,
+// активная группа и поднос выбранного. Тела строителей перенесены ДОСЛОВНО —
+// меняется только обёртка: всё, что они читали из окружения openDataFetch, теперь
+// приходит одним снимком wizardView(). Снимок безопасен: все шестеро зовутся из
+// одного места, непосредственно перед отрисовкой шага.
+function dataSourceBuilders(v) {
+  const { icon, sourceOrder, groupUi, groupDisabled, unavailable, overLimit,
+    selected, selectedRows, selectedSourceCount, layerNoun,
+    activeGroup, activeTopic, countForGroup, ogdCatalog, ogdError, ogdLoading,
+    ogdOpenPaths, query, cacheHtml } = v;
+  function topicsForCatalog() {
+    const counts = new Map();
+    ogdCatalog.forEach(layer => {
+      const topic = (layer.path || "Слои").split(" / ").filter(Boolean)[0] || "Слои";
+      counts.set(topic, (counts.get(topic) || 0) + 1);
+    });
+    return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 7);
+  }
+
+  function sourceNavHtml() {
+    return `<aside class="data-source-nav" aria-label="Источники данных">
+      <h3>Источники данных</h3>
+      <div class="data-source-list">${sourceOrder.map(gi => {
+        const group = DATA_SOURCE_GROUPS[gi], disabled = groupDisabled(group), count = countForGroup(gi);
+        const total = group.picker ? ogdCatalog.length + group.items.length : group.items.length;
+        const reason = unavailable(group) ? (group.webNote || "Недоступно в веб-версии")
+          : overLimit(group) ? `Нужно до ${group.maxKm2} км²` : "";
+        return `<button class="data-source-tab${activeGroup === gi ? " active" : ""}${disabled ? " disabled" : ""}"
+          data-group="${gi}" aria-pressed="${activeGroup === gi}"${disabled ? " aria-disabled=\"true\"" : ""}>
+          <span class="data-source-icon">${icon(groupUi[gi].icon)}</span><span class="data-source-copy"><b>${escHtml(group.title)}</b>
+          <small>${reason || escHtml(groupUi[gi].domain)}</small></span>
+          ${count ? `<span class="data-source-count selected">${count}</span>` : `<span class="data-source-count">${total || "—"}</span>`}
+          ${icon("ic-chevron")}</button>`;
+      }).join("")}</div>
+      <button class="data-file-action" data-action="file">${icon("i-download")}<span><b>Импортировать файл</b><small>GeoJSON / ZIP</small></span></button>
+    </aside>`;
+  }
+
+  function plainRowsHtml(group, gi) {
+    const low = query.trim().toLowerCase();
+    const items = group.items.filter(item => !low || item.label.toLowerCase().includes(low));
+    if (!items.length) return `<div class="data-empty">Ничего не найдено</div>`;
+    return `<div class="data-layer-list">${items.map(item => `<label class="data-layer-row${selected.has(item.key) ? " selected" : ""}">
+      <input type="checkbox" data-src="${item.key}"${selected.has(item.key) ? " checked" : ""}>
+      <span class="data-layer-copy"><b>${escHtml(item.label)}</b><small>${escHtml(group.hint)}</small></span>
+      <span class="data-layer-meta">до ${group.maxKm2} км²</span></label>`).join("")}</div>`;
+  }
+
+  function ogdRowsHtml(group, gi) {
+    if (ogdLoading) return `<div class="data-loading-state"><span class="data-spinner"></span><b>Загружаем каталог ГИС ОГД</b><small>Окно уже готово — можно выбрать другой источник</small></div>`;
+    if (ogdError) return `<div class="data-empty error"><b>Каталог временно недоступен</b><span>${escHtml(ogdError)}</span>
+      <button data-action="retry-catalog">Повторить</button></div>`;
+    const low = query.trim().toLowerCase();
+    const quick = group.items.filter(item => !low || item.label.toLowerCase().includes(low));
+    const catalog = ogdCatalog.filter(layer => {
+      const textHit = !low || (layer.name || "").toLowerCase().includes(low) || (layer.path || "").toLowerCase().includes(low);
+      const topicHit = !activeTopic || (layer.path || "").split(" / ")[0] === activeTopic;
+      return textHit && topicHit;
+    });
+    const selectedMap = Object.fromEntries([...selected].map(key => [key, true]));
+    const topics = topicsForCatalog();
+    const quickRows = quick.length ? `<div class="data-quick-title">Часто используемые</div><div class="data-layer-list data-quick-list">${quick.map(item =>
+      `<label class="data-layer-row${selected.has(item.key) ? " selected" : ""}"><input type="checkbox" data-src="${item.key}"${selected.has(item.key) ? " checked" : ""}>
+        <span class="data-layer-copy"><b>${escHtml(item.label)}</b><small>готовый набор слоёв</small></span><span class="data-layer-meta">mos.ru</span></label>`).join("")}</div>` : "";
+    return `<div class="data-topic-chips"><button class="${activeTopic ? "" : "active"}" data-topic="">Все темы <span>${ogdCatalog.length}</span></button>
+      ${topics.map(([topic, count]) => `<button class="${activeTopic === topic ? "active" : ""}" data-topic="${escHtml(topic)}">${escHtml(topic)} <span>${count}</span></button>`).join("")}</div>
+      ${quickRows}${cacheHtml()}<div class="data-catalog-head"><span>Каталог портала</span><b>${catalog.length}</b></div>
+      <div class="ogdc-list ogd-tree">${catalog.length
+        ? ogdTreeHtml(ogdBuildTree(catalog), gi, selectedMap, false, !!low || !!activeTopic, 0, "", ogdOpenPaths)
+        : `<div class="data-empty">Ничего не найдено</div>`}</div>`;
+  }
+
+  function activeSourceHtml() {
+    const group = DATA_SOURCE_GROUPS[activeGroup], disabled = groupDisabled(group);
+    const count = countForGroup(activeGroup);
+    const allLabel = group.picker ? "Выбрать найденные" : (count === group.items.length ? "Снять выбор" : "Выбрать всё");
+    return `<section class="data-source-panel" aria-labelledby="data-source-title">
+      <div class="data-source-head"><div><h3 id="data-source-title">${escHtml(group.title)}</h3><p>${escHtml(group.hint)} · до ${group.maxKm2} км²</p></div>
+      <label class="data-search">${icon("i-search")}<span class="sr-only">Поиск слоёв</span>
+        <input type="search" value="${escHtml(query)}" placeholder="Поиск слоёв по названию" autocomplete="off"${disabled ? " disabled" : ""}></label></div>
+        ${disabled ? `<div class="data-blocked-source">${icon("i-ruler")}<div><b>${unavailable(group) ? "Источник недоступен" : `Область больше ${group.maxKm2} км²`}</b>
+        <span>${escHtml(unavailable(group) ? (group.webNote || "Недоступно в этой версии") : "Уменьшите область — выбранные слои других источников сохранятся.")}</span></div>
+        ${overLimit(group) ? `<button data-action="zoom" data-target="${group.maxKm2}">Приблизить автоматически</button>` : ""}</div>` : `
+        <div class="data-source-tools"><span>${count ? `Выбрано: ${count}` : "Выберите нужные слои"}</span>
+          <button data-action="select-visible">${allLabel}</button></div>
+        <div class="data-source-content">${group.picker ? ogdRowsHtml(group, activeGroup) : plainRowsHtml(group, activeGroup)}</div>`}
+    </section>`;
+  }
+
+  function selectionTrayHtml() {
+    const rows = selectedRows();
+    const preview = rows.slice(0, 3).map(row => row.label).join(", ");
+    return `<button class="data-selection-tray${rows.length ? " has-selection" : ""}" data-action="show-review"${rows.length ? "" : " disabled"}>
+      <span class="data-selection-icon">${icon("i-layers")}</span><span class="data-selection-copy"><b>${rows.length
+        ? `Выбрано ${rows.length} ${layerNoun(rows.length)} из ${selectedSourceCount()} источников` : "Слои пока не выбраны"}</b>
+      <small>${rows.length ? `${escHtml(preview)}${rows.length > 3 ? ", …" : ""}` : "Отметьте слои в каталоге выше"}</small></span>
+      ${rows.length ? `<span class="data-selection-more">Показать все</span>` : ""}</button>`;
+  }
+  return { topicsForCatalog, sourceNavHtml, plainRowsHtml, ogdRowsHtml,
+    activeSourceHtml, selectionTrayHtml };
+}
+
 function dataAreaStepHtml(v) {
   const { icon, sourceOrder, groupUi, groupDisabled, unavailable, overLimit } = v;
     return `<section class="data-area-step"><div class="data-area-hero">${icon("i-poly")}<div><h2>Проверьте область загрузки</h2>
@@ -354,100 +456,15 @@ async function openDataFetch() {
       <div class="data-area-metric"><small>Координаты</small><b>WGS 84</b></div>${areaWarning()}`;
   }
 
-  function topicsForCatalog() {
-    const counts = new Map();
-    ogdCatalog.forEach(layer => {
-      const topic = (layer.path || "Слои").split(" / ").filter(Boolean)[0] || "Слои";
-      counts.set(topic, (counts.get(topic) || 0) + 1);
-    });
-    return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 7);
-  }
-
-  function sourceNavHtml() {
-    return `<aside class="data-source-nav" aria-label="Источники данных">
-      <h3>Источники данных</h3>
-      <div class="data-source-list">${sourceOrder.map(gi => {
-        const group = DATA_SOURCE_GROUPS[gi], disabled = groupDisabled(group), count = countForGroup(gi);
-        const total = group.picker ? ogdCatalog.length + group.items.length : group.items.length;
-        const reason = unavailable(group) ? (group.webNote || "Недоступно в веб-версии")
-          : overLimit(group) ? `Нужно до ${group.maxKm2} км²` : "";
-        return `<button class="data-source-tab${activeGroup === gi ? " active" : ""}${disabled ? " disabled" : ""}"
-          data-group="${gi}" aria-pressed="${activeGroup === gi}"${disabled ? " aria-disabled=\"true\"" : ""}>
-          <span class="data-source-icon">${icon(groupUi[gi].icon)}</span><span class="data-source-copy"><b>${escHtml(group.title)}</b>
-          <small>${reason || escHtml(groupUi[gi].domain)}</small></span>
-          ${count ? `<span class="data-source-count selected">${count}</span>` : `<span class="data-source-count">${total || "—"}</span>`}
-          ${icon("ic-chevron")}</button>`;
-      }).join("")}</div>
-      <button class="data-file-action" data-action="file">${icon("i-download")}<span><b>Импортировать файл</b><small>GeoJSON / ZIP</small></span></button>
-    </aside>`;
-  }
-
-  function plainRowsHtml(group, gi) {
-    const low = query.trim().toLowerCase();
-    const items = group.items.filter(item => !low || item.label.toLowerCase().includes(low));
-    if (!items.length) return `<div class="data-empty">Ничего не найдено</div>`;
-    return `<div class="data-layer-list">${items.map(item => `<label class="data-layer-row${selected.has(item.key) ? " selected" : ""}">
-      <input type="checkbox" data-src="${item.key}"${selected.has(item.key) ? " checked" : ""}>
-      <span class="data-layer-copy"><b>${escHtml(item.label)}</b><small>${escHtml(group.hint)}</small></span>
-      <span class="data-layer-meta">до ${group.maxKm2} км²</span></label>`).join("")}</div>`;
-  }
-
-  function ogdRowsHtml(group, gi) {
-    if (ogdLoading) return `<div class="data-loading-state"><span class="data-spinner"></span><b>Загружаем каталог ГИС ОГД</b><small>Окно уже готово — можно выбрать другой источник</small></div>`;
-    if (ogdError) return `<div class="data-empty error"><b>Каталог временно недоступен</b><span>${escHtml(ogdError)}</span>
-      <button data-action="retry-catalog">Повторить</button></div>`;
-    const low = query.trim().toLowerCase();
-    const quick = group.items.filter(item => !low || item.label.toLowerCase().includes(low));
-    const catalog = ogdCatalog.filter(layer => {
-      const textHit = !low || (layer.name || "").toLowerCase().includes(low) || (layer.path || "").toLowerCase().includes(low);
-      const topicHit = !activeTopic || (layer.path || "").split(" / ")[0] === activeTopic;
-      return textHit && topicHit;
-    });
-    const selectedMap = Object.fromEntries([...selected].map(key => [key, true]));
-    const topics = topicsForCatalog();
-    const quickRows = quick.length ? `<div class="data-quick-title">Часто используемые</div><div class="data-layer-list data-quick-list">${quick.map(item =>
-      `<label class="data-layer-row${selected.has(item.key) ? " selected" : ""}"><input type="checkbox" data-src="${item.key}"${selected.has(item.key) ? " checked" : ""}>
-        <span class="data-layer-copy"><b>${escHtml(item.label)}</b><small>готовый набор слоёв</small></span><span class="data-layer-meta">mos.ru</span></label>`).join("")}</div>` : "";
-    return `<div class="data-topic-chips"><button class="${activeTopic ? "" : "active"}" data-topic="">Все темы <span>${ogdCatalog.length}</span></button>
-      ${topics.map(([topic, count]) => `<button class="${activeTopic === topic ? "active" : ""}" data-topic="${escHtml(topic)}">${escHtml(topic)} <span>${count}</span></button>`).join("")}</div>
-      ${quickRows}${cacheHtml()}<div class="data-catalog-head"><span>Каталог портала</span><b>${catalog.length}</b></div>
-      <div class="ogdc-list ogd-tree">${catalog.length
-        ? ogdTreeHtml(ogdBuildTree(catalog), gi, selectedMap, false, !!low || !!activeTopic, 0, "", ogdOpenPaths)
-        : `<div class="data-empty">Ничего не найдено</div>`}</div>`;
-  }
-
-  function activeSourceHtml() {
-    const group = DATA_SOURCE_GROUPS[activeGroup], disabled = groupDisabled(group);
-    const count = countForGroup(activeGroup);
-    const allLabel = group.picker ? "Выбрать найденные" : (count === group.items.length ? "Снять выбор" : "Выбрать всё");
-    return `<section class="data-source-panel" aria-labelledby="data-source-title">
-      <div class="data-source-head"><div><h3 id="data-source-title">${escHtml(group.title)}</h3><p>${escHtml(group.hint)} · до ${group.maxKm2} км²</p></div>
-      <label class="data-search">${icon("i-search")}<span class="sr-only">Поиск слоёв</span>
-        <input type="search" value="${escHtml(query)}" placeholder="Поиск слоёв по названию" autocomplete="off"${disabled ? " disabled" : ""}></label></div>
-        ${disabled ? `<div class="data-blocked-source">${icon("i-ruler")}<div><b>${unavailable(group) ? "Источник недоступен" : `Область больше ${group.maxKm2} км²`}</b>
-        <span>${escHtml(unavailable(group) ? (group.webNote || "Недоступно в этой версии") : "Уменьшите область — выбранные слои других источников сохранятся.")}</span></div>
-        ${overLimit(group) ? `<button data-action="zoom" data-target="${group.maxKm2}">Приблизить автоматически</button>` : ""}</div>` : `
-        <div class="data-source-tools"><span>${count ? `Выбрано: ${count}` : "Выберите нужные слои"}</span>
-          <button data-action="select-visible">${allLabel}</button></div>
-        <div class="data-source-content">${group.picker ? ogdRowsHtml(group, activeGroup) : plainRowsHtml(group, activeGroup)}</div>`}
-    </section>`;
-  }
-
-  function selectionTrayHtml() {
-    const rows = selectedRows();
-    const preview = rows.slice(0, 3).map(row => row.label).join(", ");
-    return `<button class="data-selection-tray${rows.length ? " has-selection" : ""}" data-action="show-review"${rows.length ? "" : " disabled"}>
-      <span class="data-selection-icon">${icon("i-layers")}</span><span class="data-selection-copy"><b>${rows.length
-        ? `Выбрано ${rows.length} ${layerNoun(rows.length)} из ${selectedSourceCount()} источников` : "Слои пока не выбраны"}</b>
-      <small>${rows.length ? `${escHtml(preview)}${rows.length > 3 ? ", …" : ""}` : "Отметьте слои в каталоге выше"}</small></span>
-      ${rows.length ? `<span class="data-selection-more">Показать все</span>` : ""}</button>`;
-  }
 
   // Модель вида: всё, что нужно строителям разметки. Собирается заново на
   // каждую перерисовку — строители не знают о внутренностях окна.
   const wizardView = () => ({ icon, sourceOrder, groupUi, groupDisabled, unavailable,
     overLimit, selectedRows, selectedSourceCount, loadProgress, importing, step,
-    loadMessage, selected, areaTxt, layerNoun });
+    loadMessage, selected, areaTxt, layerNoun,
+    // для строителей списка источников
+    activeGroup, activeTopic, countForGroup, ogdCatalog, ogdError, ogdLoading, ogdOpenPaths,
+    query, cacheHtml });
   const areaStepHtml = () => dataAreaStepHtml(wizardView());
   const reviewStepHtml = () => dataReviewStepHtml(wizardView());
   function renderActions() {
@@ -481,7 +498,10 @@ async function openDataFetch() {
     renderAreaSummary();
     const view = overlay.querySelector(".data-step-view");
     if (step === 1) view.innerHTML = areaStepHtml();
-    else if (step === 2) view.innerHTML = `<div class="data-workspace">${sourceNavHtml()}${activeSourceHtml()}</div>${selectionTrayHtml()}`;
+    else if (step === 2) {
+      const строители = dataSourceBuilders(wizardView());
+      view.innerHTML = `<div class="data-workspace">${строители.sourceNavHtml()}${строители.activeSourceHtml()}</div>${строители.selectionTrayHtml()}`;
+    }
     else view.innerHTML = reviewStepHtml();
     renderActions();
     for (const [sel, top] of scrollKeep) {
