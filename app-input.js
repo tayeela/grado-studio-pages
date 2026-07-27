@@ -136,7 +136,8 @@ function featureHitsPoint(f, wx, wy, tolW, pointTolW) {
   if (f.point) return Math.hypot(f.point[0] - wx, f.point[1] - wy) < pointTol;
   if (f.line) return nearChain(wx, wy, f.line, tolW) !== null;
   if (f.arc) return Math.abs(Math.hypot(f.arc.cx - wx, f.arc.cy - wy) - f.arc.r) < tolW;
-  if (f.circle) return Math.abs(Math.hypot(f.circle.cx - wx, f.circle.cy - wy) - f.circle.r) < tolW;
+  // у круга ловится и ТЕЛО, и обводка — как у кольца (pointInPolygon + nearRing)
+  if (f.circle) return Math.hypot(f.circle.cx - wx, f.circle.cy - wy) <= f.circle.r + tolW;
   if (f.ring) return pointInPolygon(wx, wy, f) || nearRing(wx, wy, f.ring, tolW)
     || (f.holes || []).some(h => nearRing(wx, wy, h, tolW));
   return false;
@@ -169,7 +170,7 @@ function hitTest(wx, wy) {
       const aa = f.arc; const dd = Math.hypot(aa.cx - wx, aa.cy - wy);
       if (Math.abs(dd - aa.r) < tolW) return f;
     }
-    if (f.circle) {
+    if (f.circle && !isFilled(f)) {
       const cc = f.circle; const dd = Math.hypot(cc.cx - wx, cc.cy - wy);
       if (Math.abs(dd - cc.r) < tolW) return f;
     }
@@ -183,6 +184,13 @@ function hitTest(wx, wy) {
     // и внешний, и контур дыры — схватить можно
     if (f.ring && (pointInPolygon(wx, wy, f) || nearRing(wx, wy, f.ring, tolW)
                    || (f.holes || []).some(h => nearRing(wx, wy, h, tolW)))) return f;
+    // Круг — такая же площадная фигура, и у него тоже есть ТЕЛО. Пока его тут
+    // не было, круглую зону можно было схватить только точно за обводку: клик
+    // в середину не выбирал ничего, хотя на экране там сплошная заливка.
+    if (f.circle) {
+      const cc = f.circle;
+      if (Math.hypot(cc.cx - wx, cc.cy - wy) <= cc.r + tolW) return f;
+    }
   }
   return null;
 }

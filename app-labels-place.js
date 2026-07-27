@@ -25,6 +25,12 @@ const LABELS = (typeof window !== "undefined" && window.GRADO_LABELS) || null;
 // отпечаток, и точка пересчитывается.
 const _anchorCache = new WeakMap();
 function labelAnchor(f) {
+  // Круг — площадная фигура, и точка его подписи очевидна: центр. Полюс
+  // недоступности тут считать не из чего (кольца нет), а без якоря подпись
+  // уходила в ветку ЛИНИИ и раскладывалась по featurePts — а он для круга
+  // отдаёт ручки редактора (центр и четыре стороны света). Подпись круглой
+  // зоны в итоге печаталась в углу холста, в точке (0,0).
+  if (f.circle) return [f.circle.cx, f.circle.cy];
   const ring = f.ring;
   if (!ring || ring.length < 3) return null;
   const last = ring[ring.length - 1];
@@ -75,7 +81,7 @@ function labelJob(f, st, text, layer) {
   // вытесняет мелкий. Раньше место занимал тот, кого раньше нарисовали, —
   // подпись фонового слоя выигрывала у подписи верхнего.
   const base = Math.max(0, LAYERS_V2.indexOf(layer)) * 1000;
-  if (f.ring) {
+  if (f.ring || f.circle) {                        // площадные: подпись в теле
     if (width > fit[2] - fit[0]) return null;      // строка шире объекта
     const at = labelAnchor(f);
     if (!at) return null;
@@ -89,7 +95,7 @@ function labelJob(f, st, text, layer) {
     return { text, font, color, size, x: sx, y: sy, width, height: size,
       candidates: LABELS.aroundPoint(marker), priority: base + 500 };
   }
-  const pts = f.line || (f.arc || f.circle ? featurePts(f) : null);
+  const pts = f.line || (f.arc ? featurePts(f) : null);   // круг ушёл выше, в площадные
   if (pts && pts.length > 1) {
     // Подпись линии идёт ВДОЛЬ неё — по самому длинному ребру, как подписи
     // улиц на карте. Раньше она стояла горизонтально в середине и на косой
