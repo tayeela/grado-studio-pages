@@ -73,11 +73,33 @@
     return new DataView(out.buffer);
   }
 
+  // Коды сверены с таблицей TAB_GEOM_* из MITAB (mitab_priv.h).
+  //
+  // Полигоны и ломаные MapInfo пишет в трёх поколениях. Мы знали только
+  // первое, а MapInfo Professional 4.5 и старше пишет V450, версия 8 — V800,
+  // и на таком файле читалка падала с «объект типа 0x2e не поддержан». То
+  // есть современная выгрузка не открывалась вовсе, хотя лежит в ней ровно
+  // то же самое: по коду MITAB (TABMAPObjPLine::ReadObj) V450 отличается от
+  // V300 ТОЛЬКО номером типа, а V800 — тем, что число секций записано int32
+  // и за ним идут 33 байта, назначение которых не знает и сам MITAB.
   const OBJ = {
     SYMBOL_C: 0x01, SYMBOL: 0x02, LINE_C: 0x04, LINE: 0x05,
     PLINE_C: 0x07, PLINE: 0x08, REGION_C: 0x0d, REGION: 0x0e,
     MULTIPLINE_C: 0x25, MULTIPLINE: 0x26,
+    V450_REGION_C: 0x2e, V450_REGION: 0x2f,
+    V450_MULTIPLINE_C: 0x31, V450_MULTIPLINE: 0x32,
+    V800_REGION_C: 0x3d, V800_REGION: 0x3e,
+    V800_MULTIPLINE_C: 0x40, V800_MULTIPLINE: 0x41,
   };
+  const СЖАТЫЕ = new Set([OBJ.PLINE_C, OBJ.REGION_C, OBJ.MULTIPLINE_C,
+    OBJ.V450_REGION_C, OBJ.V450_MULTIPLINE_C, OBJ.V800_REGION_C, OBJ.V800_MULTIPLINE_C]);
+  const ПЛОЩАДНЫЕ = new Set([OBJ.REGION_C, OBJ.REGION,
+    OBJ.V450_REGION_C, OBJ.V450_REGION, OBJ.V800_REGION_C, OBJ.V800_REGION]);
+  const МНОГОСЕКЦИОННЫЕ = new Set([...ПЛОЩАДНЫЕ, OBJ.MULTIPLINE_C, OBJ.MULTIPLINE,
+    OBJ.V450_MULTIPLINE_C, OBJ.V450_MULTIPLINE, OBJ.V800_MULTIPLINE_C, OBJ.V800_MULTIPLINE]);
+  const V800 = new Set([OBJ.V800_REGION_C, OBJ.V800_REGION,
+    OBJ.V800_MULTIPLINE_C, OBJ.V800_MULTIPLINE]);
+  const ЛОМАНЫЕ = new Set([OBJ.PLINE_C, OBJ.PLINE, ...МНОГОСЕКЦИОННЫЕ]);
   function readMapGeometries(buffer, idBuffer) {
     const view = new DataView(buffer);
     const h = mapHeader(buffer);
@@ -121,16 +143,19 @@
     if (type === OBJ.LINE)
       return { type: "LineString", coordinates: [toWorld(i32(), i32()), toWorld(i32(), i32())] };
 
-    const compressed = type === OBJ.PLINE_C || type === OBJ.REGION_C || type === OBJ.MULTIPLINE_C;
-    const isRegion = type === OBJ.REGION_C || type === OBJ.REGION;
-    const isMulti = isRegion || type === OBJ.MULTIPLINE_C || type === OBJ.MULTIPLINE;
-    if (![OBJ.PLINE_C, OBJ.PLINE, OBJ.REGION_C, OBJ.REGION,
-      OBJ.MULTIPLINE_C, OBJ.MULTIPLINE].includes(type))
+    const compressed = СЖАТЫЕ.has(type);
+    const isRegion = ПЛОЩАДНЫЕ.has(type);
+    const isMulti = МНОГОСЕКЦИОННЫЕ.has(type);
+    if (!ЛОМАНЫЕ.has(type))
       throw new Error(`объект MapInfo типа 0x${type.toString(16)} не поддержан`);
 
     const coordPtr = i32();
     const coordSize = i32() & 0x3fffffff;                 // старшие биты — флаги
-    const numSections = isMulti ? i16() : 1;
+    let numSections = 1;
+    if (isMulti) {
+      if (V800.has(type)) { numSections = i32(); p += 33; }   // и 33 байта неизвестного назначения
+      else numSections = i16();
+    }
     let comprOrgX = 0, comprOrgY = 0;
     if (compressed) { p += 4; comprOrgX = i32(); comprOrgY = i32(); }   // label + центр сжатия
     // MBR/pen/brush дальше не нужны
@@ -183,11 +208,17 @@
     const fieldsAt = text.search(/^\s*Fields\s+\d+/im);
     if (fieldsAt >= 0) {
       for (const line of text.slice(fieldsAt).split(/\r?\n/).slice(1)) {
-        const m = line.match(/^\s*(\S+)\s+(Char|Integer|SmallInt|LargeInt|Float|Decimal|Logical|Date)\b/i);
+        // DateTime раньше Date: иначе «DateTime» съедается как «Date» и
+        // восьмибайтовое поле читается четырьмя байтами
+        const m = line.match(
+          /^\s*(\S+)\s+(Char|Integer|SmallInt|LargeInt|Float|Decimal|Logical|DateTime|Date|Time)\b/i);
         if (!m) { if (line.trim() && !/^\s*\S+\s/.test(line)) break; if (!line.trim()) break; continue; }
         const kind = m[2].toLowerCase();
+        // Date, Time и DateTime лежат в .dat так же бинарно, как числа, и без
+        // этой строки приезжали в таблицу атрибутов четырьмя байтами мусора.
         const bin = { integer: "i32", smallint: "i16", largeint: "i64",
-          float: "f64", logical: "logical" }[kind];
+          float: "f64", logical: "logical",
+          date: "date", time: "time", datetime: "datetime" }[kind];
         if (bin) binTypes[m[1].toLowerCase()] = bin;
       }
     }

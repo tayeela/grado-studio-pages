@@ -17,6 +17,30 @@
   // binTypes: переопределение типов по именам полей — .dat MapInfo пишет
   // числа БИНАРНО (int/int64/double LE), хотя дескрипторы врут «C»; истинные
   // типы объявлены в .tab и передаются сюда читалкой TAB
+  //
+  // Дата, время и «дата и время» тоже лежат бинарно, но раньше их сюда не
+  // передавали вовсе: колонка приезжала в таблицу атрибутов четырьмя байтами
+  // мусора. Раскладка — по MITAB (ogr/ogrsf_frmts/mitab/mitab_datfile.cpp,
+  // ReadDateField / ReadTimeField / ReadDateTimeField):
+  //   Date     — 4 байта: int16 год, байт месяц, байт день;
+  //   Time     — 4 байта: int32 миллисекунд от полуночи;
+  //   DateTime — 8 байт: дата, затем те же миллисекунды.
+  // Порядок байтов little-endian: в MITAB перестановка стоит под #ifdef
+  // CPL_MSB, то есть на обычной машине читается как есть.
+  const два = value => String(value).padStart(2, "0");
+  function mapinfoDate(dv, at) {
+    const year = dv.getInt16(at, true), month = dv.getUint8(at + 2), day = dv.getUint8(at + 3);
+    // нулевая дата в MITAB — это «значения нет», а не 0 год
+    if (!year && !month && !day) return null;
+    return `${String(year).padStart(4, "0")}-${два(month)}-${два(day)}`;
+  }
+  function mapinfoTime(ms) {
+    if (!(ms >= 0 && ms <= 86400000)) return null;      // -1 и мусор — «нет значения»
+    const s = Math.floor(ms / 1000);
+    const хвост = ms % 1000;
+    return `${два(Math.floor(s / 3600))}:${два(Math.floor(s / 60) % 60)}:${два(s % 60)}` +
+      (хвост ? "." + String(хвост).padStart(3, "0") : "");
+  }
   function parseDbf(buffer, encoding, binTypes) {
     const view = new DataView(buffer);
     const bytes = new Uint8Array(buffer);
@@ -58,6 +82,10 @@
             : binType === "i64" ? Number(dv.getBigInt64(0, true))
             : binType === "f64" ? dv.getFloat64(0, true)
             : binType === "logical" ? chunk[0] !== 0
+            : binType === "date" ? mapinfoDate(dv, 0)
+            : binType === "time" ? mapinfoTime(dv.getInt32(0, true))
+            : binType === "datetime" ? [mapinfoDate(dv, 0), mapinfoTime(dv.getInt32(4, true))]
+              .filter(Boolean).join(" ") || null
             : decodeText(chunk, enc).replace(/\0+/g, "").trim();
           pos += f.length;
           continue;
