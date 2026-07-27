@@ -64,7 +64,16 @@ const viewportH = () => _renderTarget ? _renderTarget.h : cv.clientHeight;
 function renderSceneTo(target, width, height, view) {
   const savedCtx = ctx, savedView = state.view, savedSelected = state.selected;
   const savedIds = state.selectedIds, savedSnap = state.snapHit, savedGuides = state.guides;
+  const savedReadable = state.lgrReadable;
   ctx = target;
+  // «Читаемый ЛГР» — экранная поблажка: он держит знак разборчивым на любом
+  // зуме (подпись фиксированного кегля, засечка и линия не тоньше пола) и тем
+  // самым ЛОМАЕТ масштаб. В выпуск это уезжать не должно, и в коде это сказано
+  // прямо — «лист всегда по эталону» рядом с самой настройкой, — но выключал
+  // режим только DXF. Лист, альбом и печать шли через эту функцию с включённым
+  // режимом, и подпись знака вставала 5 мм на бумаге при любом масштабе листа
+  // вместо положенных 10 м местности: на 1:5000 это два с половиной размера.
+  state.lgrReadable = false;
   _renderTarget = { ctx: target, w: width, h: height };
   state.view = { ...view };
   // выделение, привязки и направляющие — это экран, на листе им не место
@@ -74,6 +83,7 @@ function renderSceneTo(target, width, height, view) {
     ctx = savedCtx; _renderTarget = null; state.view = savedView;
     state.selected = savedSelected; state.selectedIds = savedIds;
     state.snapHit = savedSnap; state.guides = savedGuides;
+    state.lgrReadable = savedReadable;
   }
 }
 

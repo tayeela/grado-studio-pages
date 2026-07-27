@@ -419,8 +419,17 @@ function drawDoubleLine(pts, gap, closed) {
 // Пользовательских стилей не касается: у них нет ground_units.
 const LGR_LABEL_M = 10;
 const LGR_LABEL_MIN_PX = 9;          // ниже этого не читается и печатать нечего
+// В читаемом режиме у ширины линии и у засечки есть свой скромный пол
+// (LGR_READABLE_WIDTH_PX, LGR_READABLE_MARKER_PX), а у подписи его не было:
+// она брала эталонный кегль «10 м местности», который на опорном 1:2000 равен
+// 5 мм бумаги, то есть 18.9 px — и держала его на ЛЮБОМ зуме. Рядом с линией
+// в 1–2 px и интерфейсом в 11 px это выглядело огромным (замер: 18.9 px на
+// всех масштабах от 1:500 до 1:5000). Читаемому режиму нужен размер
+// интерфейса, а не размер бумаги.
+const LGR_READABLE_LABEL_PX = 11;
 function lgrLabelSizePx(st) {
   if (!st || !st.ground_units) return 10;
+  if (lgrReadable()) return LGR_READABLE_LABEL_PX;
   // 3779.5 = пикселей в миллиметре × 1000 — та же величина, что в lgrDenom и
   // groundFactor этого файла; берём её же, а не MM_PX из соседнего модуля.
   const наОпорном = LGR_LABEL_M * 3779.5 / (st.ref_scale || 2000);
