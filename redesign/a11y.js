@@ -225,6 +225,35 @@
       item.setAttribute('aria-checked', String(item.classList.contains('on'))));
   }
 
+  // ---------- панели инструментов: одна остановка Tab на всю панель ----------
+  // Рельс — это 33 кнопки. Клавиатурный пользователь пробивался через них по
+  // одной, чтобы дойти до холста: замер — 9 остановок Tab из 50 на странице
+  // при обычной ширине, и тем больше, чем шире окно. Паттерн W3C для toolbar
+  // ровно об этом: панель целиком получает ОДНУ остановку, а внутри неё ходят
+  // стрелками. Действие остаётся за Enter и пробелом — стрелка только двигает
+  // фокус, иначе прогулка по рельсу переключала бы инструмент на каждом шаге.
+  const toolbarItems = bar => [...bar.querySelectorAll('button:not([disabled])')].filter(visible);
+  // Снимаем остановку СО ВСЕХ кнопок панели, включая спрятанные. Рельс прячет
+  // кнопки покинутого режима, и при переключении спрятанная уносила остановку
+  // с собой: замер показал две кнопки с tabindex="0" — видимую и невидимую.
+  // Пока она невидима, это тихо, но стоит режиму вернуться — остановок две.
+  function назначитьОстановку(bar, цель) {
+    for (const item of bar.querySelectorAll('button')) item.tabIndex = -1;
+    if (цель) цель.tabIndex = 0;
+  }
+  function syncToolbars() {
+    document.querySelectorAll('[role="toolbar"]').forEach(bar => {
+      const items = toolbarItems(bar);
+      if (!items.length) return;
+      // Кого делаем остановкой: того, на ком фокус; иначе включённый
+      // инструмент — так Tab возвращает туда, где человек был; иначе первого.
+      назначитьОстановку(bar, items.find(item => item === document.activeElement)
+        || items.find(item => item.matches('.active, [aria-pressed="true"]'))
+        || items.find(item => item.tabIndex === 0)
+        || items[0]);
+    });
+  }
+
   function enabledMenuItems(menu) {
     return [...menu.querySelectorAll('[role^="menuitem"]')]
       .filter(item => visible(item) && item.getAttribute('aria-disabled') !== 'true');
@@ -305,9 +334,15 @@
     // а не в каждой ветке отдельно.
     syncDialogModality();
     syncPopupState();
+    syncToolbars();
   });
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class', 'title'] });
+  // data-workspace-mode — потому что рельс прячет кнопки покинутого режима
+  // одним лишь CSS: разметка не меняется, и без этого признака остановкой Tab
+  // осталась бы кнопка, которой на экране уже нет.
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true,
+    attributeFilter: ['hidden', 'class', 'title', 'disabled', 'data-workspace-mode'] });
   syncPopupState();
+  syncToolbars();
 
   document.querySelectorAll('[data-menu], [data-pop]').forEach(button => {
     button.addEventListener('click', () => queueMicrotask(() => {
@@ -361,6 +396,24 @@
       const trigger = document.querySelector(`[data-pop="${pop.id}"]`);
       syncPopupState();
       trigger?.focus();
+      return;
+    }
+
+    const bar = document.activeElement?.closest?.('[role="toolbar"]');
+    if (bar) {
+      const шаг = bar.getAttribute('aria-orientation') === 'horizontal'
+        ? { ArrowRight: 1, ArrowLeft: -1 } : { ArrowDown: 1, ArrowUp: -1 };
+      const край = { Home: 0, End: -1 };
+      if (!(event.key in шаг) && !(event.key in край)) return;
+      const items = toolbarItems(bar);
+      if (!items.length) return;
+      event.preventDefault();
+      const текущий = items.indexOf(document.activeElement);
+      const цель = event.key in край ? items.at(край[event.key])
+        : items[(((текущий < 0 ? 0 : текущий) + шаг[event.key]) + items.length) % items.length];
+      if (!цель) return;
+      назначитьОстановку(bar, цель);
+      цель.focus();
       return;
     }
 
