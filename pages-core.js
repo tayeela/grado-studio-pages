@@ -255,8 +255,31 @@
     return false;
   }
 
+  // Круг — площадная фигура наравне с полигоном, но весь ТЭП ниже фильтрует по
+  // feature.ring: круглые здание, территория и ЗОУИТ молча давали НОЛЬ площади
+  // (та же слепота, что была во фронтендовом featureArea и в выгрузке). Круглая
+  // санитарная зона вокруг источника — обычное дело, и её нулевая площадь
+  // занижала бы «ограничения» и завышала расчётную площадь и плотность.
+  // Раскладываем круг в кольцо ОДИН раз на входе — и все 15 проверок по .ring
+  // ниже работают без изменений. Шаг по углу 3°, как в выгрузке app-export.js.
+  const circleToRing = circle => {
+    const n = Math.max(32, Math.ceil((2 * Math.PI) / (Math.PI / 60)));
+    const ring = [];
+    for (let i = 0; i < n; i++) {
+      const a = (2 * Math.PI * i) / n;
+      ring.push([circle.cx + circle.r * Math.cos(a), circle.cy + circle.r * Math.sin(a)]);
+    }
+    return ring;
+  };
+  const polygonizeCircles = feature => {
+    if (!feature || !feature.circle || feature.ring) return feature;
+    const { circle, ...rest } = feature;
+    return { ...rest, ring: circleToRing(circle) };
+  };
+
   function computeTep(payload = {}) {
-    const rawFeatures = Array.isArray(payload.features) ? payload.features.filter(Boolean) : [];
+    const rawFeatures = (Array.isArray(payload.features) ? payload.features.filter(Boolean) : [])
+      .map(polygonizeCircles);
     const params = payload.params && typeof payload.params === "object" ? payload.params : {};
     const hasTerritory = rawFeatures.some(feature => feature.kind === "boundary" && feature.ring);
     const features = clippedToTerritory(rawFeatures);
