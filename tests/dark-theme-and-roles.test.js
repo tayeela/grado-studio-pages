@@ -31,7 +31,7 @@ const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort(
 const darkBlock = atelier.slice(atelier.indexOf('[data-theme="dark"]{'),
   atelier.indexOf("}", atelier.indexOf('[data-theme="dark"]{')));
 const token = (block, name) => {
-  const m = new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, "i").exec(block);
+  const m = block.match(new RegExp("--" + name + ":\\s*(#[0-9a-f]{6})", "i"));
   assert.ok(m, `в тёмной теме обязан быть переопределён --${name}`);
   return m[1];
 };
@@ -72,16 +72,37 @@ for (const [name, css] of cssFiles) {
 }
 
 // ---------- состояния текстом ----------
-const lightRoles = { "success-text": "#107f3a", "warning-text": "#a55a05", "danger-text": "#d52525" };
-const darkRoles = { "success-text": "#23a955", "warning-text": "#da7b0d", "danger-text": "#e86e6e" };
+// Значения ролей НЕ хардкодим: их подбирают под контраст, и сторож, спорящий
+// с каждой подгонкой, держит не суть, а прошлую цифру. Читаем из токенов и
+// проверяем то, ради чего роли и заданы, — читаемость. На ДВУХ фонах: на
+// панели и на собственной подсветке --*-weak. Второй фон нашёлся позже:
+// «Удалить» набрано --danger-text по --danger-weak, и там было 4.06:1 при
+// норме 4.5 — на панели-то цвет проходил.
 const lightPanel = /--panel:(#[0-9a-f]{6})/i.exec(atelier)[1];
-for (const [name, value] of Object.entries(lightRoles)) {
-  assert.ok(tokens.includes(`--${name}: ${value}`), `светлая тема: --${name}`);
-  assert.ok(contrast(value, lightPanel) >= AA, `${name} на светлой панели: ${contrast(value, lightPanel)}:1`);
-}
-for (const [name, value] of Object.entries(darkRoles)) {
-  assert.ok(tokens.includes(`--${name}: ${value}`), `тёмная тема: --${name}`);
-  assert.ok(contrast(value, panel) >= AA, `${name} на тёмной панели: ${contrast(value, panel)}:1`);
+const роль = (блок, имя) =>
+  (блок.match(new RegExp("--" + имя + ":\\s*(#[0-9a-f]{6})", "i")) || [])[1];
+const наСвоейПодсветке = (блок, имя, фон) => {
+  const m = блок.match(new RegExp("--" + имя + "-weak:\\s*rgba\\(([^)]+)\\)", "i"));
+  if (!m) return фон;
+  const ч = m[1].split(",").map(v => parseFloat(v));
+  const низ = srgb(фон);
+  const rgb = [0, 1, 2].map(k => Math.round(ч[k] * ч[3] + низ[k] * (1 - ч[3])));
+  return "#" + rgb.map(v => v.toString(16).padStart(2, "0")).join("");
+};
+const границаТем = tokens.search(/^\[data-theme="dark"\]\s*\{/m);   // именно ПРАВИЛО, а не упоминание в комментарии
+const светлыйБлок = границаТем > 0 ? tokens.slice(0, границаТем) : tokens;
+const тёмныйБлок = границаТем > 0 ? tokens.slice(границаТем) : tokens;
+for (const [подпись, блокТокенов, фон] of
+     [["светлая", светлыйБлок, lightPanel], ["тёмная", тёмныйБлок, panel]]) {
+  for (const имя of ["success", "warning", "danger"]) {
+    const цвет = роль(блокТокенов, `${имя}-text`);
+    assert.ok(цвет, `${подпись} тема: --${имя}-text обязан быть задан`);
+    assert.ok(contrast(цвет, фон) >= AA,
+      `${подпись}: --${имя}-text ${цвет} на панели — ${contrast(цвет, фон)}:1`);
+    const свой = наСвоейПодсветке(блокТокенов, имя, фон);
+    assert.ok(contrast(цвет, свой) >= AA,
+      `${подпись}: --${имя}-text ${цвет} на своей подсветке ${свой} — ${contrast(цвет, свой)}:1`);
+  }
 }
 for (const [name, css] of cssFiles) {
   const stray = css.match(/color:\s*var\(--(success|warning|danger)\)(?!-)/g);

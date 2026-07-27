@@ -43,6 +43,12 @@ body[data-layer-view="legend"] .layer-create-main,body[data-layer-view="legend"]
 #layers-panel .layer-row{min-height:48px;gap:5px;padding:4px 2px;border-bottom:0;border-radius:var(--r-sm)}
 #layers-panel .layer-row:hover{background:var(--field-bg)}
 #layers-panel .layer-row.active{background:var(--accent-weak);box-shadow:inset 2px 0 0 var(--accent)}
+/* Подсветка активной строки затемняет фон, а мелкие сведения (геометрия,
+   стадия, счётчик) остаются цвета --faint: контраст падал до 4.17:1 при норме
+   4.5. На выделенной строке берём основной приглушённый цвет — он и по смыслу
+   верный: строка активна, её сведения читают чаще прочих. */
+#layers-panel .layer-row.active .layer-meta,
+#layers-panel .layer-row.active .cnt{color:var(--text-2)}
 #layers-panel .layer-row .layer-disc,#layers-panel .layer-row .layer-disc-sp{width:12px}
 #layers-panel .layer-row .grip{width:10px}
 .layer-vis-toggle{width:28px;height:32px;display:grid;place-items:center;flex:0 0 auto;border-radius:var(--r-sm);cursor:pointer}
