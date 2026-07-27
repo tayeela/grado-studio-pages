@@ -135,4 +135,23 @@ const kinds = pairs => pairs.filter(pair => pair[0] === "0").map(pair => pair[1]
     "и говорить, что сделать в AutoCAD");
 }
 
+// ---------- засечки знака ЛГР ----------
+{
+  // Раскладку засечек считает холст (drawFeatureMarkers), выгрузка снимает её
+  // писцом вместо холста — второй экземпляр той же раскладки разошёлся бы с
+  // экраном. Здесь проверяем сторону выгрузки: снятые ломаные обязаны попасть
+  // в файл на слой объекта и посчитаться, а не потеряться по дороге.
+  const слой = { title: "КЛ ТОП" };
+  const feature = { id: 1, line: [[0, 0], [100, 0]] };
+  const { text, counts } = D.buildDxf({
+    features: [feature], layers: [слой],
+    styleOf: () => ({ stroke: "#fe0004" }), layerOf: () => слой,
+    markersOf: () => [[[10, 0], [10, 2]], [[30, 0], [30, 2]], [[50, 0]]],
+  });
+  assert.equal(counts.marker, 2, "две годные засечки; ломаная из одной точки — не геометрия");
+  const polylines = kinds(pairsOf(text)).filter(kind => kind === "POLYLINE").length;
+  assert.equal(polylines, 3, "линия объекта плюс две засечки");
+  assert.ok(text.includes("\n8\nКЛ_ТОП\n"), "засечка обязана лечь на слой своего объекта");
+}
+
 console.log("dxf-export: OK");
