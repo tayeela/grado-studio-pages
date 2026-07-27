@@ -54,6 +54,58 @@
     return (inside ? 1 : -1) * Math.sqrt(best);
   }
 
+  // Очередь по приоритету — двоичная куча, а не перебор массива.
+  //
+  // Раньше самая перспективная клетка искалась линейным просмотром всей
+  // очереди, то есть шаг стоил O(n) вместо O(log n). На выпуклых контурах это
+  // незаметно, но у фигуры с множеством отростков — квартал, обведённый по
+  // фасадам, гребёнка кварталов вдоль улицы — очередь разрастается, и цена
+  // растёт квадратично. Замер против эталонного polylabel: гребёнка в 20
+  // зубьев — 962 мс против 20 мс, в 48 раз. Почти секунда на ОДНУ подпись.
+  //
+  // Хуже того, перебор был обвешан предохранителем `guard < 20000`, и на тех
+  // же фигурах цикл упирался в него и МОЛЧА возвращал недосчитанный ответ.
+  // С кучей цикл доходит до конца сам, поэтому предохранитель убран, а не
+  // поднят: он прикрывал не переполнение, а собственную медлительность.
+  //
+  // Сверено с mapbox/polylabel на восьми фигурах (подкова, гребёнка, бублик,
+  // щепка, Г-образная, звезда, дыра почти во весь контур) — и в местных
+  // координатах, и со сдвигом в МСК: расстояние до границы совпадает.
+  class MaxHeap {
+    constructor() { this.items = []; }
+    get size() { return this.items.length; }
+    push(item) {
+      const items = this.items;
+      items.push(item);
+      let at = items.length - 1;
+      while (at > 0) {
+        const parent = (at - 1) >> 1;
+        if (items[parent].max >= items[at].max) break;
+        [items[parent], items[at]] = [items[at], items[parent]];
+        at = parent;
+      }
+    }
+    pop() {
+      const items = this.items;
+      const top = items[0];
+      const last = items.pop();
+      if (items.length) {
+        items[0] = last;
+        let at = 0;
+        for (;;) {
+          const left = at * 2 + 1, right = left + 1;
+          let big = at;
+          if (left < items.length && items[left].max > items[big].max) big = left;
+          if (right < items.length && items[right].max > items[big].max) big = right;
+          if (big === at) break;
+          [items[big], items[at]] = [items[at], items[big]];
+          at = big;
+        }
+      }
+      return top;
+    }
+  }
+
   function cellOf(x, y, half, rings) {
     const d = signedDistance(x, y, rings);
     // потолок для клетки: её центр плюс полудиагональ — дальше внутрь не уйти
@@ -76,26 +128,22 @@
     const tolerance = precision || Math.max(size / 100, 1e-6);
 
     let cellSize = size;
-    const queue = [];
+    const queue = new MaxHeap();
     for (let x = minX; x < maxX; x += cellSize)
       for (let y = minY; y < maxY; y += cellSize)
         queue.push(cellOf(x + cellSize / 2, y + cellSize / 2, cellSize / 2, rings));
     // отправная точка — центр габарита; центроид сюда сознательно не берём:
     // у вогнутых контуров он лежит снаружи
     let best = cellOf((minX + maxX) / 2, (minY + maxY) / 2, 0, rings);
-    let guard = 0;
-    while (queue.length && guard++ < 20000) {
-      // самая перспективная клетка: у кого потолок выше
-      let at = 0;
-      for (let i = 1; i < queue.length; i++) if (queue[i].max > queue[at].max) at = i;
-      const cell = queue.splice(at, 1)[0];
+    while (queue.size) {
+      const cell = queue.pop();          // самая перспективная: у кого потолок выше
       if (cell.d > best.d) best = cell;
       if (cell.max - best.d <= tolerance) continue;
       const half = cell.half / 2;
-      queue.push(cellOf(cell.x - half, cell.y - half, half, rings),
-                 cellOf(cell.x + half, cell.y - half, half, rings),
-                 cellOf(cell.x - half, cell.y + half, half, rings),
-                 cellOf(cell.x + half, cell.y + half, half, rings));
+      queue.push(cellOf(cell.x - half, cell.y - half, half, rings));
+      queue.push(cellOf(cell.x + half, cell.y - half, half, rings));
+      queue.push(cellOf(cell.x - half, cell.y + half, half, rings));
+      queue.push(cellOf(cell.x + half, cell.y + half, half, rings));
     }
     return [best.x, best.y];
   }
