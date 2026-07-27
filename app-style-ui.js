@@ -331,15 +331,15 @@ function styleSingleModePanel(ctx) {
             </div></div>
           </section>
           <section class="style-section">
-            <div class="style-section-head"><span><b>Маркеры линии</b><small>Засечки и направление границы</small></span><label class="switch-control" title="Включить маркеры"><input type="checkbox" id="fmt-marker" aria-label="Включить маркеры линии" ${baseMarker ? "checked" : ""}><span></span></label></div>
-            <div class="fmt-body" id="fmt-marker-fields" style="display:${baseMarker ? "" : "none"}">
+            <div class="style-section-head"><span><b>Маркеры линии</b><small>Засечки и направление границы</small></span><label class="switch-control" title="Включить маркеры"><input type="checkbox" id="fmt-marker" aria-label="Включить маркеры линии" ${cur.line_marker ? "checked" : ""}><span></span></label></div>
+            <div class="fmt-body" id="fmt-marker-fields" style="display:${cur.line_marker ? "" : "none"}">
               <div class="fmt-row"><label>Форма<select id="fmt-marker-shape">${MARKER_SHAPES.map(([v, lbl]) => opt((baseMarker && baseMarker.shape) || "tick", v, lbl)).join("")}</select></label>
                 <label>Направление<select id="fmt-marker-dir">${opt((baseMarker && baseMarker.dir) || "in", "in", "Внутрь зоны") + opt((baseMarker && baseMarker.dir) || "in", "out", "Наружу")}</select></label></div>
               <div class="fmt-row"><label>Шаг, px<input type="number" id="fmt-marker-period" value="${boundedNumber(baseMarker && baseMarker.period, 6, 200, 40)}" min="6" max="200" step="1" required></label>
                 <label>Размер, px<input type="number" id="fmt-marker-size" value="${boundedNumber(baseMarker && baseMarker.size, 1, 40, 4)}" min="1" max="40" step="0.5" required></label></div>
             </div>
           </section>
-          <section class="style-section style-section-compact"><label class="style-check"><input type="checkbox" id="fmt-label" ${baseLabel ? "checked" : ""}><span><b>Подпись линии</b><small>Использовать подпись из знака ЛГР</small></span></label></section>
+          <section class="style-section style-section-compact"><label class="style-check"><input type="checkbox" id="fmt-label" ${cur.line_label ? "checked" : ""}><span><b>Подпись линии</b><small>Использовать подпись из знака ЛГР</small></span></label></section>
           ${canLabel ? `<section class="style-section"><div class="style-section-head"><span><b>Подпись объектов</b><small>Поле и параметры текста</small></span></div>
             <label>Поле подписи<select id="fmt-labelf"><option value="">— без подписи —</option>${labelCols.map(c => opt(curLF, c.name, c.label || c.name)).join("")}</select></label>
             <div class="fmt-body" id="fmt-labelf-fields" style="display:${curLF ? "" : "none"}"><div class="fmt-row">
@@ -712,6 +712,42 @@ function собратьПодпись(fmt, $, lcolorCF, baseLabel) {
 const НЕ_ВИЗУАЛЬНЫЕ = new Set(["fmt-label", "fmt-labelf", "fmt-lsize",
                                "fmt-lcolor", "fmt-lfamily"]);
 
+// Знак, который окно «Оформление слоя» обязано показывать, и знак, из
+// которого берутся значения для переключателей.
+//
+// layerStyle(layer) отдаёт только знак, записанный НА СЛОЕ (style_id + fmt).
+// У слоёв ГИС ОГД знак живёт на ОБЪЕКТАХ: он выбирается по коду ЛГР при
+// импорте и лежит в f.style_id. Для таких слоёв layerStyle возвращает пустой
+// объект — и окно показывало запасной серый #888888 там, где на холсте
+// красная линия застройки. «Применить стиль» из такого окна покрасило бы
+// весь слой в этот серый: человек правит красные линии, а сохраняет серые.
+//
+// Возвращаем две РАЗНЫЕ величины, и путать их нельзя:
+//   cur         — что нарисовано сейчас: знак вместе с правкой слоя. По нему
+//                 показываются поля и состояние галочек;
+//   знакОбразца — исходный знак без правки слоя. Из него берётся значение,
+//                 которое возвращает включённая галочка. Если брать его из
+//                 cur, выключение становится необратимым: правка хранит
+//                 line_label: null, и включать обратно уже нечего.
+function стильДляОкна(layer) {
+  // образец — по возможности без личной правки объекта (f.fmt), иначе в окно
+  // СЛОЯ попадёт оформление одного-единственного объекта
+  const образец = (typeof state !== "undefined" && Array.isArray(state.features))
+    ? (state.features.find(f => layerOf(f) === layer && !f.fmt)
+      || state.features.find(f => layerOf(f) === layer))
+    : null;
+  if (!образец) {
+    const свой = layerStyle(layer);
+    return { cur: свой, знакОбразца: свой };
+  }
+  const sid = образец.style_id
+    || (typeof gpZoneSid === "function" ? gpZoneSid(образец) : null)
+    || (typeof layerSignSid === "function" ? layerSignSid(layer) : null);
+  const знак = (sid && ((state.projectStyles && state.projectStyles[sid]) || STYLES_V2[sid]))
+    || layerStyle(layer);
+  return { cur: styleOf(образец), знакОбразца: знак };
+}
+
 function openLayerStyle(layer, opts = {}) {
   closePopups();
   const historyBefore = window.captureHistoryState ? window.captureHistoryState() : null;
@@ -719,7 +755,7 @@ function openLayerStyle(layer, opts = {}) {
   const origFmt = clone(layer.fmt);   // для отмены
   const origRules = clone(layer.rules);
   let mode = opts.mode || (origRules && origRules.length ? "rules" : "single");
-  const cur = layerStyle(layer);
+  const { cur, знакОбразца } = стильДляОкна(layer);
   const categoryStyles = clone((layer.fmt && layer.fmt.cat_styles) || {}) || {};
   const categoryStyleOf = catId => {
     const patch = categoryStyles[catId] || {};
@@ -748,8 +784,9 @@ function openLayerStyle(layer, opts = {}) {
   const hObj = cur.hatch && typeof cur.hatch === "object" ? cur.hatch : null;
   const hAngle = hObj ? (hObj.cross ? "cross" : String(hObj.angle ?? 45)) : "45";
   const hDens = hObj ? hatchDensOf(hObj.spacing_px || 9) : "normal";
-  let baseMarker = cur.line_marker || null, baseLabel = cur.line_label || null,
-      baseDouble = cur.double || null;
+  let baseMarker = cur.line_marker || знакОбразца.line_marker || null,
+      baseLabel = cur.line_label || знакОбразца.line_label || null,
+      baseDouble = cur.double || знакОбразца.double || null;
   const targets = LAYERS_V2.filter(l => l !== layer && !l.annotation && !l.import_only);
   const targetOriginals = new Map(targets.map(target => [target, clone(target.fmt)]));
   const copiedTargets = new Set();
