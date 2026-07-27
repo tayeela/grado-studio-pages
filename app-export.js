@@ -42,6 +42,34 @@
   const PX_TO_MM = 25.4 / 96;
   const mm = value => (Math.max(0, Number(value) || 0) * PX_TO_MM).toFixed(3);
 
+  // ---------- разбиение круга и дуги ----------
+  // Шаг по углу, а не по числу звеньев: у круга R=5 м и R=500 м одинаковое
+  // число хорд дало бы у большого заметный срез угла. 3° держит стрелку прогиба
+  // меньше 0.04% радиуса — на 500-метровом круге это 17 см, ниже точности
+  // самой съёмки, и файл не раздувается.
+  const ARC_STEP = Math.PI / 60;                 // 3°
+  function arcPoints(a) {
+    if (!a || !(a.r > 0)) return [];
+    const sweep = Number(a.sweep) || 0;
+    const n = Math.max(2, Math.ceil(Math.abs(sweep) / ARC_STEP));
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const ang = a.a0 + sweep * (i / n);
+      out.push([a.cx + a.r * Math.cos(ang), a.cy + a.r * Math.sin(ang)]);
+    }
+    return out;
+  }
+  function circlePoints(c) {
+    if (!c || !(c.r > 0)) return [];
+    const n = Math.max(32, Math.ceil((2 * Math.PI) / ARC_STEP));
+    const out = [];
+    for (let i = 0; i < n; i++) {           // без замыкающей точки: её добавит ring()
+      const ang = (2 * Math.PI * i) / n;
+      out.push([c.cx + c.r * Math.cos(ang), c.cy + c.r * Math.sin(ang)]);
+    }
+    return out;
+  }
+
   // ---------- GeoJSON ----------
   // Геометрия отдаётся в WGS84: GeoJSON без указания системы координат по
   // стандарту читается именно так, и QGIS не спросит проекцию.
@@ -58,13 +86,18 @@
     if (Array.isArray(feature.line)) return { type: "LineString", coordinates: feature.line.map(point) };
     if (Array.isArray(feature.point)) return { type: "Point", coordinates: point(feature.point) };
     if (feature.circle || feature.arc) {
-      // дуга и окружность в GeoJSON не существуют — отдаём разбиение по точкам
-      const points = typeof root.featurePts === "function" ? root.featurePts(feature) : null;
-      if (points && points.length > 1) {
-        const line = points.map(point);
+      // Дуга и окружность в GeoJSON не существуют — разбиваем на ломаную.
+      //
+      // Раньше точки брались у featurePts, а он для КРУГА отдаёт ручки
+      // редактора: центр и четыре стороны света. Кольцо из них — самопересечная
+      // «бабочка» площадью 3750 м² вместо 7854 у круга R=50: выгрузка занижала
+      // площадь почти вдвое и портила саму фигуру. Для дуги там же было всего
+      // 8 хорд — грубо для файла, который уйдёт в чужой САПР.
+      const pts = feature.circle ? circlePoints(feature.circle) : arcPoints(feature.arc);
+      if (pts.length > 1) {
         return feature.circle
-          ? { type: "Polygon", coordinates: [ring(points)] }
-          : { type: "LineString", coordinates: line };
+          ? { type: "Polygon", coordinates: [ring(pts)] }
+          : { type: "LineString", coordinates: pts.map(point) };
       }
     }
     return null;
