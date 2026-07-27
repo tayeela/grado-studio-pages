@@ -737,7 +737,7 @@ function стильДляОкна(layer) {
       || state.features.find(f => layerOf(f) === layer))
     : null;
   if (!образец) {
-    const свой = layerStyle(layer);
+    const свой = layerShownStyle(layer);
     return { cur: свой, знакОбразца: свой };
   }
   const sid = образец.style_id

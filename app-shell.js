@@ -13,7 +13,7 @@ function updateLayerStatus() {
   const chip = document.getElementById("cv-activelayer");
   if (!chip) return;
   if (L) {
-    const st = layerStyle(L) || {};
+    const st = layerShownStyle(L);
     const col = st.stroke || st.fill || cvColor("boundary", "#8a8a8a");
     chip.className = "cv-activelayer";
     chip.onclick = null;

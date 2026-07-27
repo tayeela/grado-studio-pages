@@ -330,7 +330,7 @@
     // назначить объекту «ПоСлою» — он белеет. Теперь слой отдаёт свой знак.
     const { text, counts, layers: names } = buildDxf({ features, layers,
       styleOf: (feature, layer) => feature ? styleOf(feature)
-        : (typeof layerStyle === "function" ? layerStyle(layer) : {}),
+        : (typeof layerShownStyle === "function" ? layerShownStyle(layer) : {}),
       layerOf, labelOf, markersOf: markerPathsOf,
       origin: crsInfo ? crsInfo.origin : [0, 0] });
     const blob = new Blob([text], { type: "application/dxf" });

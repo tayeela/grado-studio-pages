@@ -278,7 +278,7 @@ ${labelingXml(style)}
         value: stat.id, title: stat.title,
         style: stat.sample ? styleOf(stat.sample) : null,
       })) : [];
-      const qml = layerToQml(layer, layerStyle(layer) || {},
+      const qml = layerToQml(layer, layerShownStyle(layer),
         { categories, categoryField: "style_id" });
       saveFile(`${name}.qml`, qml, "application/xml");
     }
