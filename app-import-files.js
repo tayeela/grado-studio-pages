@@ -144,7 +144,15 @@
     return { stem, imported: ok ? payload.features.length : 0, cancelled: !ok };
   }
 
+  // Второй запуск, пока идёт первый, — это не «ещё один импорт», а повтор того
+  // же действия: человек кликнул дважды или бросил файлы поверх идущего
+  // разбора. Замер до правки: два одинаковых окна «Импортировать «X»?» одно
+  // поверх другого и два запроса на сервер за одно действие. Полоса занятости
+  // от этого не защищает — она рисует прогресс, а не держит замок.
+  let идётИмпорт = false;
   async function importPickedFiles(fileList) {
+    if (идётИмпорт) { toast("Импорт уже идёт — дождитесь конца", "warn"); return; }
+    идётИмпорт = true;
     const done = typeof beginBusy === "function" ? beginBusy("Разбор файлов…") : () => {};
     try {
       const entries = [];
@@ -169,7 +177,7 @@
         }
       }
       for (const line of summary) toast(line, "warn");
-    } finally { done(); }
+    } finally { done(); идётИмпорт = false; }
   }
   root.importPickedFiles = importPickedFiles;
 
