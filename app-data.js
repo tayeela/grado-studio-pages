@@ -791,7 +791,7 @@ async function openDataFetch() {
   render();
   loadCatalog();
   loadCacheInfo();
-  window.dockOverlay?.(overlay, { title: "Данные по области" });
+  // Отдельным окном, а НЕ в доке: см. пояснение у ЛИСТ_ОКОН в tests/dock.test.js.
 }
 
 // ---------- ФГИС ТП: прямой импорт векторных слоёв документа ----------
