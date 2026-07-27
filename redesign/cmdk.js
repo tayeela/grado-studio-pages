@@ -19,7 +19,17 @@
   };
   const click = id => {
     const e = $(id);
-    if (!e) return;
+    // Команда указывает на кнопку, которой в разметке уже нет. Раньше здесь
+    // стоял молчаливый выход, и палитра показывала живую строку, которая при
+    // выборе не делала ровно ничего: так «Заполнить примером (демо)» пережила
+    // удаление демо-проекта и полгода оставалась в списке пустышкой. Молчать
+    // тут нельзя — человек решит, что сломался не список, а функция.
+    if (!e) {
+      console.warn("cmdk: команда ссылается на несуществующую кнопку", id);
+      if (typeof window.toast === "function")
+        window.toast("Этой команды в текущей версии больше нет", "warn");
+      return;
+    }
     if (e.disabled) {
       if (typeof window.toast === "function") window.toast(e.title || "Команда сейчас недоступна", "warn");
       return;
@@ -89,7 +99,6 @@
       { t: "Система координат проекта…", run: () => window.openProjectCrsDialog && window.openProjectCrsDialog() },
       { t: isWeb ? "Импорт ГИС ОГД (GeoJSON)" : "Импорт ГИС ОГД (ZIP / GeoJSON / папка)", run: () => click("btn-gisogd") },
       { t: "Импорт НСПД (файл расширения)", run: () => click("btn-nspd") },
-      { t: "Заполнить примером (демо)", run: () => click("btn-demo") },
       { t: "Подложка: спутник Sentinel-2 (Copernicus)", run: setBasemap("s2") },
       { t: "Подложка: спутник ESRI (высокое разрешение)", run: setBasemap("sat") },
       { t: "Подложка: карта OpenStreetMap", run: setBasemap("osm") },
