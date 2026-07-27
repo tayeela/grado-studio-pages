@@ -119,6 +119,12 @@
 
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape" || dock.hidden || !current) return;
+    // Одно нажатие Escape закрывает ОДНО окно. Проверять «есть ли модалка
+    // поверх» по разметке поздно: обработчик окна стоит раньше нашего и к
+    // этому моменту УЖЕ снял её со страницы — док видел пустоту и закрывался
+    // заодно, за компанию. Признак «этот Escape уже потрачен» переживает
+    // такую уборку, потому что живёт в самом событии.
+    if (event.defaultPrevented) return;
     if (document.querySelector(".modal-overlay:not(.docked)")) return;  // поверх дока есть модалка
     event.stopPropagation();
     dock.querySelector(".dock-close")?.click();

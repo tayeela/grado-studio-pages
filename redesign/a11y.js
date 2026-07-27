@@ -114,6 +114,22 @@
     }, immediate ? 0 : 250);
   }
 
+  // Окно, переехавшее в рабочую панель (док), ПЕРЕСТАЁТ быть модальным: оно
+  // стоит сбоку, холст рядом с ним виден и кликабелен — ради этого док и
+  // заведён. Разметка при переезде не меняется (dock.js только вешает класс
+  // .docked), поэтому здесь окно продолжало считаться модальным, и человек
+  // оказывался заперт в панели: Tab ходил по кругу внутри неё и не выпускал
+  // ни на холст, ни на рельс инструментов, а aria-modal="true" прятал от
+  // чтеца весь остальной интерфейс. Модальность — не свойство разметки окна,
+  // а свойство места, где оно сейчас стоит, поэтому её и пересчитываем.
+  const docked = overlay => overlay.classList.contains('docked');
+  function syncDialogModality() {
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+      const dialog = overlay.querySelector('.modal');
+      if (dialog) dialog.setAttribute('aria-modal', String(!docked(overlay)));
+    });
+  }
+
   function prepareDialog(overlay) {
     if (overlay.dataset.a11yReady) return;
     const dialog = overlay.querySelector('.modal');
@@ -262,6 +278,7 @@
   }, true);
   document.querySelectorAll('.modal-overlay').forEach(prepareDialog);
   document.querySelectorAll('.ctx-menu').forEach(prepareContextMenu);
+  syncDialogModality();
 
   const observer = new MutationObserver(records => {
     for (const record of records) {
@@ -283,6 +300,10 @@
       });
       record.removedNodes.forEach(restoreRemovedFocus);
     }
+    // Переезд окна в док и обратно — это либо смена класса, либо перенос узла;
+    // оба вида правок доходят сюда, поэтому пересчитываем модальность здесь,
+    // а не в каждой ветке отдельно.
+    syncDialogModality();
     syncPopupState();
   });
   observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class', 'title'] });
@@ -301,7 +322,13 @@
   });
 
   document.addEventListener('keydown', event => {
-    const overlays = [...document.querySelectorAll('.modal-overlay')].filter(visible);
+    // Только НЕдокированные окна: докированное стоит сбоку, а не поверх, и
+    // ни ловушки фокуса, ни перехвата Escape ему не полагается. Escape над
+    // доком доводит до конца dock.js — он умеет то, чего здесь нет: если
+    // окно закрывается через closePopups (а тот докированные не трогает),
+    // док убирает окно сам. Из-за перехвата здесь «Знаки проекта» не
+    // закрывались по Escape вовсе — замер: окно оставалось в доке.
+    const overlays = [...document.querySelectorAll('.modal-overlay:not(.docked)')].filter(visible);
     const topOverlay = overlays[overlays.length - 1];
     if (topOverlay) {
       const dialog = topOverlay.querySelector('.modal');

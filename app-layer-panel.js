@@ -526,8 +526,12 @@ function dismissOverlay(overlay) {
   if (button) button.click(); else overlay.remove();
   return true;
 }
+// Докированное окно стоит СБОКУ, а не поверх: холст рядом с ним виден и
+// кликабелен, и «верхним окном» оно не является. Закрывает его док своим
+// способом (dock.js) — он умеет то, чего здесь нет: окно, закрывающееся
+// через closePopups, тот не трогает, и док убирает его сам.
 function topOverlay() {
-  const all = document.querySelectorAll(".modal-overlay");
+  const all = document.querySelectorAll(".modal-overlay:not(.docked)");
   return all.length ? all[all.length - 1] : null;
 }
 // Escape — в фазе перехвата: окно поверх всего, и пока оно открыто, Escape
