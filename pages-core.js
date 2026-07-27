@@ -1494,7 +1494,106 @@
     return { groups: [group], notes, snapshots: [manifest], layers };
   }
 
-  return { correctGisogdLonLat, correctGisogdGeometry, GISOGD_DATUM_SHIFT_UTM37,
+  // ---------- отбор объектов ПО ХОДУ ЗАГРУЗКИ ----------
+  //
+  // Портал не отдаёт слой по области: у export/ единственный параметр —
+  // format. Проверено заново: filter/ понимает page и limit, но любые
+  // пространственные ключи (bbox, extent, geometry, spatial, where) молча
+  // игнорирует и всегда возвращает все id; objects/ по POST отвечает 401 и
+  // ставит session-cookie, то есть геометрия поштучно — только человеку,
+  // вошедшему на портал; сама карта портала (ORBISmap на /gis/) тоже за
+  // логином. Анонимно доступен ровно один маршрут с геометрией — весь слой.
+  //
+  // Значит резать придётся у себя, но НЕ дожидаясь конца файла: «Земельные
+  // участки» это 269 МБ, а в памяти строка JS вдвое тяжелее байтов. Поэтому
+  // разбираем поток кусками и держим только те объекты, что попали в область.
+  //
+  // Полноценный потоковый разборщик JSON тут не нужен: в FeatureCollection
+  // объекты лежат один за другим, и достаточно находить в буфере
+  // СБАЛАНСИРОВАННЫЕ фигурные скобки верхнего уровня. Строки и экранирование
+  // учитываем — иначе скобка внутри названия улицы («ул. Строителей, д. 5 {»)
+  // разъедет счётчик и разбор посыплется на середине города.
+  // Разборщик с состоянием: куски приходят как попало, объект рвётся на
+  // границе куска, и «сколько скобок открыто» надо помнить между вызовами.
+  function makeFeatureSplitter() {
+    let buffer = "";
+    let вошли = false;                 // добрались ли до массива features
+    let depth = 0, start = -1, inString = false, escaped = false, scanned = 0;
+    return function push(chunk) {
+      buffer += chunk || "";
+      const features = [];
+      if (!вошли) {
+        // Шапка FeatureCollection: её собственная фигурная скобка не в счёт,
+        // иначе весь документ читается как ОДИН объект и разбор кончается
+        // только вместе с файлом — ровно то, чего мы избегаем.
+        // Шапку копим целиком: она короткая (несколько сотен байт), а
+        // подрезание буфера ради экономии рвало метку на границе кусков.
+        const at = buffer.indexOf('"features"');
+        if (at < 0) return features;
+        const open = buffer.indexOf("[", at);
+        if (open < 0) return features;
+        buffer = buffer.slice(open + 1);
+        scanned = 0;
+        вошли = true;
+      }
+      let consumed = 0;
+      // Просматриваем ТОЛЬКО дочитанное. Недочитанный объект остаётся в
+      // буфере, и если пройти по нему второй раз, его скобки посчитаются
+      // дважды — глубина не вернётся к нулю, и разбор замолчит навсегда.
+      for (let i = scanned; i < buffer.length; i++) {
+        const c = buffer[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (c === "\\") escaped = true;
+          else if (c === '"') inString = false;
+          continue;
+        }
+        if (c === '"') { inString = true; continue; }
+        if (c === "{") { if (depth === 0) start = i; depth += 1; continue; }
+        if (c === "}") {
+          depth -= 1;
+          if (depth === 0 && start >= 0) {
+            features.push(buffer.slice(start, i + 1));
+            consumed = i + 1;
+            start = -1;
+          }
+        }
+      }
+      // недочитанный объект остаётся в буфере целиком, разобранные — уходят
+      const keep = start >= 0 ? start : consumed;
+      buffer = buffer.slice(keep);
+      if (start >= 0) start = 0;
+      scanned = buffer.length;   // всё оставшееся уже просмотрено
+      return features;
+    };
+  }
+
+  // Попадает ли объект в область. Считаем по СОБСТВЕННОМУ габариту объекта:
+  // участок пересекает площадку и тогда, когда ни одна его вершина внутрь не
+  // попала (площадка целиком внутри участка) — проверка «есть вершина внутри»
+  // теряла бы ровно самые крупные участки.
+  function featureHitsBbox(feature, bbox) {
+    if (!bbox || bbox.length !== 4) return true;
+    const [west, south, east, north] = bbox;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const обойти = coords => {
+      if (typeof coords[0] === "number") {
+        const [x, y] = coords;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        return;
+      }
+      for (const part of coords) обойти(part);
+    };
+    const geometry = feature && feature.geometry;
+    if (!geometry || !geometry.coordinates) return false;
+    обойти(geometry.coordinates);
+    if (!(maxX >= minX)) return false;
+    return minX <= east && maxX >= west && minY <= north && maxY >= south;
+  }
+
+  return { makeFeatureSplitter, featureHitsBbox,
+    correctGisogdLonLat, correctGisogdGeometry, GISOGD_DATUM_SHIFT_UTM37,
     setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
     computeTep, preflightProject, webProject, importNspd, importGeoJson,
     gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent,
