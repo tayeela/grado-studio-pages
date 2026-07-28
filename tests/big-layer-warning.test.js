@@ -33,7 +33,7 @@ assert.match(adapter, /async function rememberedLayerBytes\(code\)/,
 // вес пишется ПОСЛЕ чтения тела (раньше он неизвестен), спрашиваем ДО запроса
 {
   const at = adapter.indexOf("async function gisogdLayerJson(");
-  const body = adapter.slice(at, at + 3000);
+  const body = adapter.slice(at, at + 6000);
   const askAt = body.indexOf("uiConfirm");
   const fetchAt = body.indexOf("externalFetch(`ГИС ОГД");
   const rememberAt = body.indexOf("await rememberLayerBytes(");
@@ -51,7 +51,7 @@ assert.match(adapter, /stop\.name = "GradoUserDeclined"/,
   // по нему была бы мёртвым кодом. (В индикаторе прогресса обращение к нему
   // остаётся законным — там оно лишь уточняет процент, когда доступно.)
   const at = adapter.indexOf("async function gisogdLayerJson(");
-  const body = adapter.slice(at, at + 3000);
+  const body = adapter.slice(at, at + 6000);
   assert.ok(!/headers\.get\("Content-Length"\)/.test(body),
     "решение о предупреждении не должно опираться на скрытый CORS заголовок");
 }

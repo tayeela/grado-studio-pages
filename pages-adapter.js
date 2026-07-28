@@ -287,15 +287,26 @@
   // участков»: 269 МБ за 560 с и это ещё не конец файла, скорость 480 КБ/с.
   //
   // Прежде такой слой два раза по две минуты упирался в таймаут и выдавал
-  // «не ответил — попробуйте позже», хотя позже не поможет НИКОГДА. Честнее
-  // сказать сразу и назвать рабочую замену: те же участки ЕГРН приходят из
-  // НСПД за доли секунды.
+  // «не ответил — попробуйте позже», хотя позже не поможет НИКОГДА.
+  //
+  // Резать по области сервер не умеет, а вот НАШ разборщик может резать
+  // ПО ХОДУ загрузки: makeFeatureSplitter выдаёт объекты по мере получения
+  // байтов, featureHitsBbox тут же решает, входит объект в площадку или нет.
+  // В памяти и в кэше остаётся только выбранная область, но качать всё равно
+  // приходится весь файл целиком — портал другого не отдаёт. Честный опрос
+  // человека ДО скачивания (размер, время, что именно сохранится) вместо
+  // молчаливого зависания на четыре минуты. НСПД остаётся быстрой заменой,
+  // если ждать не хочется, — называем её тут же.
   const GISOGD_TOO_BIG = {
-    zu_29_06_2021: "«Земельные участки» ГИС ОГД — это все участки Москвы " +
-      "(больше 269 МБ), портал не умеет отдавать их по области. " +
-      "Возьмите «Земельные участки» из НСПД — те же границы ЕГРН по вашей " +
-      "площадке, и загрузятся сразу.",
+    zu_29_06_2021: {
+      label: "Земельные участки",
+      bytes: 269 * 1024 * 1024,
+      note: "Быстрее — «Земельные участки» из НСПД: те же границы ЕГРН по " +
+        "вашей площадке загрузятся за доли секунды.",
+    },
   };
+  // измерено на «Земельных участках»: 269 МБ за 560 с
+  const GISOGD_STREAM_BYTES_PER_SEC = 480 * 1024;
 
   const NSPD_EXTENT_URL = "https://nspd.gov.ru/api/geoportal/v1/intersects?typeIntersect=fullObject";
   const bboxKm2 = bbox => {
@@ -303,6 +314,17 @@
     return Math.abs(north - south) * 111.32 * Math.abs(east - west) * 111.32 *
       Math.cos((south + north) / 2 * Math.PI / 180);
   };
+  // Короткий ключ кэша для площадки: раунд до 4 знаков (~11 м) даёт кэшу
+  // попадать на повторный запрос той же площадки, не давая ключу расти без
+  // предела. Код слоя в маршруте кэша ограничен 40 символами (см. DELETE
+  // /api/gisogd-cache/<code>), сырые координаты в него не влезли бы.
+  const hashBbox = bbox => {
+    const s = bbox.map(v => Math.round(Number(v) * 10000)).join(",");
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(36);
+  };
+  const gisogdFilteredCode = (code, bbox) => `${code}_b${hashBbox(bbox)}`;
   const mergeExtent = (target, part) => {
     target.groups.push(...(part.groups || []));
     target.notes.push(...(part.notes || []));
@@ -407,10 +429,53 @@
     } catch (error) { /* не влезло — предупреждение просто не появится */ }
   }
 
-  async function gisogdLayerJson(code, notes, signal, name) {
+  // Читает ответ ПОТОКОМ, отдавая в кэш и в проект только объекты, задевающие
+  // bbox. Портал не умеет резать по области, поэтому качать приходится весь
+  // файл — но держать в памяти целиком не обязано: makeFeatureSplitter отдаёт
+  // объекты по мере разбора, featureHitsBbox тут же решает их судьбу, чужие
+  // выбрасываются сразу же, не долетая до массива результата.
+  async function streamGisogdFiltered(response, code, name, bbox, signal) {
+    const total = Number(response.headers.get("Content-Length")) || 0;
+    if (!response.body || typeof response.body.getReader !== "function") {
+      // сервер без потока (нечастый браузер/прокси) — фильтруем после факта,
+      // хотя бы не роняем импорт
+      const text = await response.text();
+      const data = JSON.parse(text);
+      return { features: (data.features || []).filter(f => pagesCore.featureHitsBbox(f, bbox)),
+        bytes: text.length };
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const push = pagesCore.makeFeatureSplitter();
+    const matches = [];
+    let loaded = 0, ping = 0;
+    const принять = chunk => {
+      for (const json of push(chunk)) {
+        let feature;
+        try { feature = JSON.parse(json); } catch (error) { continue; }
+        if (pagesCore.featureHitsBbox(feature, bbox)) matches.push(feature);
+      }
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (signal && signal.aborted) { reader.cancel().catch(() => {}); throwIfAborted(signal); }
+      принять(decoder.decode(value, { stream: true }));
+      loaded += value.length;
+      if (loaded - ping >= 262144) { ping = loaded; gisogdProgress(code, name, loaded, total); }
+    }
+    const tail = decoder.decode();
+    if (tail) принять(tail);
+    gisogdProgress(code, name, loaded, total || loaded);
+    return { features: matches, bytes: loaded };
+  }
+
+  async function gisogdLayerJson(code, notes, signal, name, bbox) {
     throwIfAborted(signal);
+    const heavy = GISOGD_TOO_BIG[code];
+    const cacheCode = heavy && bbox ? gisogdFilteredCode(code, bbox) : code;
     try {
-      const hit = await databaseGet(gisogdCacheKey(code));
+      const hit = await databaseGet(gisogdCacheKey(cacheCode));
       throwIfAborted(signal);
       if (hit && hit.at && (Date.now() - hit.at) < GISOGD_TTL_MS) return hit.data;
     } catch (error) { /* кэш недоступен — тянем из сети */ }
@@ -423,7 +488,7 @@
     // известен по прошлой закачке — он переживает и очистку кэша слоёв, и
     // истечение недельного срока, после которого слой качается заново.
     const knownBytes = await rememberedLayerBytes(code);
-    if (knownBytes > BIG_LAYER_BYTES && typeof window.uiConfirm === "function") {
+    if (!heavy && knownBytes > BIG_LAYER_BYTES && typeof window.uiConfirm === "function") {
       const go = await window.uiConfirm(
         `Слой «${name || code}» весит около ${formatBytes(knownBytes)} — столько он занял в прошлый раз. ` +
         `Портал отдаёт его целиком, по области он не режется. Скачать? ` +
@@ -435,7 +500,43 @@
         throw stop;
       }
     }
-    if (GISOGD_TOO_BIG[code]) throw new Error(GISOGD_TOO_BIG[code]);
+    // Заведомо неподъёмный слой (269+ МБ): целиком в память и в кэш не
+    // кладём никогда. Вместо флага «слишком большой — не дам» — честный
+    // выбор ДО закачки, с ценой в минутах и с тем, что реально сохранится.
+    if (heavy) {
+      if (!bbox) throw new Error(`слой «${name || code}» отдаётся только по области — область не задана`);
+      const bytes = knownBytes || heavy.bytes;
+      const seconds = Math.round(bytes / GISOGD_STREAM_BYTES_PER_SEC);
+      const minutes = Math.max(1, Math.round(seconds / 60));
+      if (typeof window.uiConfirm === "function") {
+        const go = await window.uiConfirm(
+          `Слой «${heavy.label}» ГИС ОГД — это ${formatBytes(bytes)} (все участки Москвы), ` +
+          `портал не отдаёт его по области, качать придётся целиком. На измеренной скорости ` +
+          `этого сервера это около ${minutes} мин. В браузере останется только ВАША площадка — ` +
+          `весь слой не хранится. Отменить можно в любой момент кнопкой отмены. ${heavy.note} Скачать область сейчас?`,
+          { title: "Большой слой без выборки по области", ok: "Скачать", cancel: "Отмена" });
+        if (!go) {
+          const stop = new Error(`слой «${heavy.label}» (${formatBytes(bytes)}) не скачан по вашему выбору`);
+          stop.name = "GradoUserDeclined";
+          throw stop;
+        }
+      }
+      const response = await externalFetch(`ГИС ОГД (слой ${code})`, pagesCore.gisogdLayerUrl(code), { signal }, 900000);
+      const { features, bytes: downloaded } = await streamGisogdFiltered(response, code, name || code, bbox, signal);
+      await rememberLayerBytes(code, downloaded);
+      throwIfAborted(signal);
+      const data = { type: "FeatureCollection", features };
+      notes.push(`слой ${code}: разобрано ${formatBytes(downloaded)} потоком, в вашей области ` +
+        `${features.length} об. — весь слой в браузере не хранится, дальше берётся из кэша по площадке`);
+      const at = Date.now();
+      try {
+        await databaseSet(gisogdCacheKey(cacheCode), { at, bytes: JSON.stringify(data).length, name: name || null, data });
+        await databaseSet(gisogdMetaKey(cacheCode),
+          { at, bytes: JSON.stringify(data).length, name: `${name || code} (по площадке)`, features: features.length });
+      } catch (error) { notes.push(`слой ${code} не поместился в кэш — будет качаться заново`); }
+      throwIfAborted(signal);
+      return data;
+    }
     // 300 с вместо 120: ГПЗУ (97 МБ, 87 720 объектов) идёт 23 с, но слои
     // потяжелее не укладывались и обрывались на полпути.
     const response = await externalFetch(`ГИС ОГД (слой ${code})`, pagesCore.gisogdLayerUrl(code), { signal }, 300000);
@@ -604,7 +705,7 @@
         }
         for (const layer of sourceLayers) {
           try {
-            const raw = await gisogdLayerJson(layer.code, result.notes, signal, layer.name);
+            const raw = await gisogdLayerJson(layer.code, result.notes, signal, layer.name, bbox);
             const part = pagesCore.importGisogdExtent(raw, layer, bbox,
               { correctDatum: payload.alignOgd !== false });
             for (const group of (part.groups || [])) group.request_source = source;
