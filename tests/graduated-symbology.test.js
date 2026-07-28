@@ -109,10 +109,12 @@ for (const method of ["equal", "quantile", "jenks"]) {
 
   assert.ok(html.indexOf('src="./app-symbology.js') < html.indexOf('src="./app-style-ui.js'),
     "модуль обязан подниматься до окна оформления");
-  assert.match(app, /if \(r\.patch && SY && r\.min !== undefined && r\.max !== undefined\)/,
+  assert.match(app, /function rulePatchFor\(L, f\)/,
     "правило-диапазон обязано разбираться отдельно от правила по значению");
-  assert.match(app, /return \{ \.\.\.\(layerStyle\(L\) \|\| \{\}\), \.\.\.r\.patch \};/,
-    "цвет диапазона ложится патчем поверх стиля слоя — знака в библиотеке у него нет");
+  assert.match(app, /const rangePatch = rulePatchFor\(L, f\);\s*\n\s*if \(rangePatch\) base = \{ \.\.\.base, \.\.\.rangePatch \};/,
+    "цвет диапазона ложится ПАТЧЕМ поверх уже выбранного знака: у импортированных " +
+    "слоёв знак живёт на объекте, и патч обязан доходить и до них — см. " +
+    "rules-over-imported-sign");
   assert.match(app, /function rangeLegendItems\(L, ranges\)/,
     "в легенде обязаны стоять диапазоны, иначе цвет есть, а ключа к нему нет");
   assert.match(ui, /data-mode="graduated"/, "в окне оформления обязан быть третий режим");

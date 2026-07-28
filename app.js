@@ -604,10 +604,11 @@ function toggleCategoryVisible(layer, catId, visible) {
  *   - f.fmt — локальные правки отображения (только холст + режим «как на холсте» в альбоме).
  *
  * Порядок разрешения styleOf(f):
- *   1. f.style_id (если есть) → библиотека
- *   2. ruleStyleFor (первое совпадение rules слоя) → библиотека
+ *   1. ruleStyleFor (первое совпадение правил-ЗНАКОВ слоя) → библиотека
+ *   2. f.style_id (если есть) → библиотека
  *   3. layerStyle (base style_id слоя + layer.fmt)
- *   4. + f.fmt (поверх всего)
+ *   4. + rulePatchFor (правила-ДИАПАЗОНЫ: патч поверх выбранного знака)
+ *   5. + f.fmt (поверх всего)
  *
  * «Библиотека знаков» правит глобальные эталоны (через style_overrides.json).
  * «Оформление слоя» — это кастомизация именно для данного слоя/проекта.
@@ -719,14 +720,9 @@ function ruleStyleFor(L, f) {
   const props = f.props || {};
   const SY = typeof window !== "undefined" && window.GRADO_SYMBOLOGY;
   for (const r of L.rules) {
-    // правило-ДИАПАЗОН (градуированная символика): несёт не знак из библиотеки,
-    // а патч оформления поверх стиля слоя — цветов диапазонов в библиотеке нет
-    // и быть не может, они считаются по данным слоя
-    if (r.patch && SY && r.min !== undefined && r.max !== undefined) {
-      if (!r.field) continue;
-      if (SY.ruleMatchesValue(r, props[r.field])) return { ...(layerStyle(L) || {}), ...r.patch };
-      continue;
-    }
+    // правила-ДИАПАЗОНЫ разбирает rulePatchFor: они несут не знак, а патч
+    // оформления, и накладываются поверх уже выбранного знака
+    if (r.patch && r.min !== undefined && r.max !== undefined) continue;
     if (!r.field || r.value === undefined || r.value === "") continue;
     const v = props[r.field] ?? "";
     const rv = r.value;
@@ -740,6 +736,21 @@ function ruleStyleFor(L, f) {
     else if (op === "contains") match = String(v).toLowerCase().includes(String(rv).toLowerCase());
     else if (op === "starts") match = String(v).toLowerCase().startsWith(String(rv).toLowerCase());
     if (match) return (r.style_id && (state.projectStyles[r.style_id] || STYLES_V2[r.style_id])) || null;
+  }
+  return null;
+}
+// Градуированная символика: патч оформления, посчитанный по данным слоя
+// (цветов диапазонов в библиотеке знаков нет и быть не может). Возвращает
+// именно ПАТЧ, а не готовый стиль: накладывать его нужно поверх того знака,
+// который объект уже получил, каким бы путём он ни был выбран.
+function rulePatchFor(L, f) {
+  if (!L || !Array.isArray(L.rules)) return null;
+  const SY = typeof window !== "undefined" && window.GRADO_SYMBOLOGY;
+  if (!SY) return null;
+  const props = f.props || {};
+  for (const r of L.rules) {
+    if (!r.patch || !r.field || r.min === undefined || r.max === undefined) continue;
+    if (SY.ruleMatchesValue(r, props[r.field])) return r.patch;
   }
   return null;
 }
@@ -796,8 +807,14 @@ function styleOf(f) {
   const sid = f.style_id;
   // знак для объекта без style_id: цвет зоны по типу ИЛИ знак слоя по имени
   const gsid = sid ? null : (gpZoneSid(f) || layerSignSid(L));
-  let base = (sid && (state.projectStyles[sid] || STYLES_V2[sid]))
-    || (gsid && STYLES_V2[gsid]) || ruleStyleFor(L, f) || layerStyle(L) || {};
+  // Условное оформление слоя стоит ВПЕРЕДИ знака объекта. У импортированных
+  // слоёв (ГИС ОГД, шейпы) знак живёт на объекте — он проставлен при импорте по
+  // коду ЛГР, а не выбран человеком. Пока f.style_id был выше правил, правила
+  // на такие слои не действовали ВООБЩЕ: окно оформления считало классы,
+  // легенда листа их рисовала, выгрузка QML писала graduatedSymbol — а холст
+  // оставался прежним. Человек настраивает раскраску и не видит отклика.
+  let base = ruleStyleFor(L, f) || (sid && (state.projectStyles[sid] || STYLES_V2[sid]))
+    || (gsid && STYLES_V2[gsid]) || layerStyle(L) || {};
   // «Оформление слоя» действует и на объекты со СВОИМ знаком. Раньше явный
   // f.style_id забирал стиль прямо из библиотеки, минуя L.fmt: правки слоя
   // (напр. выключить штриховку/подпись у импортированных зон ОГД) просто не
@@ -812,6 +829,9 @@ function styleOf(f) {
     const refStyle = refId && (state.projectStyles[refId] || STYLES_V2[refId]);
     base = { ...(refStyle || base), ...categoryLayerVisualFormat(L), ...categoryPatch };
   }
+  // диапазоны — патч поверх любого знака, каким бы путём он ни был выбран
+  const rangePatch = rulePatchFor(L, f);
+  if (rangePatch) base = { ...base, ...rangePatch };
   const withData = applyDataDefined(base, dataDefinedPatch(L, f));
   return f.fmt ? { ...withData, ...f.fmt } : withData;   // f.fmt — оформление отдельного объекта
 }
