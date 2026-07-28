@@ -658,14 +658,25 @@ window.addEventListener("pointerup", e => {
     state.drag = null;
     const L = activeLayer();
     if (moved && Math.abs(a[0] - b[0]) > 1 && Math.abs(a[1] - b[1]) > 1) {
+      // Порог протяжки меряется в ПИКСЕЛЯХ (4 px), а сторона прямоугольника —
+      // в МЕТРАХ (1 м). На крупном масштабе, где метр больше четырёх пикселей,
+      // между порогами есть щель: протяжка засчитана, прямоугольник — нет.
+      // Молчать в этой щели нельзя: человек тянет рамку и не получает ничего
+      // без единого слова. Так же и с неподходящим слоем.
       if (L && L.geometry_type === "polygon")
         addFeature(L.id, { ring: [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]] });
-    } else if (!moved) {
+      else toast(L ? `Слой «${L.title}» не полигональный — прямоугольник в него не лечь`
+        : "Нет активного слоя для прямоугольника", "warn");
+    } else if (moved) {
+      toast(`Прямоугольник ${Math.abs(a[0] - b[0]).toFixed(1)}×${Math.abs(a[1] - b[1]).toFixed(1)} м ` +
+        "меньше метра по стороне — не создан", "warn");
+      draw();
+    } else {
       // клик без протягивания — произвольный контур по точкам
       state.drawing = { pts: [a] };
       state.typed = "";
       draw();
-    } else draw();
+    }
   } else if (state.drawing && state.drawing.center != null && state.tool === "circle") {
     const c = state.drawing.center;
     const mp = state.mouse || [c[0], c[1]];
