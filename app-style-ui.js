@@ -813,7 +813,9 @@ function openLayerStyle(layer, opts = {}) {
   const numericCols = !SYMBOLOGY ? [] : fieldCols.filter(column =>
     SYMBOLOGY.numericValues(layerFeatures, column.name).length >= 2);
   const gradSaved = (layer.fmt && layer.fmt.graduated) || {};
-  if (mode !== "rules" && gradSaved.field) mode = "graduated";
+  // Диапазоны ПИШУТ layer.rules: «есть rules — значит по значению поля»
+  // открывало слой не в той вкладке и стирало классы (graduated-mode-reopen).
+  if (!opts.mode && gradSaved.field) mode = "graduated";
   // Разметку окна собирают три строителя — по одному на режим. Значения,
   // которые им нужны, передаются явно: так видно, от чего зависит панель.
   const ctx = { mode, layer, catsSection, scaleSection, hasFill, opacity, cur, dp, opt,

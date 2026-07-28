@@ -663,12 +663,22 @@ function layerVisualFormat(L) {
 // явного флага uniform_style считаем служебным наследием редактора, а не
 // намерением перекрасить все категории одинаково. Явная правка блока
 // «Единый стиль» ставит uniform_style=true и снова применяет общий формат.
+// Подпись — не про цвет категории. Точечные правки категорий отменяют общий
+// формат слоя, но настройки ПОДПИСИ у категорий своих нет: они задаются один
+// раз на слой. Возвращая пустоту целиком, мы теряли и их — человек выключал
+// подписи слоя или менял поле подписи, а объекты правленых категорий (то есть
+// почти все) продолжали подписываться по-старому и молча.
+const LAYER_LABEL_KEYS = ["line_label", "label_field", "label_font", "label_font_family",
+  "label_size", "label_size_mm", "label_size_expr", "label_color"];
 function categoryLayerVisualFormat(L) {
   if (!L || !L.fmt) return {};
   const hasCategoryOverrides = !!(L.fmt.cat_styles &&
     Object.keys(L.fmt.cat_styles).length);
-  return hasCategoryOverrides && L.fmt.uniform_style !== true
-    ? {} : layerVisualFormat(L);
+  if (!hasCategoryOverrides || L.fmt.uniform_style === true) return layerVisualFormat(L);
+  const labels = {};
+  for (const key of LAYER_LABEL_KEYS)
+    if (L.fmt[key] !== undefined) labels[key] = L.fmt[key];
+  return labels;
 }
 
 // условное форматирование: первое правило слоя, чьё поле совпадает со
