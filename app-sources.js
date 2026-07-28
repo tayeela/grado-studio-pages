@@ -149,6 +149,11 @@ function joinImportedRuns(features) {
         // ключи ВСЕХ склеенных отрезков остаются на объекте: по ним повторная
         // выгрузка той же территории узнаёт, что эти отрезки уже в проекте
         seed.srcKeys = members.flatMap(m => m.srcKeys || (m.srcKey ? [m.srcKey] : []));
+        // место подписи с портала стоит не на каждом отрезке (человек ставил
+        // его один раз на квартал, не на каждый 3-точечный обрезок), поэтому
+        // после склейки берём первое, какое нашлось среди всех вошедших
+        const anchor = members.map(m => m.label_anchor).find(Boolean);
+        if (anchor) seed.label_anchor = anchor;
       }
       out.push(seed);
     }

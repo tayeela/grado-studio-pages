@@ -1355,9 +1355,14 @@
     ["virtual1965", "Сельскохозяйственная зона"]];
   const curatedLayer = (code, name, kind) => ({ code, name, kind,
     layer_id: `source.gisogd.${code}`, source_code: code, source_name: name });
-  // набор красных линий: слой портала + код ЛГР, который из него берут
-  const redlineLayer = (code, lineCode, name) => ({
-    ...curatedLayer(code, name, "redline"), line_code: lineCode });
+  // набор красных линий: слой портала + код ЛГР, который из него берут.
+  // labelCode — код КОМПАНЬОН-слоя портала: у каждого набора КЛ рядом в
+  // каталоге лежит точечный слой «Надписи …» с местом, которое для этой линии
+  // выбрал человек на портале (courtesy points), а не наш алгоритм «через
+  // каждые 320 px». Найдено обходом каталога: у слоя и его «Надписи»-соседа
+  // общий parent_id (лежат в одной папке).
+  const redlineLayer = (code, lineCode, name, labelCode) => ({
+    ...curatedLayer(code, name, "redline"), line_code: lineCode, label_code: labelCode });
   // Наборы красных линий портала → код ЛГР, который в них запрашивают.
   // Коды берутся из moscow_lgr.json: 1 — КЛ УДС, 2 — КЛ ТОП, 3 — КЛ ЛО,
   // 4 — КЛ ОДМС. Линия несёт коды обеих своих сторон, поэтому без этой
@@ -1372,11 +1377,48 @@
     // Красные линии — четыре разных набора портала, каждый со своим кодом ЛГР.
     // В каталоге они лежат в четырёх подпапках с длинными именами; здесь они
     // рядом и названы так, как их называют в работе.
-    "gisogd.kl_uds": [redlineLayer("l1", 1, "Красные линии УДС (КЛ УДС)")],
-    "gisogd.kl_top": [redlineLayer("l2", 2, "Красные линии ТОП (КЛ ТОП)")],
-    "gisogd.kl_lo": [redlineLayer("l3", 3, "Красные линии линейных объектов (КЛ ЛО)")],
-    "gisogd.kl_odms": [redlineLayer("l4", 4, "Красные линии ОДМС (КЛ ОДМС)")],
+    "gisogd.kl_uds": [redlineLayer("l1", 1, "Красные линии УДС (КЛ УДС)", "virtual14")],
+    "gisogd.kl_top": [redlineLayer("l2", 2, "Красные линии ТОП (КЛ ТОП)", "virtual15")],
+    "gisogd.kl_lo": [redlineLayer("l3", 3, "Красные линии линейных объектов (КЛ ЛО)", "virtual16")],
+    "gisogd.kl_odms": [redlineLayer("l4", 4, "Красные линии ОДМС (КЛ ОДМС)", "virtual17")],
   };
+
+  // Точечный слой «Надписи …» несёт place-точки для линий-компаньонов: guid
+  // самого сегмента линии (lineguid) + код стороны (textlineco, тот же код,
+  // что и в linelineco у геометрии) → место и текст, которые для ЭТОЙ линии
+  // выбрал человек на портале. Одна линия может нести несколько кодов —
+  // каждому своя точка, поэтому ключ составной, а не просто guid.
+  //
+  // Портал режет линию на короткие отрезки, и guid — это guid ИМЕННО отрезка,
+  // а не всей улицы: подпись стоит не на каждом отрезке, только там, где её
+  // поставил составитель. Это и есть весь смысл: не «подпись на каждые 320 px
+  // нашим алгоритмом», а «ровно там, где её видел смысл поставить человек».
+  function buildGisogdLabelIndex(payload, bbox, correctDatum) {
+    const index = new Map();
+    if (!payload || !Array.isArray(payload.features)) return index;
+    for (const f of payload.features) {
+      if (bbox && bbox.length) {
+        const fb = geomBbox(f && f.geometry);
+        if (!fb || !bboxHit(fb, bbox)) continue;
+      }
+      const p = f.properties || {};
+      const guid = p.lineguid;
+      const text = typeof p.text === "string" ? p.text.trim() : "";
+      let coords = f.geometry && f.geometry.coordinates;
+      if (!guid || !text || !Array.isArray(coords) || coords.length < 2) continue;
+      if (correctDatum) {
+        const fixed = correctGisogdGeometry({ type: "Point", coordinates: coords });
+        if (fixed && Array.isArray(fixed.coordinates)) coords = fixed.coordinates;
+      }
+      const codeRaw = p.textlineco;
+      const code = codeRaw != null && codeRaw !== "" && Number.isFinite(Number(codeRaw))
+        ? Math.abs(Number(codeRaw)) : null;
+      const key = `${guid}|${code}`;
+      // при повторе (портал иногда дублирует точку) первая — не хуже любой другой
+      if (!index.has(key)) index.set(key, { x: coords[0], y: coords[1], text });
+    }
+    return index;
+  }
 
   // layer = {code, name, kind?, layer_id?}; payload — сырой GeoJSON слоя целиком
   function importGisogdExtent(payload = {}, layer = {}, bbox = [], options = {}) {
@@ -1386,6 +1428,7 @@
     // датум-поправка портала (см. correctGisogdGeometry) — включена по
     // умолчанию; координаты ГИС ОГД садятся на ЕГРН/спутник без ручного сдвига
     const correctDatum = options.correctDatum !== false;
+    const labelIndex = buildGisogdLabelIndex(options.labelsPayload, bbox, correctDatum);
     const name = layer.name || layer.code || "";
     // СЛОЙ = слой-источник (требование юзера), а не слой-знак. kind нужен для
     // вида объекта; layer_id для динамических слоёв — source.gisogd.<code>,
@@ -1436,7 +1479,10 @@
           for (const [code, side, csid] of routes) {
             // атрибуты — по СВОЕЙ стороне линии: у чужой стороны свой документ
             const props = { ...gisogdCleanProps(raw, code), line_code: code, line_side: side };
-            group.features.push({
+            // guid отрезка — служебное поле, gisogdCleanProps его уже вырезал
+            // из props; ключ ищем в СЫРЫХ атрибутах, пока raw ещё под рукой
+            const anchor = raw.guid != null ? labelIndex.get(`${raw.guid}|${code}`) : null;
+            const feature = {
               // слой — источника (layerId), различаются ЗНАКОМ (csid); раньше
               // код уводил объект в чужой слой-знак
               kind: REDLINE_CODES.has(code) ? "redline" : "restrict",
@@ -1444,7 +1490,9 @@
               props,
               style_id: csid,
               srcKey: `${layerId}:${layer.code}:${code}:${key}#${pi}`,
-            });
+            };
+            if (anchor) feature.label_anchor = { x: anchor.x, y: anchor.y };
+            group.features.push(feature);
             addFields(group, props, GISOGD_PROP_LABELS);
           }
           return;
@@ -1596,7 +1644,7 @@
     correctGisogdLonLat, correctGisogdGeometry, GISOGD_DATUM_SHIFT_UTM37,
     setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
     computeTep, preflightProject, webProject, importNspd, importGeoJson,
-    gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent,
+    gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent, buildGisogdLabelIndex,
     GISOGD_WEB_LAYERS, sourceLayerId,
     originWgs84: [...ORIGIN_WGS84],
     buildOsmExtentRequest, importOsmExtent, buildNspdExtentRequest, importNspdExtent };

@@ -436,7 +436,55 @@ function lgrLabelSizePx(st) {
   return наОпорном * groundFactor(st);
 }
 
-function drawLineLabel(pts, text, color, grid, sizePx = 10) {
+// Место подписи «через каждые 320 px» — старое поведение, когда портал не
+// подсказал ничего лучше.
+function repeatAlongChain(segs, total, textW, half) {
+  const step = Math.max(textW + 60, total / Math.max(1, Math.round(total / 320)));
+  // размещаем подпись ТОЛЬКО там, где строка целиком помещается на ОДНОМ
+  // прямом отрезке (не заходя за угол) — иначе текст вылезал за контур и
+  // ломался на изгибах звёздчатого контура
+  const places = [];
+  for (let s = step / 2; s < total; s += step) {
+    const seg = segs.find(sg => s >= sg.s0 && s <= sg.s0 + sg.len);
+    if (!seg) continue;
+    const local = s - seg.s0;
+    if (local < half || local > seg.len - half) continue;
+    const t = local / seg.len;
+    let ang = Math.atan2(seg.by - seg.ay, seg.bx - seg.ax);
+    if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+    places.push({ x: seg.ax + (seg.bx - seg.ax) * t, y: seg.ay + (seg.by - seg.ay) * t, ang });
+  }
+  return places;
+}
+
+// Место, которое для этой линии выбрал человек на портале ГИС ОГД (см.
+// buildGisogdLabelIndex в pages-core.js), вместо расчёта «через 320 px».
+// Портал даёт ТОЧКУ, не направление: угол текста берём с ближайшего к ней
+// отрезка склеенной линии — направление портала (`textangle`) нигде не
+// проверено вживую, гадать со знаком означает риск подписи вверх ногами.
+// Расстояние до ближайшего отрезка обязано быть маленьким: якорь пришёл
+// именно с ЭТОЙ линии (см. buildGisogdLabelIndex, ключ — guid отрезка), но
+// после стыковки в цепочку либо реального расхождения в датум-поправке
+// сверяем ещё раз, а не доверяем вслепую чужой точке.
+const GISOGD_ANCHOR_MAX_PX = 60;
+function placeAtAnchor(segs, anchor) {
+  const [ax, ay] = w2s(anchor.x, anchor.y);
+  let best = null;
+  for (const sg of segs) {
+    const dx = sg.bx - sg.ax, dy = sg.by - sg.ay;
+    const len2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((ax - sg.ax) * dx + (ay - sg.ay) * dy) / len2));
+    const px = sg.ax + dx * t, py = sg.ay + dy * t;
+    const d = Math.hypot(ax - px, ay - py);
+    if (!best || d < best.d) best = { sg, d, px, py };
+  }
+  if (!best || best.d > GISOGD_ANCHOR_MAX_PX) return null;
+  let ang = Math.atan2(best.sg.by - best.sg.ay, best.sg.bx - best.sg.ax);
+  if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+  return [{ x: best.px, y: best.py, ang }];
+}
+
+function drawLineLabel(pts, text, color, grid, sizePx = 10, anchor = null) {
   const scr = pts.map(p => w2s(...p));
   if (scr.length < 2) return;
   if (sizePx < LGR_LABEL_MIN_PX) return;      // мельче — смаз, QGIS тут знак прячет
@@ -456,21 +504,8 @@ function drawLineLabel(pts, text, color, grid, sizePx = 10) {
     total += len;
   }
   if (!segs.length || total < textW + 20) { ctx.restore(); return; }
-  const step = Math.max(textW + 60, total / Math.max(1, Math.round(total / 320)));
-  // размещаем подпись ТОЛЬКО там, где строка целиком помещается на ОДНОМ
-  // прямом отрезке (не заходя за угол) — иначе текст вылезал за контур и
-  // ломался на изгибах звёздчатого контура
-  const places = [];
-  for (let s = step / 2; s < total; s += step) {
-    const seg = segs.find(sg => s >= sg.s0 && s <= sg.s0 + sg.len);
-    if (!seg) continue;
-    const local = s - seg.s0;
-    if (local < half || local > seg.len - half) continue;
-    const t = local / seg.len;
-    let ang = Math.atan2(seg.by - seg.ay, seg.bx - seg.ax);
-    if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
-    places.push({ x: seg.ax + (seg.bx - seg.ax) * t, y: seg.ay + (seg.by - seg.ay) * t, ang });
-  }
+  let places = anchor ? placeAtAnchor(segs, anchor) : null;
+  if (!places) places = repeatAlongChain(segs, total, textW, half);
   if (!places.length) {                        // ни один отрезок не вместил — хотя бы одна на самом длинном
     const seg = segs.reduce((m, sg) => sg.len > m.len ? sg : m, segs[0]);
     if (seg.len >= textW + 4) {
@@ -969,7 +1004,7 @@ function drawFeatureGeometry(f, layer, st, stDash, stWidth, _labelGrid) {
           drawFeatureMarkers(f, st, stWidth, stDash);
         if (st.line_label) {
           const pts = f.ring ? [...f.ring, f.ring[0]] : f.line;
-          drawLineLabel(pts, st.line_label, st.stroke || cvColor("redline", "#d91a1a"), _labelGrid, lgrLabelSizePx(st));
+          drawLineLabel(pts, st.line_label, st.stroke || cvColor("redline", "#d91a1a"), _labelGrid, lgrLabelSizePx(st), f.label_anchor);
         }
       }
       ctx.setLineDash([]);

@@ -706,8 +706,23 @@
         for (const layer of sourceLayers) {
           try {
             const raw = await gisogdLayerJson(layer.code, result.notes, signal, layer.name, bbox);
+            // Точечный слой-компаньон «Надписи …»: место подписи, которое для
+            // ЭТОЙ линии выбрал человек на портале, вместо расчёта «каждые
+            // 320 px». Необязательный — сбой закачки не должен рушить импорт
+            // самой линии, только оставлять её без готового места подписи.
+            let labelsPayload = null;
+            if (layer.label_code) {
+              try {
+                labelsPayload = await gisogdLayerJson(layer.label_code, result.notes, signal,
+                  `Надписи: ${layer.name}`, bbox);
+              } catch (error) {
+                if (error?.name === "AbortError" || signal?.aborted) throw abortError();
+                result.notes.push(`места подписи для «${layer.name}» не загрузились: ` +
+                  `${error.message || error} — подписи встанут по умолчанию`);
+              }
+            }
             const part = pagesCore.importGisogdExtent(raw, layer, bbox,
-              { correctDatum: payload.alignOgd !== false });
+              { correctDatum: payload.alignOgd !== false, labelsPayload });
             for (const group of (part.groups || [])) group.request_source = source;
             mergeExtent(result, part);
           } catch (error) {

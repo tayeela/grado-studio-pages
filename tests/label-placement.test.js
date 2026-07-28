@@ -110,8 +110,9 @@ const job = (text, x, y, extra = {}) => ({ text, x, y, width: 40, height: 12, ..
     "полюс обязан кешироваться: на 20 000 подписанных зданий пересчёт каждый кадр невозможен");
   assert.match(app, /const stamp = `\$\{ring\.length\}\|/,
     "но правка вершины обязана сбрасывать кеш");
-  assert.match(app, /drawLineLabel\(pts, st\.line_label, [\s\S]{0,140}_labelGrid, lgrLabelSizePx\(st\)\)/,
-    "подпись знака вдоль линии обязана занимать место в общей сетке и брать кегль знака");
+  assert.match(app, /drawLineLabel\(pts, st\.line_label, [\s\S]{0,140}_labelGrid, lgrLabelSizePx\(st\), f\.label_anchor\)/,
+    "подпись знака вдоль линии обязана занимать место в общей сетке, брать кегль знака " +
+    "и место с портала (см. gisogd-label-anchors), когда оно есть");
   assert.match(app, /const LGR_LABEL_M = 10;/,
     "кегль подписи знака — 10 метров местности, как fontSize=10 MapUnit в эталонном textlines.qml");
   assert.match(app, /ctx\.strokeText\(job\.text, tx, ty\)/,
