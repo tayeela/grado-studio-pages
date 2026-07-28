@@ -275,7 +275,7 @@ cv.addEventListener("pointerdown", e => {
       const f = state.features.find(x => x.id === grabbed.featureId);
       if (f) {
         snapshot();
-        state.labelDrag = { f, startX: wxr, startY: wyr,
+        state.labelDrag = { f, startX: wxr, startY: wyr, moved: false,
           orig: Array.isArray(f.label_offset) ? [...f.label_offset] : [0, 0] };
         return;
       }
@@ -487,6 +487,7 @@ cv.addEventListener("pointermove", e => {
   if (state.labelDrag) {
     const d = state.labelDrag;
     d.f.label_offset = [d.orig[0] + (wx - d.startX), d.orig[1] + (wy - d.startY)];
+    d.moved = true;
     draw();
     return;
   }
@@ -626,8 +627,12 @@ window.addEventListener("pointerup", e => {
   if (state.labelDrag) {
     const d = state.labelDrag;
     state.labelDrag = null;
-    // почти нулевой сдвиг — это клик, а не перенос: смещение снимается
-    if (d.f.label_offset && Math.hypot(d.f.label_offset[0] - d.orig[0], d.f.label_offset[1] - d.orig[1]) < 0.5) {
+    // почти нулевой сдвиг — это клик, а не перенос: смещение снимается.
+    // !d.moved — тот же клик, но у объекта БЕЗ прежнего label_offset (пишет
+    // его только pointermove): d.f.label_offset тогда ещё undefined, старая
+    // проверка на его правдивость молчала, и ветка ниже коммитила несуществующую
+    // правку — лишняя запись в отмене и тост «закреплена» без единого движения.
+    if (!d.moved || (d.f.label_offset && Math.hypot(d.f.label_offset[0] - d.orig[0], d.f.label_offset[1] - d.orig[1]) < 0.5)) {
       if (d.orig[0] === 0 && d.orig[1] === 0) delete d.f.label_offset;
       else d.f.label_offset = d.orig;
       state.undo.pop(); syncHistoryControls(); draw();
@@ -716,6 +721,37 @@ window.addEventListener("blur", () => {
     state.edit = null;
     if (moved) afterChange(); else draw();
   } else draw();
+});
+// Отмена жеста браузером/ОС — pointercancel, не pointerup. iOS Safari шлёт его
+// на edge-swipe-back поверх открытого чертежа, Android — на notification
+// pull-down, оба — на конкурирующий тач; setPointerCapture (pointerdown) не
+// спасает: capture теряется вместе с самим жестом. Событие приходит ЗАХВАТИВШЕМУ
+// элементу (cv), не window, поэтому и слушатель — на cv, а не рядом с pointerup.
+//
+// Без него уже сдвинутая вершина или подпись оставались в памяти без
+// afterChange(): пространственный индекс и автосохранение о правке не знали, а
+// на undo уже лежал сделанный при нажатии снимок без парного коммита —
+// ровно то полу-состояние, которое чинили для blur.
+cv.addEventListener("pointercancel", () => {
+  state.pan = null;
+  state.drag = null;
+  if (state.labelDrag) {
+    const d = state.labelDrag;
+    state.labelDrag = null;
+    if (!d.moved) {
+      if (d.orig[0] === 0 && d.orig[1] === 0) delete d.f.label_offset;
+      else d.f.label_offset = d.orig;
+      state.undo.pop(); syncHistoryControls(); draw();
+    } else afterChange();
+    return;
+  }
+  if (state.edit) {
+    const moved = state.edit.moved;
+    state.edit = null;
+    if (moved) afterChange(); else draw();
+    return;
+  }
+  draw();
 });
 cv.addEventListener("dblclick", e => {
   {

@@ -320,6 +320,10 @@ function undo() {
   const current = historySnapshot(historyTail(state.redo));
   state.redo.push(current);
   while (state.redo.length > undoDepth()) state.redo.shift();
+  // тот же потолок по объёму, что и у обычной правки (pushHistoryEntry) —
+  // без него Ctrl+Z/Ctrl+Shift+Z на крупной геометрии копят state.redo без
+  // границы: счётчик шагов их не ловит, он считает объекты, а не байты
+  trimHistoryToBudget(state.redo);
   try {
     restoreHistoryEntry(entry);
   } catch (error) {
@@ -337,6 +341,7 @@ function redo() {
   const current = historySnapshot(historyTail(state.undo));
   state.undo.push(current);
   while (state.undo.length > undoDepth()) state.undo.shift();
+  trimHistoryToBudget(state.undo);   // см. пояснение в undo()
   try {
     restoreHistoryEntry(entry);
   } catch (error) {
