@@ -1355,14 +1355,9 @@
     ["virtual1965", "Сельскохозяйственная зона"]];
   const curatedLayer = (code, name, kind) => ({ code, name, kind,
     layer_id: `source.gisogd.${code}`, source_code: code, source_name: name });
-  // набор красных линий: слой портала + код ЛГР, который из него берут.
-  // labelCode — код КОМПАНЬОН-слоя портала: у каждого набора КЛ рядом в
-  // каталоге лежит точечный слой «Надписи …» с местом, которое для этой линии
-  // выбрал человек на портале (courtesy points), а не наш алгоритм «через
-  // каждые 320 px». Найдено обходом каталога: у слоя и его «Надписи»-соседа
-  // общий parent_id (лежат в одной папке).
-  const redlineLayer = (code, lineCode, name, labelCode) => ({
-    ...curatedLayer(code, name, "redline"), line_code: lineCode, label_code: labelCode });
+  // набор красных линий: слой портала + код ЛГР, который из него берут
+  const redlineLayer = (code, lineCode, name) => ({
+    ...curatedLayer(code, name, "redline"), line_code: lineCode });
   // Наборы красных линий портала → код ЛГР, который в них запрашивают.
   // Коды берутся из moscow_lgr.json: 1 — КЛ УДС, 2 — КЛ ТОП, 3 — КЛ ЛО,
   // 4 — КЛ ОДМС. Линия несёт коды обеих своих сторон, поэтому без этой
@@ -1377,10 +1372,38 @@
     // Красные линии — четыре разных набора портала, каждый со своим кодом ЛГР.
     // В каталоге они лежат в четырёх подпапках с длинными именами; здесь они
     // рядом и названы так, как их называют в работе.
-    "gisogd.kl_uds": [redlineLayer("l1", 1, "Красные линии УДС (КЛ УДС)", "virtual14")],
-    "gisogd.kl_top": [redlineLayer("l2", 2, "Красные линии ТОП (КЛ ТОП)", "virtual15")],
-    "gisogd.kl_lo": [redlineLayer("l3", 3, "Красные линии линейных объектов (КЛ ЛО)", "virtual16")],
-    "gisogd.kl_odms": [redlineLayer("l4", 4, "Красные линии ОДМС (КЛ ОДМС)", "virtual17")],
+    "gisogd.kl_uds": [redlineLayer("l1", 1, "Красные линии УДС (КЛ УДС)")],
+    "gisogd.kl_top": [redlineLayer("l2", 2, "Красные линии ТОП (КЛ ТОП)")],
+    "gisogd.kl_lo": [redlineLayer("l3", 3, "Красные линии линейных объектов (КЛ ЛО)")],
+    "gisogd.kl_odms": [redlineLayer("l4", 4, "Красные линии ОДМС (КЛ ОДМС)")],
+  };
+  // Код линии-границы портала → код точечного слоя-компаньона «Надписи …» с
+  // местом, которое для этой линии выбрал человек на портале (courtesy
+  // points), а не наш алгоритм «через каждые 320 px». Найдено ПОЛНЫМ обходом
+  // каталога (874 записи): у слоя и его «Надписи»-соседа общий parent_id
+  // (лежат в одной папке дерева). Все 16 существующих в каталоге пар — здесь.
+  //
+  // Карта отдельная от GISOGD_WEB_LAYERS и применяется УНИВЕРСАЛЬНО — не
+  // только к курируемым наборам (l1-l4 выше), но и к любому слою, который
+  // человек импортирует по сырому коду (source "gisogd:{code}", см.
+  // gisogdLayersFor в pages-adapter.js): большинство из этих 16 линий
+  // (границы ООПТ, водоохранных зон, полос отвода ЖД и т.д.) в куратора не
+  // попали, но остаются импортируемыми, и подпись с портала им — так же
+  // кстати, как и красным линиям.
+  const GISOGD_LABEL_COMPANIONS = {
+    l1: "virtual14", l2: "virtual15", l3: "virtual16", l4: "virtual17",
+    l25: "virtual28",                         // границы зон транспортных сооружений
+    l16: "virtual18",                         // границы водоохранных зон
+    l17: "virtual19",                         // границы прибрежных защитных полос
+    l7: "virtual21",                          // границы режимов особой охраны на территории ООПТ
+    l57: "virtual22",                         // границы зон размещения ОКС на ООПТ
+    l41: "virtual23",                         // границы береговой полосы
+    l18: "virtual24",                         // границы территорий природного комплекса
+    l29: "virtual25",                         // границы технических зон инженерных коммуникаций
+    l6: "virtual26",                          // полосы отвода железных дорог
+    l45: "virtual29",                         // границы внеуличных пешеходных переходов
+    l26: "virtual30",                         // линии застройки
+    virtual2950: "virtual27",                 // зоны транспортных коммуникаций (монорельс, канатка, фуникулёр, трамвай)
   };
 
   // Точечный слой «Надписи …» несёт place-точки для линий-компаньонов: guid
@@ -1645,7 +1668,7 @@
     setLgrCodeStyles, parseLineCodes, lineCodesOf, lineCodeRoutes,
     computeTep, preflightProject, webProject, importNspd, importGeoJson,
     gisogdCatalogUrl, gisogdLayerUrl, buildGisogdCatalog, importGisogdExtent, buildGisogdLabelIndex,
-    GISOGD_WEB_LAYERS, sourceLayerId,
+    GISOGD_WEB_LAYERS, GISOGD_LABEL_COMPANIONS, sourceLayerId,
     originWgs84: [...ORIGIN_WGS84],
     buildOsmExtentRequest, importOsmExtent, buildNspdExtentRequest, importNspdExtent };
 });

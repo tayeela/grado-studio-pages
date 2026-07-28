@@ -708,12 +708,17 @@
             const raw = await gisogdLayerJson(layer.code, result.notes, signal, layer.name, bbox);
             // Точечный слой-компаньон «Надписи …»: место подписи, которое для
             // ЭТОЙ линии выбрал человек на портале, вместо расчёта «каждые
-            // 320 px». Необязательный — сбой закачки не должен рушить импорт
-            // самой линии, только оставлять её без готового места подписи.
+            // 320 px». Карта — по КОДУ слоя (pagesCore.GISOGD_LABEL_COMPANIONS),
+            // а не по курированной записи: работает и для «gisogd:{code}» —
+            // импорта произвольного слоя портала по коду, не только для
+            // забронированных пунктов вроде красных линий. Необязательный —
+            // сбой закачки не должен рушить импорт самой линии, только
+            // оставлять её без готового места подписи.
             let labelsPayload = null;
-            if (layer.label_code) {
+            const labelCode = pagesCore.GISOGD_LABEL_COMPANIONS[layer.code];
+            if (labelCode) {
               try {
-                labelsPayload = await gisogdLayerJson(layer.label_code, result.notes, signal,
+                labelsPayload = await gisogdLayerJson(labelCode, result.notes, signal,
                   `Надписи: ${layer.name}`, bbox);
               } catch (error) {
                 if (error?.name === "AbortError" || signal?.aborted) throw abortError();
