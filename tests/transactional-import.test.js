@@ -17,7 +17,10 @@ const context = vm.createContext({
   LAYERS_V2: [],
   LAYER_BY_ID: Object.create(null),
   LAYER_BY_KIND: Object.create(null),
-  state: { features: [], nextId: 1, sources: [], undo: [], redo: ["redo"], selected: 99 },
+  state: { features: [], nextId: 1, sources: [], undo: [], redo: ["redo"], selected: 99, selectedIds: new Set([99]) },
+  // выделение снимается helper'ом (см. selection-consistency): импорт обязан
+  // чистить оба поля, selected и selectedIds, и возвращать оба при откате
+  clearSelection() { context.state.selected = null; context.state.selectedIds = new Set(); },
   failAfterChange: false,
   upgradeFeature(feature, resolveLayer) {
     const layer = resolveLayer(feature);
@@ -114,6 +117,7 @@ const beforeRollback = {
   undo: context.state.undo.slice(),
   redo: context.state.redo.slice(),
   selected: context.state.selected,
+  selectedIds: [...context.state.selectedIds],
   existingLayer: JSON.parse(JSON.stringify({
     visible: existingLayer.visible,
     fields: existingLayer.fields,
@@ -136,6 +140,9 @@ assert.deepEqual(context.state.sources, beforeRollback.sources);
 assert.deepEqual(context.state.undo, beforeRollback.undo);
 assert.deepEqual(context.state.redo, beforeRollback.redo);
 assert.equal(context.state.selected, beforeRollback.selected);
+assert.deepEqual([...context.state.selectedIds], beforeRollback.selectedIds,
+  "откат обязан вернуть и групповое выделение: иначе после неудачного импорта " +
+  "групповые правки идут по пустому множеству");
 assert.equal(context.LAYER_BY_ID["source.gisogd.virtual2"], undefined);
 assert.deepEqual(JSON.parse(JSON.stringify({
   visible: existingLayer.visible,

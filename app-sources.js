@@ -289,6 +289,7 @@ function commitPreparedSourceImport(plan) {
   const undo = state.undo.slice();
   const redo = state.redo.slice();
   const selected = state.selected;
+  const selectedIds = state.selectedIds;
   const layerBackups = new Map();
   for (const layerId of plan.touchedLayerIds) {
     const layer = LAYER_BY_ID[layerId];
@@ -326,7 +327,7 @@ function commitPreparedSourceImport(plan) {
     for (const entry of plan.snapshots)
       recordSource(entry && entry.snapshot !== undefined ? entry.snapshot : entry,
         entry && entry.diff, { defer: true });
-    state.selected = null;
+    clearSelection();
     renderSources();
     afterChange();
     // первая геоданная в проекте с СК «авто» выбирает местную систему
@@ -351,6 +352,7 @@ function commitPreparedSourceImport(plan) {
     state.undo.push(...undo);
     state.redo = redo;
     state.selected = selected;
+    state.selectedIds = selectedIds;   // откат импорта возвращает и групповое выделение
     state._ix = null; state._snapIndex = null;
     syncHistoryControls();
     renderSources(); renderLayers(); renderProps(); draw();

@@ -275,7 +275,7 @@ on("btn-clear", "click", async () => {
   if (!(await uiConfirm(
     `Очистить холст и удалить ${ruCount(count, "объект", "объекта", "объектов")}? Действие можно отменить сразу после очистки.`,
     { ok: "Очистить", danger: true }))) return;
-  snapshot(); state.features = []; state.selected = null; afterChange();
+  snapshot(); state.features = []; clearSelection(); afterChange();
 });
 on("p-density", "change", refreshTep);
 on("p-ratio", "change", refreshTep);

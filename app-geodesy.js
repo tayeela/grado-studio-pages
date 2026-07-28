@@ -97,6 +97,15 @@ function setSelection(ids) {
   state.selectedIds = new Set(ids);
   state.selected = ids.length === 1 ? ids[0] : null;
 }
+// убрать из выделения объекты, которые перестали быть выбираемыми (слой
+// скрыли). Снять только state.selected мало: объект остаётся в selectedIds, и
+// групповые правки — сдвиг стрелками, разрезание, удаление — продолжают
+// доставать его вслепую, хотя на экране его нет.
+function deselectWhere(pred) {
+  const s = state.selectedIds = new Set(state.selectedIds || []);
+  for (const f of state.features) if (s.has(f.id) && pred(f)) s.delete(f.id);
+  if (!s.has(state.selected)) state.selected = s.size === 1 ? [...s][0] : null;
+}
 function toggleSelection(id) {
   const s = state.selectedIds = new Set(state.selectedIds || []);
   if (s.has(id)) s.delete(id); else s.add(id);

@@ -192,11 +192,8 @@ function renderLayers() {
       const nextVisible = !allVisible;
       groupLayers.forEach(layer => { layer.visible = nextVisible; });
       if (!nextVisible) {
-        const selected = selectedFeature();
-        if (selected && groupLayers.includes(layerOf(selected))) {
-          state.selected = null;
-          renderProps();
-        }
+        deselectWhere(f => groupLayers.includes(layerOf(f)));
+        renderProps();
       }
       state._ix = null; state._snapIndex = null;
       persist();
@@ -303,9 +300,8 @@ function layerPanelRow(layer, ctx) {
     row.querySelector(".layer-vis-toggle input").addEventListener("change", ev => {
       snapshot();
       layer.visible = ev.target.checked;
-      const sel = selectedFeature();
-      if (!layer.visible && sel && layerOf(sel) === layer) {
-        state.selected = null;
+      if (!layer.visible) {
+        deselectWhere(f => layerOf(f) === layer);
         renderProps();
       }
       state._ix = null; state._snapIndex = null;

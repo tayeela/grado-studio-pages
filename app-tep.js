@@ -737,7 +737,7 @@ function renderProps() {
     <div class="metric" style="margin-top:6px">двойной клик по ребру — вершина,<br>Alt+клик по вершине — удалить,<br>R — поворот, ${modKeyLabel("D")} — дубликат</div>
     <button class="danger" id="f-del">Удалить (Del)</button>`;
   const startNextLayer = kind => {
-    state.selected = null;
+    clearSelection();
     quickLayerByKind(kind);
     renderProps();
   };

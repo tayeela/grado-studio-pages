@@ -348,7 +348,7 @@ function duplicateSelected() {
   }
   snapshot();
   state.features.push(copy);
-  state.selected = copy.id;
+  selectOne(copy.id);   // и selectedIds: иначе стрелки и Del шли по оригиналу
   afterChange();
 }
 function nudgeSelected(dx, dy) {   // стрелки — сдвиг ВСЕГО выделения (группа тоже)
