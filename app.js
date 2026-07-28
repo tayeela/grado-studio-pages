@@ -745,7 +745,14 @@ function ruleStyleFor(L, f) {
     else if (op === "<=") match = parseFloat(v) <= parseFloat(rv);
     else if (op === "contains") match = String(v).toLowerCase().includes(String(rv).toLowerCase());
     else if (op === "starts") match = String(v).toLowerCase().startsWith(String(rv).toLowerCase());
-    if (match) return (r.style_id && (state.projectStyles[r.style_id] || STYLES_V2[r.style_id])) || null;
+    // {id, style}, а не голый объект: styleOf несёт эффективный id знака
+    // дальше, в st._styleId — canvasStrokeOf иначе не отличит объект, чей
+    // ЭФФЕКТИВНЫЙ знак стал boundary.line через правило, от того, у кого
+    // ИСХОДНЫЙ f.style_id/L.style_id так называется, а правило его сменило
+    if (match) {
+      const style = r.style_id && (state.projectStyles[r.style_id] || STYLES_V2[r.style_id]);
+      return style ? { id: r.style_id, style } : null;
+    }
   }
   return null;
 }
@@ -817,14 +824,24 @@ function styleOf(f) {
   const sid = f.style_id;
   // знак для объекта без style_id: цвет зоны по типу ИЛИ знак слоя по имени
   const gsid = sid ? null : (gpZoneSid(f) || layerSignSid(L));
-  // Условное оформление слоя стоит ВПЕРЕДИ знака объекта. У импортированных
-  // слоёв (ГИС ОГД, шейпы) знак живёт на объекте — он проставлен при импорте по
-  // коду ЛГР, а не выбран человеком. Пока f.style_id был выше правил, правила
-  // на такие слои не действовали ВООБЩЕ: окно оформления считало классы,
-  // легенда листа их рисовала, выгрузка QML писала graduatedSymbol — а холст
-  // оставался прежним. Человек настраивает раскраску и не видит отклика.
-  let base = ruleStyleFor(L, f) || (sid && (state.projectStyles[sid] || STYLES_V2[sid]))
+  // Условное оформление слоя стоит ВПЕРЕДИ знака объекта — НО только когда
+  // знак не выбирал человек. У импортированных слоёв (ГИС ОГД, шейпы) знак
+  // живёт на объекте — он проставлен при импорте по коду ЛГР. Пока f.style_id
+  // был выше правил безусловно, правила на такие слои не действовали ВООБЩЕ.
+  // Но чинить это тем же способом безусловно в обратную сторону — заново
+  // ломало обратное: человек открывает свойства объекта, ставит СВОЙ знак в
+  // «Знак из библиотеки» (f.style_manual, см. bindObjectStyleSelect) — а
+  // правило слоя тут же его перебивало, и выпадающий список продолжал
+  // показывать выбор человека, которого на самом деле уже не было на холсте.
+  // f.style_manual — единственный флаг, который отличает эти два style_id.
+  const manual = sid && f.style_manual && (state.projectStyles[sid] || STYLES_V2[sid]);
+  const ruleMatch = manual ? null : ruleStyleFor(L, f);   // тот же короткий обход, что был у ||
+  let base = manual || (ruleMatch && ruleMatch.style) || (sid && (state.projectStyles[sid] || STYLES_V2[sid]))
     || (gsid && STYLES_V2[gsid]) || layerStyle(L) || {};
+  // эффективный style_id (какой знак реально применился) — пробрасывается в
+  // st._styleId ниже; canvasStrokeOf по нему отличает РЕЗУЛЬТАТ разрешения от
+  // сырого f.style_id/L.style_id, которые правило уже могло сменить
+  const effectiveId = manual ? sid : ruleMatch ? ruleMatch.id : (sid || gsid || (L && L.style_id) || null);
   // «Оформление слоя» действует и на объекты со СВОИМ знаком. Раньше явный
   // f.style_id забирал стиль прямо из библиотеки, минуя L.fmt: правки слоя
   // (напр. выключить штриховку/подпись у импортированных зон ОГД) просто не
@@ -834,16 +851,22 @@ function styleOf(f) {
   const categoryId = sid || gsid;
   const categoryPatch = categoryId && L && L.fmt && L.fmt.cat_styles
     ? L.fmt.cat_styles[categoryId] : null;
+  let finalId = effectiveId;
   if (categoryPatch) {
     const refId = categoryPatch.style_ref;
     const refStyle = refId && (state.projectStyles[refId] || STYLES_V2[refId]);
     base = { ...(refStyle || base), ...categoryLayerVisualFormat(L), ...categoryPatch };
+    if (refStyle) finalId = refId;   // цветовая правка категории подменила и сам знак
   }
   // диапазоны — патч поверх любого знака, каким бы путём он ни был выбран
   const rangePatch = rulePatchFor(L, f);
   if (rangePatch) base = { ...base, ...rangePatch };
   const withData = applyDataDefined(base, dataDefinedPatch(L, f));
-  return f.fmt ? { ...withData, ...f.fmt } : withData;   // f.fmt — оформление отдельного объекта
+  const result = f.fmt ? { ...withData, ...f.fmt } : withData;   // f.fmt — оформление отдельного объекта
+  // служебное поле для canvasStrokeOf — не расчётный визуальный атрибут,
+  // поэтому невидимое (enumerable:false): наружу (в PDF/DXF/QML) не течёт
+  Object.defineProperty(result, "_styleId", { value: finalId, enumerable: false, configurable: true });
+  return result;
 }
 
 // Эталонный тёмный штрих границы (#1c1c1a) корректен для печати и светлого
@@ -854,7 +877,11 @@ function canvasStrokeOf(f, st) {
   const L = layerOf(f);
   const objectOverride = f.fmt && Object.prototype.hasOwnProperty.call(f.fmt, "stroke");
   const layerOverride = L && L.fmt && Object.prototype.hasOwnProperty.call(L.fmt, "stroke");
-  const styleId = f.style_id || (L && L.style_id);
+  // РЕЗУЛЬТАТ разрешения (st._styleId, см. styleOf), а не сырой f.style_id/
+  // L.style_id: правило слоя или патч категории могли сменить знак объекта на
+  // совсем другой — сырые поля тогда врут о том, что объект реально рисуется
+  // не как boundary.line, а раскраска темы всё равно подставлялась бы
+  const styleId = st._styleId;
   if (!objectOverride && !layerOverride && styleId === "boundary.line")
     return cvColor("boundary", st.stroke || "#1c1c1a");
   return st.stroke || cvColor("boundary", "#000");

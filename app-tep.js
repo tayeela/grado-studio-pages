@@ -663,6 +663,7 @@ function bindObjectStyleSelect(f) {
       const newId = await createProjectStyle();
       if (newId) {
         f.style_id = newId;
+        f.style_manual = true;         // человек только что выбрал знак сам
         renderProps();                 // перерисовать, чтобы новый знак попал в список
       } else {
         styleSel.value = f.style_id || "";
@@ -670,8 +671,12 @@ function bindObjectStyleSelect(f) {
       return;
     }
     snapshot();
-    if (styleSel.value) f.style_id = styleSel.value;
-    else delete f.style_id;
+    // Ручной выбор из ЭТОГО списка — единственное, что отличает style_id,
+    // поставленный человеком, от того же поля у импортированных объектов
+    // (там его проставил код ЛГР). styleOf(f) читает флаг, чтобы решить,
+    // перебивает ли условное оформление слоя этот выбор или нет.
+    if (styleSel.value) { f.style_id = styleSel.value; f.style_manual = true; }
+    else { delete f.style_id; delete f.style_manual; }
     afterChange(); draw();
   });
 }
