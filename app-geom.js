@@ -556,53 +556,28 @@ function joinSelected() {
 }
 
 // fillet polyline at corners with radius r, sampling arcs. For "полные сопряжения"
+// скруглить ВСЕ углы линии разом (кнопка «сопрячь» в свойствах).
+//
+// Углы считаются по исходным точкам, поэтому соседние скругления делят одно
+// общее ребро. Прежде каждый брал от него полный подрез r/tan(a/2): на ребре
+// 10 м с радиусом 8 первый угол уходил вперёд до 8 м, второй начинался с 2 м —
+// линия откатывалась назад по себе и вместо укорачивания становилась длиннее.
+// Отсюда — доля 0.5 на общих рёбрах: подрезы двух соседей в сумме не длиннее
+// ребра, каждому поровну. Крайние рёбра ни с кем не делятся.
 function filletLine(pts, r) {
   if (!pts || pts.length < 3 || !(r > 0)) return pts;
+  const n = pts.length;
   const res = [pts[0]];
-  for (let i = 1; i < pts.length - 1; i++) {
-    const p0 = pts[i-1], p1 = pts[i], p2 = pts[i+1];
-    const v1 = [p1[0] - p0[0], p1[1] - p0[1]];
-    const v2 = [p2[0] - p1[0], p2[1] - p1[1]];
-    const l1 = Math.hypot(v1[0], v1[1]);
-    const l2 = Math.hypot(v2[0], v2[1]);
-    if (l1 < 1e-6 || l2 < 1e-6) { res.push(p1); continue; }
-    const u1 = [v1[0]/l1, v1[1]/l1];
-    const u2 = [v2[0]/l2, v2[1]/l2];
-    let dot = u1[0]*u2[0] + u1[1]*u2[1];
-    dot = Math.max(-1, Math.min(1, dot));
-    let ang = Math.acos(dot);
-    if (ang < 1e-4 || ang > Math.PI - 1e-4) { res.push(p1); continue; }
-    const d = r / Math.tan(ang / 2);
-    if (d > l1 || d > l2) { res.push(p1); continue; }
-    const q1 = [p1[0] - u1[0]*d, p1[1] - u1[1]*d];
-    const q2 = [p1[0] + u2[0]*d, p1[1] + u2[1]*d];   // вперёд по исходящему ребру (был баг знака)
-    res.push(q1);
-    // center using perps
-    const perp1 = [-u1[1], u1[0]];
-    const perp2 = [-u2[1], u2[0]];
-    const dx = q2[0] - q1[0], dy = q2[1] - q1[1];
-    const det = perp1[0]*perp2[1] - perp1[1]*perp2[0];
-    if (Math.abs(det) < 1e-9) { res.push(q2); continue; }
-    const t = (dx * perp2[1] - dy * perp2[0]) / det;
-    const cx = q1[0] + t * perp1[0];
-    const cy = q1[1] + t * perp1[1];
-    let a0 = Math.atan2(q1[1] - cy, q1[0] - cx);
-    let a1 = Math.atan2(q2[1] - cy, q2[0] - cx);
-    let sw = a1 - a0;
-    const cross = v1[0]*v2[1] - v1[1]*v2[0];
-    if (cross < 0) {
-      if (sw > 0) sw -= 2 * Math.PI;
-    } else {
-      if (sw < 0) sw += 2 * Math.PI;
-    }
-    const n = 6;
-    for (let k = 1; k < n; k++) {
-      const aa = a0 + sw * (k / n);
-      res.push([cx + r * Math.cos(aa), cy + r * Math.sin(aa)]);
-    }
-    res.push(q2);
+  for (let i = 1; i < n - 1; i++) {
+    const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1];
+    const l1 = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+    const l2 = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const доля = Math.min(l1 * (i > 1 ? 0.5 : 1), l2 * (i < n - 2 ? 0.5 : 1));
+    const arc = cornerArcPoints(p0, p1, p2, r, доля);
+    if (!arc) { res.push(p1); continue; }
+    res.push(...arc);
   }
-  res.push(pts[pts.length - 1]);
+  res.push(pts[n - 1]);
   return res;
 }
 
@@ -618,7 +593,7 @@ function applyFillet(f) {
 // дуга скругления ОДНОГО угла p0-p1-p2 радиусом r: массив точек, заменяющих
 // вершину p1 (без неё самой). null — угол прямой/вырожденный. Радиус ужимается,
 // если не помещается в короткое ребро. Число сегментов адаптивно к длине дуги.
-function cornerArcPoints(p0, p1, p2, r) {
+function cornerArcPoints(p0, p1, p2, r, maxD) {
   const v1 = [p1[0] - p0[0], p1[1] - p0[1]], v2 = [p2[0] - p1[0], p2[1] - p1[1]];
   const l1 = Math.hypot(v1[0], v1[1]), l2 = Math.hypot(v2[0], v2[1]);
   if (l1 < 1e-6 || l2 < 1e-6) return null;
@@ -628,6 +603,7 @@ function cornerArcPoints(p0, p1, p2, r) {
   if (ang < 1e-3 || ang > Math.PI - 1e-3) return null;   // прямая — скруглять нечего
   let d = r / Math.tan(ang / 2);
   d = Math.min(d, l1 * 0.999, l2 * 0.999);               // не длиннее рёбер
+  if (maxD > 0) d = Math.min(d, maxD);                   // доля ребра, если соседний угол режет то же ребро
   const rEff = d * Math.tan(ang / 2);                    // реальный радиус (если ужали)
   // касательные точки: q1 назад по входящему ребру (к p0), q2 вперёд по
   // исходящему (к p2). Оба на расстоянии d от угла p1.
