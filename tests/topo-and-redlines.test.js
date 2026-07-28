@@ -32,7 +32,15 @@ assert.match(app, /for \(const \{ feat, vi, comps \} of \(ed\.bodyComps \|\| \[\
   "перемещение тела объекта берёт спутников оттуда же");
 
 // состояние переживает перезагрузку — иначе выключатель приходится жать каждый раз
-assert.match(app, /topoEdit: state\.topoEdit,/, "выбор обязан сохраняться в проект");
+// Проверка смотрит именно на collectState: единственный путь в файл и автосейв.
+// Прежде она попадала на одноимённое поле во временном объекте отмены — оно
+// переживало Ctrl+Z, но не перезагрузку, и проверка светила зелёным впустую.
+{
+  const собрать = app.slice(app.indexOf("function collectState"), app.indexOf("function collectProjectSettings"));
+  assert.match(собрать, /topoEdit: state\.topoEdit === true,/, "выбор обязан сохраняться в проект");
+  assert.match(собрать, /osnap: state\.osnap !== false,/, "привязка к объектам — туда же");
+  assert.match(собрать, /gridSnap: state\.gridSnap !== false,/, "привязка к сетке — туда же");
+}
 assert.match(app, /topoEdit: restored\.topoEdit === true,/,
   "при восстановлении режим включается только явным true");
 assert.match(app, /setTopoEdit\(d\.topoEdit === true, true\)/,

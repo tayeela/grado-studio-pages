@@ -257,14 +257,21 @@ function restoreHistoryEntry(entry) {
   if (!isRecord(restored) || restored.history_version !== 2 || !Array.isArray(restored.features))
     throw new Error("unsupported history entry");
 
+  // Что historySmallState намеренно НЕ кладёт в снимок, то приходится
+  // придержать здесь. Восстановление — общее с открытием файла, а там
+  // отсутствующее поле означает «старый проект» и подменяется значением по
+  // умолчанию: СК становится исторической UTM 37N, легенда листа — пустой,
+  // выравнивание ОГД — включённым. Для отмены чертежа это не умолчание, а
+  // потеря: система координат менялась БЕЗ пересчёта координат (reproject:
+  // false), то есть выгрузка уезжала в чужую СК с прежними числами.
   const personal = {
     name: document.getElementById("project-name").value,
     variants: state.variants,
     accessRadii: state.accessRadii,
     albumConfig: state.albumConfig,
-    osnap: state.osnap,
-    topoEdit: state.topoEdit,
-    gridSnap: state.gridSnap,
+    projectCrsId: state.projectCrsId,
+    sheetLegend: state.sheetLegend,
+    alignOgd: state.alignOgd,
     basemapSource: basemap.source,
     exportStyle: exportStyleMode(),
   };
@@ -289,6 +296,13 @@ function restoreHistoryEntry(entry) {
   state.variants = personal.variants;
   state.accessRadii = personal.accessRadii;
   state.albumConfig = personal.albumConfig;
+  state.sheetLegend = personal.sheetLegend;
+  state.alignOgd = personal.alignOgd;
+  state.projectCrsId = personal.projectCrsId;
+  // СК возвращаем и в сам преобразователь: applyRestoredState уже переключил
+  // его на историческую
+  if (personal.projectCrsId && personal.projectCrsId !== "auto")
+    applyProjectCrs(personal.projectCrsId, { reproject: false, silent: true });
   if (basemap.source !== personal.basemapSource) setBasemapSource(personal.basemapSource);
   const exportSelect = document.getElementById("export-style");
   if (exportSelect) exportSelect.value = personal.exportStyle;
@@ -414,6 +428,14 @@ function collectState(opts = {}) {
     sheetLegend: state.sheetLegend || null,
     projectCrsId: state.projectCrsId || "utm37-legacy",
     alignOgd: state.alignOgd !== false,
+    // Режимы привязки и топоправки читались при восстановлении
+    // (applyRestoredState) и нормализовались (normalizeRestoredState), но
+    // сюда их никто не клал — то есть в файл и в автосейв они не попадали
+    // вовсе. Топорежим и привязки приходилось включать заново после каждой
+    // перезагрузки, хотя весь путь чтения был готов.
+    osnap: state.osnap !== false,
+    topoEdit: state.topoEdit === true,
+    gridSnap: state.gridSnap !== false,
   };
 }
 // Настройки, которые должны ехать внутри .grado вместе с геометрией. Без
