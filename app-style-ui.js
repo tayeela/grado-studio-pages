@@ -693,6 +693,24 @@ function initRulesControls({ overlay, $, layer, work, fieldCols, clearStyleError
 // слоя нет. Пока подпись собиралась вместе с цветом, её включение писало в
 // layer.fmt весь блок цвета из формы — и он ложился поверх знаков: все линии
 // разом становились серыми.
+// Окно правит не всё, что есть у штриховки знака: своего поля цвета в форме
+// нет, а густота выбирается из трёх шагов, не точным числом. Собирая объект с
+// нуля, окно ЗАТИРАЛО остальное: цвет штриховки становился цветом линии,
+// точный шаг — ближайшим из трёх шагов списка. Поэтому собираем поверх того,
+// что было у знака, и меняем только то, что человек правда тронул.
+function собратьШтриховку(fmt, $, hObj, strokeCF) {
+  const дано = hObj || {};
+  if (!$("fmt-hatch").checked) { fmt.hatch = false; return; }
+  const av = $("fmt-hangle").value;
+  // густоту трогаем, только если список СДВИНУЛИ: иначе он показывает
+  // ближайший шаг к точному значению знака, и запись вернула бы шаг вместо него
+  const шаг = $("fmt-hdens").value;
+  const тронули = шаг !== hatchDensOf(дано.spacing_px || 9);
+  fmt.hatch = { ...дано,
+    angle: av === "cross" ? 45 : +av, cross: av === "cross",
+    spacing_px: тронули ? (HATCH_DENS[шаг] || 9) : (дано.spacing_px || 9),
+    color: дано.color || strokeCF.get() };
+}
 function собратьПодпись(fmt, $, lcolorCF, baseLabel) {
   if ($("fmt-label").checked) { if (baseLabel) fmt.line_label = baseLabel; }
   else fmt.line_label = null;
@@ -1040,14 +1058,10 @@ ${styleGraduatedModePanel(ctx)}
 
     собратьПодпись(fmt, $, lcolorCF, baseLabel);
     if (!includeUniform) return fmt;
-    if ($("fmt-hatch").checked) {
-      const av = $("fmt-hangle").value;
-      fmt.hatch = { angle: av === "cross" ? 45 : +av, cross: av === "cross",
-                    spacing_px: HATCH_DENS[$("fmt-hdens").value] || 9,
-                    color: strokeCF.get() };
-    } else fmt.hatch = false;
+    собратьШтриховку(fmt, $, hObj, strokeCF);
     if ($("fmt-marker").checked) {
       fmt.line_marker = {
+        ...(baseMarker || {}),
         shape: $("fmt-marker-shape").value || "tick",
         period: boundedNumber($("fmt-marker-period").value, 6, 200, 40),
         size: boundedNumber($("fmt-marker-size").value, 1, 40, 4),
@@ -1125,7 +1139,11 @@ ${styleGraduatedModePanel(ctx)}
     const fmt = collect({ forceUniform: true }); layer.fmt = fmt;
     const to = $("fmt-copy-to").value;
     const dest = to === "__all__" ? targets : targets.filter(l => l.id === to);
-    for (const l of dest) { l.fmt = clone(fmt); copiedTargets.add(l); }
+    // cats_off/cat_styles — категории ЭТОГО слоя; на чужом гасят его собственные
+    const общий = clone(fmt);
+    delete общий.cats_off;
+    delete общий.cat_styles;
+    for (const l of dest) { l.fmt = clone(общий); copiedTargets.add(l); }
     renderLayers(); draw();
     toast(`Оформление скопировано на ${dest.length} слой(ёв)`);
   });
