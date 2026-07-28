@@ -683,13 +683,28 @@ window.addEventListener("pointerup", e => {
     }
   }
 });
-// потеря фокуса окна (alt-tab, системный диалог) посреди жеста —
-// та же защита, чтобы состояние не осталось залипшим
+// Потеря фокуса окна (alt-tab, системный диалог) посреди жеста: незавершённое
+// НАЖАТИЕ мыши бросаем, потому что pointerup до нас уже не дойдёт и жест
+// залипнет. Но бросать надо ровно нажатие, а не работу человека.
+//
+// Правка вершин двигает геометрию прямо в pointermove; commit делает
+// afterChange на pointerup. Раньше blur обнулял state.edit молча, и уже
+// сдвинутая геометрия оставалась без afterChange: пространственный индекс и
+// индекс привязок держали старые координаты, ТЭП и автосохранение не знали о
+// правке. Теперь blur завершает жест так же, как отпускание кнопки.
+//
+// Черчение (state.drawing) — не залипшее нажатие, а многокликовый жест,
+// который живёт между кликами по замыслу. Обнулять его на alt-tab значило
+// терять начатый контур целиком, стоило человеку отвлечься на другое окно.
+// Отменяет черчение Escape.
 window.addEventListener("blur", () => {
   state.pan = null;
-  if (state.edit) { state.edit = null; }
-  if (state.drag) { state.drag = null; }
-  if (state.drawing) { state.drawing = null; draw(); }
+  state.drag = null;
+  if (state.edit) {
+    const moved = state.edit.moved;
+    state.edit = null;
+    if (moved) afterChange(); else draw();
+  } else draw();
 });
 cv.addEventListener("dblclick", e => {
   {
