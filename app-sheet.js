@@ -154,6 +154,37 @@
       context.moveTo(x, y + height / 2);
       context.lineTo(x + width, y + height / 2);
       context.stroke();
+      // Знак с засечкой/треугольником (красные линии, границы ЗОУИТ и т.п.)
+      // печатался в легенде листа ГОЛОЙ чертой — line_marker тут не читали
+      // вовсе, хотя на самом чертеже засечка есть. Читающий легенду видел
+      // не тот знак, что на плане. drawMarkerGlyph рисует в разделяемый
+      // модульный ctx (см. app.js), а не в переданный context — на время
+      // вызова подменяем ctx на холст листа, как уже делает DXF-экспорт
+      // (app-dxf.js) для той же функции.
+      if (style.line_marker && style.line_marker.shape) {
+        const savedCtx = ctx;
+        ctx = context;
+        try {
+          const mk = style.line_marker;
+          const midY = y + height / 2;
+          // drawMarkerGlyph красит/штрихует ТЕКУЩИМ ctx.fillStyle/strokeStyle,
+          // не своим аргументом — без явной установки маркер брал ЧУЖОЙ цвет,
+          // оставшийся от предыдущей отрисовки (заголовок легенды тёмно-серым
+          // текстом рисовался прямо перед этим), а не цвет своего же знака.
+          ctx.fillStyle = ctx.strokeStyle = style.stroke || "#5c5a54";
+          // Одна засечка по центру образца, остриём НАВЕРХ — тот же выбор,
+          // что и у остальных условных (_markerGlyphsSVG, app.js): в
+          // плоском свотче нет полигона, значит нет и «внутрь», а вниз
+          // смотрящий знак читается как ошибка, а не как направление.
+          // nx=0, ny=+1: у drawMarkerGlyph основание уходит В СТОРОНУ (nx,ny),
+          // остриё остаётся на линии (px,py) — положительный ny (вниз по
+          // канве) уводит ОСНОВАНИЕ вниз, а остриё оказывается ВЫШЕ его,
+          // то есть треугольник смотрит вверх (проверено на _markerGlyphsSVG,
+          // где тот же результат даёт ny = d*-1 при d=-1 «один ряд — вверх»).
+          const s = Math.min(height / 2 - 1, mk.size || 4);
+          drawMarkerGlyph(mk, x + width / 2, midY, 1, 0, 0, 1, s, width);
+        } finally { ctx = savedCtx; }
+      }
     } else {
       if (style.fill) { context.fillStyle = style.fill; context.fillRect(x, y, width, height); }
       context.strokeRect(x, y, width, height);
